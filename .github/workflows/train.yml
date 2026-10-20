@@ -1,0 +1,48 @@
+name: kalshi-train
+
+# Weekly: download the last 7 days of REAL settled Kalshi 15-minute windows,
+# add them to the training set, retrain, and promote only if the new model
+# beats Kalshi AND the current champion on unseen data. Run it by hand
+# (Actions -> kalshi-train -> Run workflow) right after setup to start trained.
+
+on:
+  schedule:
+    - cron: "17 4 * * 0"        # Sundays 04:17 UTC
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Days of history to download"
+        default: "14"
+
+concurrency:
+  group: kalshi-bot
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Load memory
+        run: bash .github/load.sh
+      - name: Download history + train
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          ML_MIN_WINDOWS: ${{ vars.ML_MIN_WINDOWS || '300' }}
+        run: |
+          python -m bot.main history ${{ github.event.inputs.days || '7' }}
+          python -m bot.main train
+      - name: Save memory
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash .github/save.sh

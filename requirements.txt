@@ -1,0 +1,6 @@
+requests>=2.31
+cryptography>=42
+websockets>=12
+numpy>=1.26
+scikit-learn>=1.4
+joblib>=1.3

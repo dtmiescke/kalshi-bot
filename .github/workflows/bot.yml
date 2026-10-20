@@ -1,0 +1,61 @@
+name: kalshi-bot
+
+# Every 12 minutes:
+#   crypto  - an 8-minute LIVE streaming burst (BURST_MINUTES) on the 15-minute markets
+#   sports  - full scan every 5.5 hours (SPORTS_EVERY_HOURS)
+#   always  - grading, learning, AI briefing, weekly model retraining
+# Unlimited free minutes on a PUBLIC repo.
+
+on:
+  schedule:
+    - cron: "*/12 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: kalshi-bot
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Load memory
+        run: bash .github/load.sh
+      - name: Run
+        env:
+          BOT_MODE: ${{ vars.BOT_MODE || 'paper' }}
+          LIVE_TRADING_CONFIRMED: ${{ vars.LIVE_TRADING_CONFIRMED || 'no' }}
+          KALSHI_API_KEY_ID: ${{ secrets.KALSHI_API_KEY_ID }}
+          KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
+          KALSHI_DATA_URL: ${{ vars.KALSHI_DATA_URL }}
+          KALSHI_DATA_KEY_ID: ${{ secrets.KALSHI_DATA_KEY_ID }}
+          KALSHI_DATA_PRIVATE_KEY: ${{ secrets.KALSHI_DATA_PRIVATE_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODELS: ${{ vars.OPENROUTER_MODELS }}
+          OMNIROUTE_URL: ${{ secrets.OMNIROUTE_URL }}
+          OMNIROUTE_API_KEY: ${{ secrets.OMNIROUTE_API_KEY }}
+          OMNIROUTE_MODELS: ${{ vars.OMNIROUTE_MODELS }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          SPORTS_EVERY_HOURS: ${{ vars.SPORTS_EVERY_HOURS || '5.5' }}
+          BURST_MINUTES: ${{ vars.BURST_MINUTES || '8' }}
+          BRIEFING_EVERY_MINUTES: ${{ vars.BRIEFING_EVERY_MINUTES || '12' }}
+          LLM_DAILY_LIMIT: ${{ vars.LLM_DAILY_LIMIT || '45' }}
+          FIXED_BET: ${{ vars.FIXED_BET }}
+          ORDER_STYLE: ${{ vars.ORDER_STYLE || 'maker' }}
+        run: python -m bot.main scheduled
+      - name: Save memory
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash .github/save.sh

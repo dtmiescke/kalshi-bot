@@ -1,0 +1,167 @@
+"""The learning brain.
+
+Blend: each signal's probability is converted to log-odds and averaged, weighted
+by (learned weight x the reading's confidence). Log-odds pooling treats a move
+from 90% to 95% as the big deal it is, unlike plain averaging.
+
+Learn: after every market settles, each signal is scored with log loss against
+the result, relative to the Kalshi price. Signals that beat the market gain
+weight; ones that don't, lose it (multiplicative weights / Hedge). Every change
+is appended to history, never overwritten, so nothing learned is ever lost.
+
+Calibrate: the bot also checks itself — when it says 70%, does it win ~70%?
+Once there's enough data, it corrects its own over- or under-confidence.
+"""
+import math
+from collections import defaultdict
+
+from .signals.base import clamp, logit, sigmoid
+
+DEFAULT_WEIGHTS = {
+    "kalshi_market": 1.0,      # the anchor
+    "book_consensus": 1.5,     # sharp books are the strongest known signal
+    "line_movement": 0.4,
+    "reverse_line_movement": 0.4,
+    "trade_flow": 0.3,
+    "ai_news": 0.3,
+    "schedule_spot": 0.3,
+    "crypto_model": 1.2,       # spot vs strike vs volatility
+    "crypto_momentum": 0.2,
+    "crypto_model_iv": 0.8,    # same model on option-implied (Deribit) volatility
+    "spot_flow": 0.2,
+    "ml_model": 2.0,           # trained model; only exists after passing out-of-sample tests          # live executed flow + book imbalance on Kraken
+}
+MIN_W, MAX_W = 0.05, 5.0
+ETA = 0.05            # learning rate: small = slow, steady learning
+CAL_MIN_SAMPLES = 60  # don't trust calibration until this many graded markets
+
+
+def domain_of(ticker_or_series):
+    """Sports and 15-minute crypto behave differently, so each learns its own
+    weights (e.g. how much to trust the Kalshi price on BTC vs on NBA games)."""
+    t = (ticker_or_series or "").upper()
+    return "crypto" if t.startswith(("KXBTC", "KXETH", "KXSOL")) or "15M" in t else "sports"
+
+
+def decision_cutoff(ticker, start):
+    """The moment a signal should be judged at.
+
+    Sports: the last reading before kick-off (the closing line).
+    Crypto 15-minute: NOT the last second before the bell (by then everything,
+    including Kalshi, already knows the answer, which would teach the brain
+    nothing about real decisions) but the last reading at least 2 minutes before
+    close — the end of the window in which the bot actually trades."""
+    return start - 120 if domain_of(ticker) == "crypto" else start
+
+
+def get_weights(store, domain=None):
+    """Defaults, overridden by learned weights. With a domain, that domain's
+    own learned weights (stored as 'signal@domain') take priority."""
+    w = dict(DEFAULT_WEIGHTS)
+    learned = store.current_weights()
+    w.update({k: v for k, v in learned.items() if "@" not in k})
+    if domain:
+        suffix = "@" + domain
+        w.update({k[:-len(suffix)]: v for k, v in learned.items() if k.endswith(suffix)})
+    return w
+
+
+def blend(readings, weights):
+    """Return (prob, external_confidence) from a list of Readings."""
+    num = den = 0.0
+    ext_conf_num = ext_conf_den = 0.0
+    for r in readings:
+        w = weights.get(r.name, 0.3) * r.confidence
+        num += w * logit(r.prob)
+        den += w
+        if r.name != "kalshi_market":
+            ext_conf_num += w * r.confidence
+            ext_conf_den += w
+    if den == 0:
+        return None, 0.0
+    ext_conf = ext_conf_num / ext_conf_den if ext_conf_den else 0.0
+    blended = num / den
+    # when the independent outside signals argue with each other, trust the
+    # blend less. trade_flow is built around the Kalshi price itself, so its
+    # gap from a model is the edge being measured, not disagreement.
+    ext = [(weights.get(r.name, 0.3) * r.confidence, logit(r.prob)) for r in readings
+           if r.name not in ("kalshi_market", "trade_flow")]
+    wsum = sum(w for w, _ in ext)
+    if len(ext) >= 2 and wsum > 0:
+        mean = sum(w * x for w, x in ext) / wsum
+        sd = (sum(w * (x - mean) ** 2 for w, x in ext) / wsum) ** 0.5
+        ext_conf *= max(0.5, 1 - sd / 3)   # sd of 1.5 logits = heavy disagreement
+    return clamp(sigmoid(blended)), ext_conf
+
+
+def log_loss(p, y):
+    p = clamp(p, 1e-4, 1 - 1e-4)
+    return -(y * math.log(p) + (1 - y) * math.log(1 - p))
+
+
+def learn(store, graded, domain=None):
+    """graded: list of {signal: prob, ..., '_outcome': 0/1}, one per settled market.
+
+    Each signal is judged against the Kalshi price on the SAME market, so a
+    signal only gains weight by being better than the market, not by luck of
+    which markets it happened to show up on.
+    """
+    weights = get_weights(store, domain)
+    totals = defaultdict(float)
+    counts = defaultdict(int)
+    for g in graded:
+        y = g["_outcome"]
+        mkt = g.get("kalshi_market")
+        if mkt is None:
+            continue
+        base = log_loss(mkt, y)
+        for name, p in g.items():
+            if name.startswith("_") or name == "kalshi_market" or p is None:
+                continue
+            totals[name] += log_loss(p, y) - base   # negative = beat the market
+            counts[name] += 1
+    changes = {}
+    for name, rel in totals.items():
+        old = weights.get(name, 0.3)
+        new = clamp(old * math.exp(-ETA * rel), MIN_W, MAX_W)
+        if abs(new - old) > 1e-6:
+            store.set_weight(f"{name}@{domain}" if domain else name, new,
+                             f"{counts[name]} markets, rel_logloss={rel:+.4f}")
+            changes[name] = (old, new)
+    return changes
+
+
+# --- calibration ---------------------------------------------------------------
+def calibration_table(store, buckets=10, domain=None):
+    """Bucket graded model probabilities and compare with actual win rates.
+    Sports and crypto are calibrated SEPARATELY: mixing them would let one
+    domain's over-confidence wrongly correct the other."""
+    rows = store.q("""SELECT model_prob, side, result, series FROM bets
+                      WHERE status='graded' AND result IN ('yes','no')
+                      AND model_prob IS NOT NULL""")
+    if domain:
+        rows = [r for r in rows if domain_of(r["series"]) == domain]
+    table = defaultdict(lambda: [0, 0])
+    for r in rows:
+        p = r["model_prob"] if r["side"] == "yes" else 1 - r["model_prob"]
+        won = 1 if r["result"] == r["side"] else 0
+        b = min(int(p * buckets), buckets - 1)
+        table[b][0] += 1
+        table[b][1] += won
+    return {b: {"n": n, "predicted": (b + 0.5) / buckets, "actual": w / n}
+            for b, (n, w) in sorted(table.items())}
+
+
+def calibrate(prob, store, domain=None):
+    """Shrink or stretch a probability using the bot's own track record."""
+    table = calibration_table(store, domain=domain)
+    n_total = sum(v["n"] for v in table.values())
+    if n_total < CAL_MIN_SAMPLES:
+        return prob
+    b = min(int(prob * 10), 9)
+    cell = table.get(b)
+    if not cell or cell["n"] < 10:
+        return prob
+    # move partway toward observed rate, more when the bucket is well sampled
+    trust = min(cell["n"] / 100, 0.5)
+    return clamp(prob + trust * (cell["actual"] - cell["predicted"]))
