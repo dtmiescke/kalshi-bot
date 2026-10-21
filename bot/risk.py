@@ -5,7 +5,6 @@ import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from . import brain
 
 
 def taker_fee(contracts, price, rate):
@@ -126,7 +125,6 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
     asks = asks_from_book(book)
     options = []
     for side, p_win in (("yes", model_prob), ("no", 1 - model_prob)):
-        p_win = brain.calibrate(p_win, store, brain.domain_of(mkt.get("series") or mkt["ticker"]))
         if not asks[side]:
             continue
         best_ask = asks[side][0][0]
