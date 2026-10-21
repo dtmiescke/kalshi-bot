@@ -93,6 +93,22 @@ def run_scheduled(s, store, data):
     if keep and burst > 0:
         from .live.runner import run as run_live
         print("live burst:", json.dumps(run_live(s, store, burst, sports=False), default=str))
+    # Combo discovery is read-only and cheap enough to run on every scheduled
+    # cycle, independent of the less-frequent full sports scan. The Kalshi client
+    # briefly caches paginated event responses, so a full-scan cycle reuses them.
+    if getattr(s, "combo_research_enabled", True):
+        try:
+            from . import combo_research
+            combo_result = combo_research.scan(data, store, settings=s)
+            print("combo research:", json.dumps({
+                "ok": combo_result.get("ok"),
+                "scanned_markets": combo_result.get("scanned_markets"),
+                "ranked_count": combo_result.get("ranked_count"),
+                "skipped": combo_result.get("skipped", {}),
+                "execution_enabled": False,
+            }, default=str))
+        except Exception as e:
+            logging.warning("combo research scan failed: %s", e)
     grade(store, data)
     # retrain the model when due (weekly by default) — cheap, takes seconds
     if time.time() - store.get_kv("last_train", 0) >= float(os.environ.get("TRAIN_EVERY_HOURS", 24)) * 3600:
