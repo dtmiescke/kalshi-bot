@@ -11,6 +11,8 @@ import io
 import json
 import os
 import time
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from . import brain, guard
 
@@ -65,7 +67,7 @@ def build(store, settings, live_path="data/live_summary.json", briefing_path="da
                 live = json.load(f)
         except (OSError, ValueError):
             pass
-    graded = store.q("SELECT pnl, clv, result, side FROM bets WHERE status='graded'")
+    graded = store.q("SELECT pnl, clv, result, side, graded_ts FROM bets WHERE status='graded'")
     # Win percentage is settled pick accuracy, not profitability: compare the
     # chosen side with Kalshi's actual YES/NO settlement. Sold-early positions
     # have no settlement outcome and are excluded. Open bets are never counted.
@@ -73,6 +75,18 @@ def build(store, settings, live_path="data/live_summary.json", briefing_path="da
     wins = sum(1 for b in settled if b["result"] == b["side"])
     win_pct = 100.0 * wins / len(settled) if settled else None
     win_pct_text = f"{win_pct:.1f}%" if win_pct is not None else "—"
+    # Daily stats use the configured BOT_TIMEZONE (UTC fallback) and settlement
+    # time, not bet-placement time. Historical overall stats remain unchanged.
+    try:
+        report_tz = ZoneInfo(os.environ.get("BOT_TIMEZONE", "UTC"))
+    except Exception:
+        report_tz = timezone.utc
+    today = datetime.fromtimestamp(now, timezone.utc).astimezone(report_tz).date()
+    today_settled = [b for b in settled if b["graded_ts"] and
+                     datetime.fromtimestamp(b["graded_ts"], timezone.utc).astimezone(report_tz).date() == today]
+    today_wins = sum(1 for b in today_settled if b["result"] == b["side"])
+    today_win_pct = 100.0 * today_wins / len(today_settled) if today_settled else None
+    today_win_pct_text = f"{today_win_pct:.1f}%" if today_win_pct is not None else "—"
     open_bets = store.q("SELECT * FROM bets WHERE status='open' ORDER BY ts DESC")
     recent = store.q("SELECT * FROM bets WHERE status='graded' ORDER BY graded_ts DESC LIMIT 15")
 
@@ -152,7 +166,8 @@ td div.mut{{white-space:normal}}.mut{{color:var(--mut);font-size:12px}}a{{color:
 <div><div class="k">Cash</div><div class="v">${acct['cash']:,.2f}</div></div>
 <div><div class="k">Realized P&amp;L</div><div class="v {'good' if acct['realized'] >= 0 else 'bad'}">${acct['realized']:+,.2f}</div></div>
 <div><div class="k">Open cost</div><div class="v">${acct['open_cost']:,.2f}</div></div>
-<div><div class="k">Settled · won · win %</div><div class="v">{len(settled)} · {wins} · {win_pct_text}</div></div></div></div>
+<div><div class="k">Overall · settled · won · win %</div><div class="v">{len(settled)} · {wins} · {win_pct_text}</div></div>
+<div><div class="k">Today · settled · won · win %</div><div class="v">{len(today_settled)} · {today_wins} · {today_win_pct_text}</div></div></div></div>
 <div class="card"><h2>Open positions ({len(open_bets)})</h2><div class="scroll"><table>
 <tr><td class="k">Position</td><td class="k">Now</td><td class="k">Quote age</td></tr>
 {pos_rows or '<tr><td colspan=3 class="mut">none</td></tr>'}</table></div></div>
