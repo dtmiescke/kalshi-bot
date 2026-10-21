@@ -229,7 +229,7 @@ class Engine:
                             if item_event and mkt.get("event_ticker") and item_event != mkt.get("event_ticker"):
                                 continue
                             self._headlines[sport].append({
-                                "headline": item.get("title", ""),
+                                "headline": f"[{item.get('publisher') or item.get('source') or 'unknown source'}] {item.get('title', '')}",
                                 "description": item.get("summary", ""),
                                 "published": published or item.get("observed_ts"),
                                 "source": item.get("source", ""),
