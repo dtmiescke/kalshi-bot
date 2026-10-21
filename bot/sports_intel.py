@@ -247,6 +247,60 @@ def collect(store, force=False, now=None):
     store.set_kv("sports_intel_last_run", now)
     return summary
 
+def collect_event_news(store, events, max_events=12, now=None):
+    """Fetch event-targeted public news for a small rotating budget of upcoming games.
+
+    Uses one cached RSS query per event, with a strict request budget to avoid
+    hammering feeds. News remains unverified and is only an input to later review.
+    """
+    ensure_schema(store)
+    now = int(now or _now())
+    ttl = max(300, int(os.environ.get("SPORTS_INTEL_EVENT_TTL_SECONDS", "900")))
+    queried = 0
+    new_items = 0
+    failures = 0
+    candidates = []
+    for event in events:
+        ticker = _clean(event.get("event_ticker") or event.get("ticker"), 180)
+        if not ticker:
+            continue
+        key = "eventnews:" + ticker
+        if not _due(store, key, ttl, now):
+            continue
+        market_rows = event.get("markets") or []
+        teams = []
+        for market in market_rows:
+            name = market.get("yes_sub_title") or market.get("subtitle") or market.get("title")
+            if name and name not in teams:
+                teams.append(_clean(name, 100))
+        event_name = _clean(event.get("title") or event.get("sub_title") or " ".join(teams), 180)
+        if not teams and not event_name:
+            continue
+        # Prioritize a small set of useful, event-specific developments.
+        names = teams[:4] if teams else [event_name]
+        query_text = " ".join(f'"{name}"' for name in names)
+        query_text += " (injury OR lineup OR roster OR suspension OR starter OR preview OR odds)"
+        url = "https://news.google.com/rss/search?q=" + urllib.parse.quote(query_text) + "&hl=en-US&gl=US&ceid=US:en"
+        candidates.append((key, ticker, url))
+        if len(candidates) >= max(0, int(max_events)):
+            break
+    for key, ticker, url in candidates:
+        queried += 1
+        try:
+            response = _request(url)
+            items = _parse_rss(response.content, "Google News RSS event search", "event_news", now)
+            for item in items:
+                item["event_ticker"] = ticker
+                item["confidence"] = 0.4 if item.get("published_ts") else 0.2
+            new_items += _record_items(store, items)
+            _source_status(store, key, {"ok": True, "ts": now, "count": len(items)})
+        except Exception as exc:
+            failures += 1
+            _source_status(store, key, {"ok": False, "ts": now, "error": _clean(exc, 240)})
+            log.warning("event news source %s failed: %s", key, exc)
+        store.set_kv("sports_intel_fetch:" + key, now)
+    return {"queried": queried, "new_items": new_items, "failures": failures}
+
 def recent(store, limit=100, category=None, kind=None):
     """Return newest stored evidence for briefing/model integration and diagnosis."""
     ensure_schema(store)
