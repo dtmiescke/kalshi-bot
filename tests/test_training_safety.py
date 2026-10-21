@@ -34,6 +34,17 @@ class TestTrainingSafety(unittest.TestCase):
                 self.assertTrue(guard.drawdown_tripped(store, 1000.0, mode="live"))
                 store.q.assert_not_called()
 
+    def test_invalid_daily_loss_limit_pauses_betting_before_account_query(self):
+        for value in ("nan", "inf", "-1", "not-a-number"):
+            with self.subTest(value=value), mock.patch.dict(
+                "os.environ", {"DAILY_LOSS_LIMIT": value}
+            ):
+                store = mock.Mock()
+                allowed, reason = guard.status(store, 1000.0, mode="live")
+                self.assertFalse(allowed)
+                self.assertIn("invalid daily loss limit", reason)
+                store.realized_today.assert_not_called()
+
     def test_settings_reject_nonfinite_or_unsafe_risk_values(self):
         for field, value in (
             ("bankroll", float("nan")),
