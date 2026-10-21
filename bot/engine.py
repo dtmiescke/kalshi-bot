@@ -198,54 +198,65 @@ class Engine:
         start = iso_to_ts(ev_match.get("commence_time")) if ev_match else None
         if not (self.llm and team and start and 0 < start - now < 24 * 3600):
             return None
+
+        category_for = {
+            "americanfootball_nfl": "football", "americanfootball_ncaaf": "football",
+            "basketball_nba": "basketball", "basketball_wnba": "basketball",
+            "basketball_ncaab": "basketball", "baseball_mlb": "baseball",
+            "icehockey_nhl": "hockey", "soccer_mls": "soccer",
+            "soccer_epl": "soccer", "soccer_uefa": "soccer",
+            "tennis_atp": "tennis", "tennis_wta": "tennis",
+            "mma_mixed_martial_arts": "mma", "golf_pga": "golf",
+            "motorsport_f1": "motorsports", "esports": "esports",
+        }
+        try:
+            from . import sports_intel
+            category = category_for.get(sport, sport if sport in sports_intel.SPORT_TERMS else None)
+        except Exception:
+            sports_intel = None
+            category = category_for.get(sport)
+
         if intel.news_due(self.store, mkt["ticker"],
                           minutes=max(5, int(os.environ.get("SPORTS_AI_NEWS_REFRESH_MINUTES", "30")))):
             if sport not in self._headlines:
                 self._headlines[sport] = intel.fetch_headlines(sport)
-                # Merge the free-first scheduled web collector into the existing
-                # event-specific news analysis. Collected claims remain unverified
-                # evidence and cannot independently authorize a trade.
+                if sports_intel:
+                    try:
+                        now_ts = int(time.time())
+                        categories = [category] if category else []
+                        categories.append("event_news")
+                        for news_category in set(categories):
+                            for item in sports_intel.recent(self.store, limit=250, category=news_category, kind="news"):
+                                published = item.get("published_ts")
+                                if published and now_ts - published > 48 * 3600:
+                                    continue
+                                item_event = item.get("event_ticker")
+                                self._headlines[sport].append({
+                                    "headline": f"[{item.get('publisher') or item.get('source') or 'unknown source'}] {item.get('title', '')}",
+                                    "description": item.get("summary", ""),
+                                    "published": published or item.get("observed_ts"),
+                                    "source": item.get("source", ""),
+                                    "url": item.get("url", ""),
+                                    "event_ticker": item_event,
+                                })
+                    except Exception as e:
+                        log.debug("cached web intelligence unavailable for %s: %s", sport, e)
+
+            event_headlines = [h for h in self._headlines[sport]
+                               if not h.get("event_ticker") or h.get("event_ticker") == mkt.get("event_ticker")]
+            heads = intel.relevant(event_headlines, [team, opp or ""])
+            ai_context = dict(context or {})
+            if sports_intel:
+                stat_categories = {
+                    "americanfootball_nfl": ["nfl"], "americanfootball_ncaaf": ["college_football"],
+                    "basketball_nba": ["nba"], "basketball_wnba": ["wnba"],
+                    "baseball_mlb": ["mlb"], "icehockey_nhl": ["nhl"],
+                    "soccer_epl": ["soccer_epl"], "soccer_mls": ["soccer_mls"],
+                    "soccer_uefa": ["soccer_uefa"], "tennis_atp": ["tennis_atp"],
+                    "tennis_wta": ["tennis_wta"], "golf_pga": ["golf_pga"],
+                    "mma_mixed_martial_arts": ["mma_ufc"],
+                }
                 try:
-                    from . import sports_intel
-                    category_for = {
-                        "americanfootball_nfl": "football", "americanfootball_ncaaf": "football",
-                        "basketball_nba": "basketball", "basketball_wnba": "basketball",
-                        "basketball_ncaab": "basketball", "baseball_mlb": "baseball",
-                        "icehockey_nhl": "hockey", "soccer_mls": "soccer",
-                        "soccer_epl": "soccer", "soccer_uefa": "soccer",
-                        "tennis_atp": "tennis", "tennis_wta": "tennis",
-                        "mma_mixed_martial_arts": "mma", "golf_pga": "golf",
-                        "motorsport_f1": "motorsports", "esports": "esports",
-                    }
-                    category = category_for.get(sport, sport if sport in sports_intel.SPORT_TERMS else None)
-                    now_ts = int(time.time())
-                    categories = [category] if category else []
-                    categories.append("event_news")
-                    for news_category in set(categories):
-                        for item in sports_intel.recent(self.store, limit=250, category=news_category, kind="news"):
-                            published = item.get("published_ts")
-                            if published and now_ts - published > 48 * 3600:
-                                continue
-                            item_event = item.get("event_ticker")
-                            self._headlines[sport].append({
-                                "headline": f"[{item.get('publisher') or item.get('source') or 'unknown source'}] {item.get('title', '')}",
-                                "description": item.get("summary", ""),
-                                "published": published or item.get("observed_ts"),
-                                "source": item.get("source", ""),
-                                "url": item.get("url", ""),
-                                "event_ticker": item_event,
-                            })
-                    # Include recent live/final scoreboard and box-score evidence
-                    # for these teams, without treating an unverified feed as truth.
-                    stat_categories = {
-                        "americanfootball_nfl": ["nfl"], "americanfootball_ncaaf": ["college_football"],
-                        "basketball_nba": ["nba"], "basketball_wnba": ["wnba"],
-                        "baseball_mlb": ["mlb"], "icehockey_nhl": ["nhl"],
-                        "soccer_epl": ["soccer_epl"], "soccer_mls": ["soccer_mls"],
-                        "soccer_uefa": ["soccer_uefa"], "tennis_atp": ["tennis_atp"],
-                        "tennis_wta": ["tennis_wta"], "golf_pga": ["golf_pga"],
-                        "mma_mixed_martial_arts": ["mma_ufc"],
-                    }
                     stat_rows = []
                     team_terms = [str(x).lower() for x in (team, opp) if x and len(str(x)) > 2]
                     for stat_category in stat_categories.get(sport, []):
@@ -256,21 +267,16 @@ class Engine:
                             stat_rows.append({
                                 "event": item.get("title"), "observed_ts": item.get("observed_ts"),
                                 "state": item.get("state"), "scoreboard": item.get("scoreboard", []),
-                                "team_stats": item.get("team_stats", []),
-                                "leaders": item.get("leaders", []),
-                                "public_odds": item.get("odds", []),
-                                "predictor": item.get("predictor"),
+                                "team_stats": item.get("team_stats", []), "leaders": item.get("leaders", []),
+                                "public_odds": item.get("odds", []), "predictor": item.get("predictor"),
                             })
                     if stat_rows:
-                        context = dict(context or {})
-                        context["recent_scoreboard_stats"] = stat_rows[:3]
+                        ai_context["recent_scoreboard_stats"] = stat_rows[:3]
                 except Exception as e:
-                    log.debug("cached web intelligence unavailable for %s: %s", sport, e)
-            event_headlines = [h for h in self._headlines[sport]
-                               if not h.get("event_ticker") or h.get("event_ticker") == mkt.get("event_ticker")]
-            heads = intel.relevant(event_headlines, [team, opp or ""])
+                    log.debug("cached scoreboard stats unavailable for %s: %s", sport, e)
+
             book = hist[-1]["fair_prob"] if hist else None
-            r = intel.ai_news(self.llm, team, opp, mid, book, heads, context)
+            r = intel.ai_news(self.llm, team, opp, mid, book, heads, ai_context)
             self.store.set_kv(f"news_last_{mkt['ticker']}", time.time())
             self.store.set_kv(key, r.__dict__ if r else None)
         cached = self.store.get_kv(key)
