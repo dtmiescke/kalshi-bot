@@ -56,6 +56,16 @@ class TestAudit(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertIn("daily loss limit", reason)
 
+    def test_league_loss_guard_separates_paper_and_live(self):
+        now = int(time.time())
+        self.st.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,
+                     stake,fee,status,result,pnl,graded_ts)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (now, "paper", "PAPER-CRYPTO", "PAPER-E", "KXBTC15M", "yes",
+                   0.5, 1, 0.5, 0.01, "graded", "no", -10.0, now))
+        self.assertFalse(guard.league_benched(self.st, "KXBTC15M", n=1, mode="live"))
+        self.assertTrue(guard.league_benched(self.st, "KXBTC15M", n=1, mode="paper"))
+
     def test_daily_risk_day_start_matches_central_dashboard_day(self):
         # 04:30 UTC on Oct 21 is 23:30 CDT on Oct 20.
         now = datetime(2026, 10, 21, 4, 30, tzinfo=timezone.utc).timestamp()
@@ -65,7 +75,7 @@ class TestAudit(unittest.TestCase):
         # In winter, Central midnight is 06:00 UTC because of standard time.
         winter_now = datetime(2026, 1, 15, 5, 30, tzinfo=timezone.utc).timestamp()
         winter_start = risk.day_start_ts(winter_now, "America/Chicago")
-        winter_expected = datetime(2026, 1, 15, 6, 0, tzinfo=timezone.utc).timestamp()
+        winter_expected = datetime(2026, 1, 14, 6, 0, tzinfo=timezone.utc).timestamp()
         self.assertEqual(winter_start, int(winter_expected))
 
     def test_01_history_has_no_lookahead(self):
