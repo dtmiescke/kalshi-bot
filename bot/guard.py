@@ -11,6 +11,7 @@
    - per-league: a league with a proven negative edge stops being bet
    Research and learning keep running while betting is paused.
 """
+import math
 import os
 import time
 
@@ -45,7 +46,13 @@ def arb_plan(series, book_a, book_b, fee_rate, max_dollars, min_profit_per=0.01)
 
 
 def drawdown_tripped(store, bankroll, mode=None):
-    pct = float(os.environ.get("MAX_DRAWDOWN", 10))
+    try:
+        pct = float(os.environ.get("MAX_DRAWDOWN", 10))
+    except (TypeError, ValueError):
+        # Invalid circuit-breaker configuration must pause betting, not disable it.
+        return True
+    if not math.isfinite(pct) or pct <= 0 or pct > 100:
+        return True
     limit = (pct / 100 if pct > 1 else pct) * bankroll
     since = int(time.time()) - 7 * 86400
     r = store.q("""SELECT COALESCE(SUM(pnl),0) p FROM bets
