@@ -455,7 +455,9 @@ class Engine:
                     if not self.betting_ok or benched:
                         self._skip(summary, "league benched" if benched else "betting paused")
                         continue
-                    c = self.evaluate(snap, readings, weights, summary)
+                    # Apply league-specific learned weights when the series is identifiable.
+                    league_weights = brain.get_weights(self.store, brain.learning_domain_of(series))
+                    c = self.evaluate(snap, readings, league_weights, summary)
                     if c:
                         candidates.append(c)
                 if candidates:
