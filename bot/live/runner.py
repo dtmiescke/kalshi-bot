@@ -325,7 +325,7 @@ class LiveRunner:
                 self.engine.place(mk["snap"], dict(plan, contracts=filled), mk["readings"],
                                   mk["prob"], mk["conf"], summary=self.summary, now=int(now),
                                   executed={"order_id": mk["order_id"], "contracts": filled})
-                self.summary["alerts"].append("{} maker fill {} x{} @ $ {:.2f}".format(
+                self.summary["alerts"].append("{} maker fill {} x{} @ ${:.2f}".format(
                     ticker, plan["side"].upper(), filled, plan["limit"]))
                 self.store.log_maker(ticker, 1, "filled", now - mk["placed"])
                 del self.makers[ticker]
