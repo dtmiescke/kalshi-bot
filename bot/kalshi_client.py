@@ -210,6 +210,21 @@ class KalshiClient:
             "status": status, "with_nested_markets": "true", "limit": 200,
         }, max_pages=20)
 
+    def multivariate_events(self, status="open"):
+        """Read-only discovery for Kalshi's multivariate/combo event catalog."""
+        out, cursor = [], None
+        for _ in range(10):
+            params = {"status": status, "limit": 200}
+            if cursor:
+                params["cursor"] = cursor
+            data = self._req("GET", "/events/multivariate", params=params)
+            rows = data.get("events") or data.get("multivariate_events") or []
+            out.extend(rows)
+            cursor = data.get("cursor")
+            if not cursor:
+                break
+        return out
+
     def market(self, ticker):
         return self._req("GET", f"/markets/{ticker}").get("market", {})
 
