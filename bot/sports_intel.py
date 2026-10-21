@@ -65,6 +65,15 @@ SPORT_TERMS = {
     "golf": "PGA LPGA golf player withdrawal leaderboard",
     "motorsports": "Formula 1 NASCAR driver team race update",
     "esports": "esports roster change match result tournament",
+    "cricket": "international cricket IPL BBL lineup injury team news score",
+    "rugby": "rugby union league lineup injury team news score",
+    "volleyball": "volleyball roster lineup injury tournament score",
+    "chess": "chess tournament player updates match result",
+    "badminton": "badminton tournament player injury results",
+    "cycling": "cycling race rider injury team update results",
+    "track_field": "track and field athletics athlete injury results",
+    "swimming": "swimming championship athlete results roster",
+    "olympics": "Olympic sports athlete injury lineup medal event update",
 }
 RSS_CATEGORIES = tuple(SPORT_TERMS)
 
