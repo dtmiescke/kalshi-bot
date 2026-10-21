@@ -1,6 +1,6 @@
 import unittest
 
-from bot.combo_research import _market_ask, combo_ranking_score, score_combo_probabilities
+from bot.combo_research import _market_ask, combo_ranking_score, conservative_leg_probability, score_combo_probabilities
 
 
 class TestComboResearch(unittest.TestCase):
@@ -27,6 +27,19 @@ class TestComboResearch(unittest.TestCase):
     def test_invalid_probabilities_are_not_scored(self):
         self.assertFalse(score_combo_probabilities([0.8], 0.2, 0.8)["eligible"])
         self.assertFalse(score_combo_probabilities([0.8, 1.0], 0.2, 0.8)["eligible"])
+
+    def test_weak_or_single_signal_forecasts_shrink_toward_half(self):
+        raw = 0.80
+        weak = conservative_leg_probability(raw, 0.40, 1)
+        strong = conservative_leg_probability(raw, 0.90, 3)
+        self.assertLess(weak, strong)
+        self.assertLess(weak, raw)
+        self.assertGreater(weak, 0.50)
+        self.assertAlmostEqual(conservative_leg_probability(0.80, 1.0, 4), 0.80)
+
+    def test_invalid_probability_is_neutralized(self):
+        self.assertEqual(conservative_leg_probability(1.2, 0.9, 3), 0.5)
+        self.assertEqual(conservative_leg_probability(0.8, -2, 1), 0.5)
 
     def test_prefers_three_to_five_legs_unless_long_combo_is_exceptional(self):
         five = combo_ranking_score(5, 0.10, 0.70, 0.06)
