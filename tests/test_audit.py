@@ -35,6 +35,18 @@ class TestAudit(unittest.TestCase):
     def tearDown(self):
         self.d.cleanup()
 
+    def test_daily_risk_day_start_matches_central_dashboard_day(self):
+        # 04:30 UTC on Oct 21 is 23:30 CDT on Oct 20.
+        now = datetime(2026, 10, 21, 4, 30, tzinfo=timezone.utc).timestamp()
+        start = risk.day_start_ts(now, "America/Chicago")
+        expected = datetime(2026, 10, 20, 5, 0, tzinfo=timezone.utc).timestamp()
+        self.assertEqual(start, int(expected))
+        # In winter, Central midnight is 06:00 UTC because of standard time.
+        winter_now = datetime(2026, 1, 15, 5, 30, tzinfo=timezone.utc).timestamp()
+        winter_start = risk.day_start_ts(winter_now, "America/Chicago")
+        winter_expected = datetime(2026, 1, 15, 6, 0, tzinfo=timezone.utc).timestamp()
+        self.assertEqual(winter_start, int(winter_expected))
+
     def test_01_history_has_no_lookahead(self):
         """Spot jumps in the minute AFTER the Kalshi candle must not be visible."""
         close = 1_800_000_000
