@@ -54,6 +54,7 @@ jobs:
           SPORTS_INTEL_EVENT_SEARCH: ${{ vars.SPORTS_INTEL_EVENT_SEARCH || 'yes' }}
           SPORTS_INTEL_EVENT_BUDGET: ${{ vars.SPORTS_INTEL_EVENT_BUDGET || '6' }}
           SPORTS_INTEL_TTL_SECONDS: ${{ vars.SPORTS_INTEL_TTL_SECONDS || '600' }}
+          SPORTS_AI_NEWS_REFRESH_MINUTES: ${{ vars.SPORTS_AI_NEWS_REFRESH_MINUTES || '30' }}
           COMBOS_ENABLED: ${{ vars.COMBOS_ENABLED || 'no' }}
           COMBO_MAX_LEGS: ${{ vars.COMBO_MAX_LEGS || '3' }}
           COMBO_MIN_EDGE: ${{ vars.COMBO_MIN_EDGE || '6' }}
