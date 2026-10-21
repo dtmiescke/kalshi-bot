@@ -50,6 +50,23 @@ def run_scheduled(s, store, data):
             from . import sports_intel
             intel_result = sports_intel.collect(store)
             print("sports intelligence:", json.dumps(intel_result, default=str))
+            if os.environ.get("SPORTS_INTEL_EVENT_SEARCH", "yes").lower() in ("yes", "true", "1"):
+                try:
+                    catalog = data.sports_series()
+                    open_events = data.sports_events_all()
+                    selected = s.selected_series()
+                    eligible = [ev for ev in open_events
+                                if ev.get("series_ticker") in catalog
+                                and (selected is None or ev.get("series_ticker") in selected)]
+                    targeted = sports_intel.collect_event_news(
+                        store, eligible,
+                        max_events=int(os.environ.get("SPORTS_INTEL_EVENT_BUDGET", "6")))
+                    store.set_kv("sports_intel_event_news_health", {
+                        "ts": int(time.time()), "series_discovered": len(catalog),
+                        "open_events_seen": len(open_events), **targeted})
+                    print("event news:", json.dumps(targeted, default=str))
+                except Exception as e:
+                    logging.warning("event-targeted sports news scan failed: %s", e)
         except Exception as e:
             logging.warning("sports intelligence collection failed: %s", e)
     hours = float(os.environ.get("SPORTS_EVERY_HOURS", 5.5))
