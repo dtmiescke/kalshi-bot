@@ -99,6 +99,7 @@ class Settings:
     combo_min_legs: int = field(default_factory=lambda: _env_int("COMBO_MIN_LEGS", 3))
     combo_max_legs: int = field(default_factory=lambda: _env_int("COMBO_MAX_LEGS", 8))
     combo_min_edge: float = field(default_factory=lambda: _env_pct("COMBO_MIN_EDGE", 6))
+    combo_audit_lead_seconds: int = field(default_factory=lambda: _env_int("COMBO_AUDIT_LEAD_SECONDS", 300))
 
     def selected_series(self):
         if self.sports_mode == "all":
