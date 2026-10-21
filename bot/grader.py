@@ -105,6 +105,24 @@ def learn_from_markets(store, client, max_fetch=150):
     return len(graded), changes
 
 
+def grade_decision_audits(store, client, max_fetch=150):
+    """Grade logged candidates and rejections from real Kalshi settlements only."""
+    tickers = store.q("SELECT DISTINCT ticker FROM decision_audit WHERE outcome IS NULL LIMIT ?", (max_fetch,))
+    graded = 0
+    for row in tickers:
+        ticker = row["ticker"]
+        try:
+            market = client.market(ticker)
+        except Exception as e:
+            log.debug("decision audit market lookup %s: %s", ticker, e)
+            continue
+        result = market.get("result")
+        if result not in ("yes", "no"):
+            continue
+        graded += store.grade_decision_audit(ticker, 1 if result == "yes" else 0)
+    return graded
+
+
 def monitor_model(store, window=300):
     """LIVE DEMOTION: the model passed its tests once, but markets change. If over
     the last `window` settled crypto markets the model's live forecasts are worse
@@ -143,7 +161,8 @@ def monitor_model(store, window=300):
 def grade(store, client):
     n_bets = settle_bets(store, client)
     n_mkts, changes = learn_from_markets(store, client)
+    n_decisions = grade_decision_audits(store, client)
     monitor_model(store)
-    log.info("graded %d bets, %d markets, weight changes: %s", n_bets, n_mkts,
+    log.info("graded %d bets, %d markets, %d decision snapshots, weight changes: %s", n_bets, n_mkts, n_decisions,
              json.dumps({k: [round(a, 3), round(b, 3)] for k, (a, b) in changes.items()}))
     return {"bets": n_bets, "markets": n_mkts, "weight_changes": changes}
