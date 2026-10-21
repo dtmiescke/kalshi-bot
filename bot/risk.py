@@ -36,6 +36,22 @@ def fill_plan(asks, max_dollars, limit_price):
     return contracts, (cost / contracts if contracts else None)
 
 
+def fill_plan_contracts(asks, max_contracts, limit_price):
+    """Recalculate average cost for an exact target size using only available depth."""
+    contracts, cost = 0, 0.0
+    remaining = max(0, int(max_contracts))
+    for p, q in asks:
+        if p > limit_price or remaining <= 0:
+            break
+        take = min(int(q), remaining)
+        if take <= 0:
+            continue
+        contracts += take
+        cost += take * p
+        remaining -= take
+    return contracts, (cost / contracts if contracts else None)
+
+
 def day_start_ts():
     now = datetime.now(timezone.utc)
     return int(now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
@@ -113,12 +129,14 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
     if edge < min_edge:
         return None, f"best edge {edge:+.1%} below {min_edge:.0%}"
 
+    earned = earned_size(store, mkt)
     if s.fixed_bet > 0:
-        want = s.fixed_bet
+        # A fixed target is still scaled by the earned-size safety ramp.
+        want = s.fixed_bet * earned
     else:   # fractional Kelly on the FEE-INCLUSIVE cost, scaled by confidence
         cost = price + taker_fee(100, price, rate) / 100
         kelly = max(0.0, (p_win - cost) / (1 - cost))
-        want = s.bankroll * s.kelly_fraction * kelly * confidence * earned_size(store, mkt)
+        want = s.bankroll * s.kelly_fraction * kelly * confidence * earned
 
     acct = store.account(s.bankroll)
     if acct["open_positions"] >= s.max_open_positions:
@@ -144,6 +162,23 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
         contracts, avg = fill_plan(asks[side], budget, limit)
     if contracts < 1:
         return None, "not enough size at a good price"
+
+    # Reconcile exact depth and cent-rounded fees before returning a plan.
+    # A budget is total dollars at risk, not just the contract premium.
+    while contracts > 0:
+        if style == "maker":
+            avg = price
+        else:
+            contracts, avg = fill_plan_contracts(asks[side], contracts, limit)
+            if contracts < 1:
+                break
+        fee = taker_fee(contracts, avg, rate)
+        stake = contracts * avg
+        if stake + fee <= budget + 1e-9 and stake + fee <= acct["cash"] - 0.05 + 1e-9:
+            break
+        contracts -= 1
+    if contracts < 1:
+        return None, "fees exceed available budget"
     fee = taker_fee(contracts, avg, rate)
     # Final check on the REAL order: fees round up per order, so small orders
     # and deeper fills can turn a "5% edge" into 3%. Re-test after actual costs.
