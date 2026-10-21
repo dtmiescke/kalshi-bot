@@ -152,13 +152,13 @@ def _due(store, key, ttl, now):
 def _record_items(store, items):
     inserted = 0
     for item in items:
-        store.x("""INSERT OR IGNORE INTO sports_intel_items
+        cur = store.x("""INSERT OR IGNORE INTO sports_intel_items
             (id, kind, category, source, title, url, summary, published_ts, observed_ts, confidence, payload_json)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
             item["id"], item["kind"], item["category"], item["source"], item.get("title") or item.get("name") or "",
             item.get("url", ""), item.get("summary", ""), item.get("published_ts"),
             item["observed_ts"], item.get("confidence", 0.5), json.dumps(item, separators=(",", ":"))))
-        inserted += 1
+        inserted += max(0, cur.rowcount)
     return inserted
 
 def ensure_schema(store):
