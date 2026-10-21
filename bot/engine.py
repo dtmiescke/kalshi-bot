@@ -310,6 +310,7 @@ class Engine:
                                     "depth_charts": item.get("depth_charts"),
                                     "season_series": item.get("season_series"),
                                     "game_info": item.get("game_info"),
+                                    "football_matchup_profile": item.get("football_matchup_profile"),
                                     "public_odds": item.get("odds", []), "predictor": item.get("predictor"),
                                 })
                     if stat_rows:
