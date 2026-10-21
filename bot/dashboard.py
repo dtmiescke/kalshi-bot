@@ -88,7 +88,7 @@ def build(store, settings, live_path="data/live_summary.json", briefing_path="da
     today_win_pct = 100.0 * today_wins / len(today_settled) if today_settled else None
     today_win_pct_text = f"{today_win_pct:.1f}%" if today_win_pct is not None else "—"
     open_bets = store.q("SELECT * FROM bets WHERE status='open' ORDER BY ts DESC")
-    completed_bets = store.q("SELECT * FROM bets WHERE status IN ('graded','sold') ORDER BY COALESCE(graded_ts, ts) DESC")
+    completed_bets = store.q("SELECT * FROM bets WHERE status IN ('graded','sold') ORDER BY COALESCE(exit_ts, graded_ts, ts) DESC")
     recent = store.q("SELECT * FROM bets WHERE status='graded' ORDER BY graded_ts DESC LIMIT 15")
 
     def last_quote(ticker):
@@ -111,16 +111,33 @@ def build(store, settings, live_path="data/live_summary.json", briefing_path="da
 
     completed_rows = ""
     for b in completed_bets:
-        result_label = str(b["result"] or b["status"]).upper()
+        result = str(b["result"] or "").lower()
+        side = str(b["side"] or "").lower()
+        if result == "sold":
+            result_label = "SOLD EARLY"
+            result_detail = "position closed before settlement"
+        elif result in ("yes", "no") and side in ("yes", "no"):
+            result_label = "WON" if result == side else "LOST"
+            result_detail = f"settled {result.upper()}"
+        else:
+            result_label = str(b["status"] or "UNKNOWN").upper()
+            result_detail = result.upper() or "outcome unavailable"
         pnl = float(b["pnl"] or 0)
-        closed_ts = b["graded_ts"] or b["ts"]
+        closed_ts = b.get("exit_ts") or b.get("graded_ts") or b["ts"]
         closed_at = time.strftime("%Y-%m-%d %H:%M", time.gmtime(closed_ts or 0))
+        entry_price = float(b["price"] or 0)
+        exit_price = b.get("exit_price")
+        price_detail = "entry $" + f"{entry_price:.2f}"
+        if exit_price is not None:
+            price_detail += " · exit $" + f"{float(exit_price):.2f}"
+        pnl_text = "$" + f"{pnl:+.2f}"
         completed_rows += (
             f"<tr><td>{E(closed_at)} UTC</td>"
             f"<td>{E(short(b['ticker']))}<div class='mut'>{E(str(b['mode']).upper())}</div></td>"
-            f"<td>{E(str(b['side']).upper())} · {b['contracts']} @ ${b['price']:.2f}</td>"
-            f"<td>{E(result_label)}</td>"
-            f"<td class='{'good' if pnl > 0 else 'bad' if pnl < 0 else ''}'><b>${pnl:+.2f}</b></td></tr>"
+            f"<td>{E(side.upper())} · {int(b['contracts'] or 0)}<div class='mut'>{price_detail}</div></td>"
+            f"<td><b class='{'good' if result_label == 'WON' else 'bad' if result_label == 'LOST' else ''}'>{E(result_label)}</b>"
+            f"<div class='mut'>{E(result_detail)}</div></td>"
+            f"<td class='{'good' if pnl > 0 else 'bad' if pnl < 0 else ''}'><b>{pnl_text}</b></td></tr>"
         )
 
     coins = ""
@@ -193,7 +210,7 @@ td div.mut{{white-space:normal}}.mut{{color:var(--mut);font-size:12px}}a{{color:
 <div class="card"><h2>Recent results</h2><div class="scroll"><table>{rec_rows or '<tr><td class="mut">none yet</td></tr>'}</table></div>
 <details><summary>All completed bets ({len(completed_bets)})</summary>
 <div class="scroll"><table>
-<tr><td class="k">Closed (UTC)</td><td class="k">Market</td><td class="k">Position</td><td class="k">Outcome</td><td class="k">P&amp;L</td></tr>
+<tr><td class="k">Closed (UTC)</td><td class="k">Market</td><td class="k">Position / prices</td><td class="k">Result</td><td class="k">Realized P&amp;L</td></tr>
 {completed_rows or '<tr><td colspan=5 class="mut">No completed bets yet.</td></tr>'}
 </table></div></details>
 <div class="mut"><a href="bets.csv">Download all trades (CSV)</a></div></div>
