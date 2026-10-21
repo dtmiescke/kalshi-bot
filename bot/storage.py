@@ -76,6 +76,18 @@ CREATE TABLE IF NOT EXISTS decision_audit (
 );
 CREATE INDEX IF NOT EXISTS ix_decision_audit_ticker_ts ON decision_audit(ticker, ts);
 CREATE INDEX IF NOT EXISTS ix_decision_audit_grade ON decision_audit(outcome, decision);
+
+-- One row per combo ticker: latest pre-settlement research snapshot wins.
+-- This prevents repeated scans of the same contract inflating sample size.
+CREATE TABLE IF NOT EXISTS combo_prediction_audit (
+    ticker TEXT PRIMARY KEY, ts INTEGER NOT NULL, event_ticker TEXT,
+    leg_count INTEGER NOT NULL, side TEXT, market_price REAL,
+    predicted_yes REAL, predicted_side_prob REAL, market_yes_proxy REAL,
+    fee REAL, expected_profit REAL, eligible INTEGER, ranking_score REAL,
+    legs_json TEXT, outcome INTEGER, brier REAL, market_proxy_brier REAL,
+    hypothetical_pnl REAL, settled_ts INTEGER
+);
+CREATE INDEX IF NOT EXISTS ix_combo_audit_grade ON combo_prediction_audit(outcome, leg_count);
 """
 
 
@@ -125,6 +137,64 @@ class Store:
                 self.db.execute("UPDATE decision_audit SET outcome=?, brier=?, hypothetical_pnl=?, settled_ts=? WHERE id=?", (y, brier, pnl, settled_ts, row["id"]))
             self.db.commit()
             return len(rows)
+
+    def record_combo_prediction(self, row):
+        """Upsert the latest open-market forecast; never overwrite a settled row."""
+        self.x("""INSERT INTO combo_prediction_audit
+            (ticker,ts,event_ticker,leg_count,side,market_price,predicted_yes,
+             predicted_side_prob,market_yes_proxy,fee,expected_profit,eligible,
+             ranking_score,legs_json)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(ticker) DO UPDATE SET
+              ts=excluded.ts,event_ticker=excluded.event_ticker,
+              leg_count=excluded.leg_count,side=excluded.side,
+              market_price=excluded.market_price,predicted_yes=excluded.predicted_yes,
+              predicted_side_prob=excluded.predicted_side_prob,
+              market_yes_proxy=excluded.market_yes_proxy,fee=excluded.fee,
+              expected_profit=excluded.expected_profit,eligible=excluded.eligible,
+              ranking_score=excluded.ranking_score,legs_json=excluded.legs_json
+            WHERE combo_prediction_audit.outcome IS NULL""", (
+            row["ticker"], int(row.get("ts", time.time())), row.get("event_ticker"),
+            int(row["leg_count"]), row.get("side"), row.get("market_price"),
+            row.get("predicted_yes"), row.get("predicted_side_prob"),
+            row.get("market_yes_proxy"), row.get("fee"), row.get("expected_profit"),
+            int(bool(row.get("eligible"))), row.get("ranking_score"),
+            json.dumps(row.get("legs", []), ensure_ascii=False, default=str)))
+
+    def grade_combo_prediction(self, ticker, outcome, settled_ts=None):
+        """Grade only against a real YES/NO settlement returned by Kalshi."""
+        if outcome not in (0, 1):
+            return 0
+        settled_ts = int(settled_ts or time.time())
+        with self.lock:
+            row = self.db.execute(
+                "SELECT * FROM combo_prediction_audit WHERE ticker=? AND outcome IS NULL",
+                (ticker,)).fetchone()
+            if row is None:
+                return 0
+            p = row["predicted_yes"]
+            brier = (float(p) - int(outcome)) ** 2 if p is not None else None
+            proxy = row["market_yes_proxy"]
+            proxy_brier = (float(proxy) - int(outcome)) ** 2 if proxy is not None else None
+            pnl = None
+            if row["side"] in ("yes", "no") and row["market_price"] is not None:
+                price, fee = float(row["market_price"]), float(row["fee"] or 0.0)
+                won = (row["side"] == "yes" and outcome == 1) or (row["side"] == "no" and outcome == 0)
+                pnl = (1.0 - price if won else -price) - fee
+            self.db.execute("""UPDATE combo_prediction_audit
+                SET outcome=?,brier=?,market_proxy_brier=?,hypothetical_pnl=?,settled_ts=?
+                WHERE ticker=? AND outcome IS NULL""",
+                (int(outcome), brier, proxy_brier, pnl, settled_ts, ticker))
+            self.db.commit()
+            return 1
+
+    def combo_prediction_summary(self):
+        """One observation per settled combo ticker; P&L is hypothetical, not realized."""
+        return self.q("""SELECT leg_count, COUNT(*) AS markets,
+            AVG(brier) AS model_brier, AVG(market_proxy_brier) AS market_proxy_brier,
+            SUM(hypothetical_pnl) AS hypothetical_net_pnl
+            FROM combo_prediction_audit WHERE outcome IS NOT NULL
+            GROUP BY leg_count ORDER BY leg_count""")
 
     def decision_audit_summary(self):
         return self.q("SELECT decision, COUNT(*) AS n, AVG(brier) AS brier, AVG(hypothetical_pnl) AS diagnostic_pnl FROM decision_audit WHERE outcome IS NOT NULL GROUP BY decision ORDER BY decision")
