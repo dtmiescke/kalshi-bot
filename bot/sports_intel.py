@@ -183,6 +183,101 @@ def _parse_espn(payload, source, category, observed_at):
             events.append(event_row)
     return events
 
+def _football_matchup_profile(event, box, raw, observed_at):
+    """Build a cautious football-specific evidence profile from fields ESPN exposes.
+
+    This is descriptive evidence, not a win-probability model. Missing statistics
+    stay missing; provider labels and athlete positions are preserved for audit.
+    """
+    competitors = event.get("competitors") or []
+    teams = []
+    for competitor in competitors:
+        teams.append({
+            "name": competitor.get("name"),
+            "abbreviation": competitor.get("abbreviation"),
+            "home_away": competitor.get("home_away"),
+            "score": competitor.get("score"),
+        })
+
+    team_rows = []
+    for team_block in (box.get("teams") or [])[:4]:
+        team_obj = team_block.get("team") or {}
+        stats = {}
+        for stat in team_block.get("statistics") or []:
+            if not isinstance(stat, dict):
+                continue
+            key = _clean(stat.get("name") or stat.get("label") or stat.get("abbreviation"), 80).lower()
+            value = stat.get("displayValue", stat.get("value", stat.get("display")))
+            if key and value is not None:
+                stats[key] = _clean(value, 80)
+        team_rows.append({
+            "team": _clean(team_obj.get("displayName") or team_obj.get("name"), 100),
+            "statistics": stats,
+        })
+
+    player_rows = []
+    for group in (box.get("players") or [])[:8]:
+        group_team = _clean((group.get("team") or {}).get("displayName"), 100)
+        for stat_group in (group.get("statistics") or [])[:8]:
+            labels = stat_group.get("labels") or stat_group.get("names") or []
+            for athlete_row in (stat_group.get("athletes") or [])[:60]:
+                athlete = athlete_row.get("athlete") or {}
+                values = athlete_row.get("stats") or []
+                stat_values = {}
+                for idx, value in enumerate(values):
+                    label = labels[idx] if idx < len(labels) else f"stat_{idx + 1}"
+                    stat_values[_clean(label, 50)] = _clean(value, 80)
+                if athlete.get("displayName") or athlete.get("fullName"):
+                    player_rows.append({
+                        "name": _clean(athlete.get("displayName") or athlete.get("fullName"), 100),
+                        "team": group_team,
+                        "position": _clean((athlete.get("position") or {}).get("abbreviation")
+                                           or (athlete.get("position") or {}).get("displayName"), 30),
+                        "starter": athlete_row.get("starter"),
+                        "statistics": stat_values,
+                    })
+    # Keep the profile small enough for prompts/logs while retaining role diversity.
+    quarterbacks = [p for p in player_rows if p.get("position", "").upper() in ("QB", "QUARTERBACK")]
+    skill_players = [p for p in player_rows if p.get("position", "").upper() in
+                     ("RB", "HB", "FB", "WR", "TE", "RUNNING BACK", "WIDE RECEIVER", "TIGHT END")]
+    defenders = [p for p in player_rows if p.get("position", "").upper() in
+                 ("DE", "DT", "NT", "LB", "OLB", "ILB", "CB", "S", "FS", "SS", "EDGE")]
+    injuries = raw.get("injuries") if isinstance(raw.get("injuries"), list) else []
+    lineups_present = bool(raw.get("lineups") or raw.get("roster") or raw.get("rosters"))
+    return {
+        "sport_profile": "american_football",
+        "event_id": event.get("provider_event_id"),
+        "event": event.get("name") or event.get("short_name"),
+        "observed_ts": observed_at,
+        "source": "ESPN event summary",
+        "teams": teams,
+        "team_statistics": team_rows,
+        "quarterbacks": quarterbacks[:8],
+        "skill_players": skill_players[:16],
+        "defensive_players": defenders[:12],
+        "other_players": [p for p in player_rows if p not in quarterbacks and p not in skill_players and p not in defenders][:12],
+        "injury_records": injuries[:30],
+        "lineup_data_present": lineups_present,
+        "lineups_confirmed": False,
+        "data_quality": {
+            "team_stats_available": bool(team_rows),
+            "player_stats_available": bool(player_rows),
+            "injury_data_available": bool(injuries),
+            "lineup_data_available": lineups_present,
+            "provider_fields_vary": True,
+        },
+        "missing_information": [
+            label for label, present in (
+                ("confirmed_inactives", bool(injuries)),
+                ("confirmed_starting_lineups", lineups_present),
+                ("team_statistics", bool(team_rows)),
+                ("player_statistics", bool(player_rows)),
+            ) if not present
+        ],
+        "interpretation_guardrail": "Descriptive source evidence only; do not infer availability from missing fields or treat this profile as a calibrated probability.",
+    }
+
+
 def _source_status(store, key, status):
     store.set_kv("sports_intel_source:" + key, status)
 
@@ -326,6 +421,8 @@ def collect(store, force=False, now=None):
                 "source_note": "ESPN public event summary; field availability varies by sport; verify lineup/injury freshness before use",
                 "verified": False,
             }
+            if category in ("nfl", "college_football"):
+                payload["football_matchup_profile"] = _football_matchup_profile(event, box, raw, now)
             summary["new_items"] += _record_items(store, [payload])
             _source_status(store, key, {"ok": True, "ts": now, "count": 1})
             summary["sources_ok"] += 1
