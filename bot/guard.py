@@ -71,9 +71,10 @@ def clv_tripped(store, n=50, floor=-0.01, mode=None):
     return sum(r["clv"] for r in rows) / n < floor
 
 
-def league_benched(store, series, n=40):
+def league_benched(store, series, n=40, mode=None):
     rows = store.q("""SELECT clv, pnl FROM bets WHERE status='graded' AND series=?
-                      AND graded_ts >= ? ORDER BY graded_ts DESC LIMIT ?""", (series, _since(), n))
+                      AND graded_ts >= ? AND (? IS NULL OR mode=?)
+                      ORDER BY graded_ts DESC LIMIT ?""", (series, _since(), mode, mode, n))
     if len(rows) < n:
         return False
     if series.endswith("15M"):
