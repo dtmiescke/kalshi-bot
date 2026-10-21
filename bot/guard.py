@@ -16,13 +16,15 @@ import time
 
 from .risk import asks_from_book, taker_fee
 
-# leagues where a game can end tied (both "team wins" markets lose): no arb
-TIE_POSSIBLE = {"KXNFLGAME"}
+# Only these series have been explicitly allowlisted for two-team locked-profit
+# arbitrage. Unknown/future sports fail closed until their settlement rules are checked.
+# Soccer and other draw-capable events must never be treated as a two-outcome market.
+ARB_NO_TIE = {"KXNBAGAME", "KXMLBGAME", "KXNHLGAME", "KXNCAABGAME", "KXNCAAFGAME"}
 
 
 def arb_plan(series, book_a, book_b, fee_rate, max_dollars, min_profit_per=0.01):
     """Return a two-leg plan if YES(A)+YES(B) < $1 after fees, else None."""
-    if series in TIE_POSSIBLE:
+    if series not in ARB_NO_TIE:
         return None
     a = asks_from_book(book_a)["yes"]
     b = asks_from_book(book_b)["yes"]
