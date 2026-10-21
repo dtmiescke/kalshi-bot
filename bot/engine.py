@@ -818,10 +818,11 @@ class Engine:
         if executed:
             order_id = executed.get("order_id", order_id)
             plan["contracts"] = executed.get("contracts", plan["contracts"])
-            # Resting maker fills use the maker fee schedule, and only the
-            # contracts actually filled belong in the ledger.
-            plan["fee"] = risk.taker_fee(0, plan["price"], self.s.taker_fee_rate) + \
-                risk.taker_fee(plan["contracts"], plan["price"], self.s.maker_fee_rate)
+            # Ledger only the filled quantity. A partial maker fill must not
+            # retain the original full-order stake.
+            plan["stake"] = round(plan["contracts"] * plan["price"], 2)
+            # Resting maker fills use the maker fee schedule.
+            plan["fee"] = risk.taker_fee(plan["contracts"], plan["price"], self.s.maker_fee_rate)
         elif self.s.mode in ("demo", "live"):
             try:
                 order = self.trade.place_limit_buy(snap["ticker"], plan["side"],
