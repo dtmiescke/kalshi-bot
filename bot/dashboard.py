@@ -69,7 +69,7 @@ def export_csv(store):
 def build(store, settings, live_path="data/live_summary.json", briefing_path="data/BRIEFING.txt"):
     now = time.time()
     acct = store.account(settings.bankroll)
-    ok, why = guard.status(store, settings.bankroll)
+    ok, why = guard.status(store, settings.bankroll, mode=settings.mode)
     health = store.get_kv("kalshi_health") or {}
     live = {}
     if os.path.exists(live_path):
@@ -78,7 +78,8 @@ def build(store, settings, live_path="data/live_summary.json", briefing_path="da
                 live = json.load(f)
         except (OSError, ValueError):
             pass
-    graded = store.q("SELECT pnl, clv, result, side, graded_ts FROM bets WHERE status='graded'")
+    graded = store.q("SELECT pnl, clv, result, side, graded_ts FROM bets WHERE status='graded' AND mode=?",
+                      (settings.mode,))
     # Win percentage is settled pick accuracy, not profitability: compare the
     # chosen side with Kalshi's actual YES/NO settlement. Sold-early positions
     # have no settlement outcome and are excluded. Open bets are never counted.
