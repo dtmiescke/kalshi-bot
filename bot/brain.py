@@ -142,13 +142,15 @@ def calibration_table(store, buckets=10, domain=None):
     rows = store.q("""SELECT model_prob, outcome, series FROM decision_audit
                       WHERE brier IS NOT NULL AND model_prob IS NOT NULL
                       AND outcome IN (0,1)""")
+    if domain:
+        rows = [r for r in rows if domain_of(r["series"]) == domain]
     audit_source = bool(rows)
     if not rows:
         rows = store.q("""SELECT model_prob, result, series FROM bets
                           WHERE status='graded' AND result IN ('yes','no')
                           AND model_prob IS NOT NULL""")
-    if domain:
-        rows = [r for r in rows if domain_of(r["series"]) == domain]
+        if domain:
+            rows = [r for r in rows if domain_of(r["series"]) == domain]
     table = defaultdict(lambda: [0, 0])
     for r in rows:
         p = float(r["model_prob"])
