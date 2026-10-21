@@ -258,6 +258,8 @@ class Engine:
                                 "state": item.get("state"), "scoreboard": item.get("scoreboard", []),
                                 "team_stats": item.get("team_stats", []),
                                 "leaders": item.get("leaders", []),
+                                "public_odds": item.get("odds", []),
+                                "predictor": item.get("predictor"),
                             })
                     if stat_rows:
                         context = dict(context or {})
