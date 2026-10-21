@@ -34,6 +34,7 @@ DEFAULT_WEIGHTS = {
 MIN_W, MAX_W = 0.05, 5.0
 ETA = 0.05            # learning rate: small = slow, steady learning
 CAL_MIN_SAMPLES = 60  # don't trust calibration until this many graded markets
+MIN_LEARN_SAMPLES = 20  # per signal and domain; prevents single-result overfitting
 
 
 def domain_of(ticker_or_series):
@@ -161,12 +162,19 @@ def learn(store, graded, domain=None):
             totals[name] += log_loss(p, y) - base   # negative = beat the market
             counts[name] += 1
     changes = {}
-    for name, rel in totals.items():
+    for name, rel_total in totals.items():
+        n = counts[name]
+        # League-specific samples are sparse at first. Do not let a handful of
+        # lucky/unlucky outcomes swing weights; normalize loss by sample count so
+        # the learning rate reflects average evidence, not how many rows arrived.
+        if n < MIN_LEARN_SAMPLES:
+            continue
+        rel = rel_total / n
         old = weights.get(name, 0.3)
         new = clamp(old * math.exp(-ETA * rel), MIN_W, MAX_W)
         if abs(new - old) > 1e-6:
             store.set_weight(f"{name}@{domain}" if domain else name, new,
-                             f"{counts[name]} markets, rel_logloss={rel:+.4f}")
+                             f"{n} markets, mean_rel_logloss={rel:+.4f}")
             changes[name] = (old, new)
     return changes
 
