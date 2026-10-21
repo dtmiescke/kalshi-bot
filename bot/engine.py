@@ -843,6 +843,15 @@ class Engine:
     def place(self, snap, plan, readings, prob, conf, summary, now, executed=None):
         """Send (or simulate) the order and record the bet. `executed` = an order
         the live runner already filled as a resting maker order."""
+        if not executed:
+            # Recheck the hard circuit breakers at the final execution boundary,
+            # not only at the start of a long scan. Already-filled orders must
+            # still be recorded even if a breaker trips afterward.
+            allowed, reason = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
+            if not allowed:
+                self._skip(summary, f"execution guard: {reason}")
+                log.warning("order blocked at execution boundary: %s", reason)
+                return
         order_id = f"paper-{uuid.uuid4().hex[:10]}"
         if executed:
             order_id = executed.get("order_id", order_id)
