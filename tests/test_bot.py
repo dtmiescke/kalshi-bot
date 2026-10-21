@@ -149,6 +149,10 @@ class TestEndToEnd(unittest.TestCase):
             self.assertIn("LOST", page)
             self.assertIn("exit $0.60", page)
             self.assertIn("T1", page)
+            csv_text = dashboard.export_csv(store)
+            self.assertIn("entry_time_utc,closed_time_utc", csv_text)
+            self.assertIn("exit_ts", csv_text.splitlines()[0])
+            self.assertIn("exit_price", csv_text.splitlines()[0])
 
     def test_dashboard_daily_win_rate_uses_central_time(self):
         with tempfile.TemporaryDirectory() as d:
