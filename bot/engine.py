@@ -318,7 +318,7 @@ class Engine:
         now = int(time.time())
         summary = {"mode": "watch" if watch else "full", "markets": 0,
                    "matched": 0, "bets": 0, "skipped": {}, "alerts": []}
-        held = {b["event_ticker"] for b in self.store.open_bets()}
+        held = {b["event_ticker"] for b in self.store.open_bets(mode=self.s.mode)}
         if sports and getattr(self.s, "combo_research_enabled", True):
             from . import combo_research
             summary["combos"] = combo_research.scan(self.data, self.store, settings=self.s)
