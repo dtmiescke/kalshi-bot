@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from bot import main, ml
+from bot import engine, main, ml
 from bot.config import Settings
 
 
@@ -38,6 +38,21 @@ class TestTrainingSafety(unittest.TestCase):
         settings = Settings()
         settings.mode = "paper"
         settings.validate()
+
+    def test_partial_maker_fill_records_only_filled_stake_and_fee(self):
+        saved = []
+        obj = engine.Engine.__new__(engine.Engine)
+        obj.s = SimpleNamespace(mode="demo", taker_fee_rate=0.07, maker_fee_rate=0.0175)
+        obj.store = SimpleNamespace(add_bet=lambda row: saved.append(row))
+        snap = {"ticker": "T", "event_ticker": "E", "series": "KXBTC15M", "team": "BTC"}
+        plan = {"side": "yes", "price": 0.50, "limit": 0.50, "style": "maker",
+                "contracts": 5, "stake": 2.50, "fee": 0.05, "edge": 0.10}
+        with mock.patch("bot.engine.alerts.send"):
+            obj.place(snap, plan, [], 0.60, 0.80, {"bets": 0}, 123,
+                      executed={"order_id": "ORDER", "contracts": 2})
+        self.assertEqual(saved[0]["contracts"], 2)
+        self.assertEqual(saved[0]["stake"], 1.00)
+        self.assertEqual(saved[0]["fee"], 0.01)
 
     def test_train_command_exits_nonzero_when_data_is_insufficient(self):
         settings = SimpleNamespace(
