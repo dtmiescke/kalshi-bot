@@ -88,7 +88,7 @@ def status(store, bankroll, daily_loss_limit=None):
         float(os.environ.get("DAILY_LOSS_LIMIT", 30))
     lost = store.realized_today(day_start_ts())
     if lost <= -limit:
-        return False, f"daily loss limit hit (${-lost:.2f} lost today; resets at 00:00 UTC)"
+        return False, f"daily loss limit hit (${-lost:.2f} lost today; resets at midnight in {os.environ.get('BOT_TIMEZONE', 'America/Chicago')})"
     if drawdown_tripped(store, bankroll):
         return False, "drawdown limit hit (7-day losses)"
     if clv_tripped(store):
