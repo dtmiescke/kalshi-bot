@@ -280,6 +280,27 @@ class TestAccountLimits(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("daily loss", why)
 
+    def test_decision_audit_scores_only_latest_snapshot_before_cutoff(self):
+        for ts, prob, decision in ((100, 0.60, "candidate"),
+                                   (150, 0.70, "candidate"),
+                                   (190, 0.99, "candidate")):
+            self.st.add_decision_audit({
+                "ts": ts, "ticker": "KXNBA-CUTOFF", "event_ticker": "E2",
+                "series": "KXNBAGAME", "decision": decision, "reason": "audit",
+                "side": "yes", "market_price": 0.4, "model_prob": prob,
+                "side_prob": prob, "edge": prob - 0.4, "confidence": 0.8,
+            })
+        self.st.grade_decision_audit("KXNBA-CUTOFF", 1, 300, cutoff_ts=160)
+        rows = self.st.q("SELECT ts, outcome, brier, hypothetical_pnl FROM decision_audit WHERE ticker=? ORDER BY ts",
+                         ("KXNBA-CUTOFF",))
+        self.assertEqual([row["outcome"] for row in rows], [1, 1, 1])
+        self.assertIsNone(rows[0]["brier"])
+        self.assertAlmostEqual(rows[1]["brier"], (0.70 - 1) ** 2)
+        self.assertIsNone(rows[2]["brier"])
+        self.assertIsNone(rows[0]["hypothetical_pnl"])
+        self.assertAlmostEqual(rows[1]["hypothetical_pnl"], 0.6)
+        self.assertIsNone(rows[2]["hypothetical_pnl"])
+
     def test_decision_audit_never_creates_fake_bets(self):
         self.st.add_decision_audit({
             "ts": 100, "ticker": "KXNBA-TEST", "event_ticker": "E1",
