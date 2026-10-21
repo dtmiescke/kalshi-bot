@@ -158,11 +158,28 @@ def monitor_model(store, window=300):
     return {"ok": False, "ml_brier": ml_b, "kalshi_brier": k_b, "n": len(pairs)}
 
 
+def grade_combo_predictions(store, client, max_fetch=150):
+    """Grade combo forecasts only after Kalshi reports actual settled YES/NO."""
+    rows = store.q("SELECT ticker FROM combo_prediction_audit WHERE outcome IS NULL LIMIT ?", (max_fetch,))
+    graded = 0
+    for row in rows:
+        try:
+            market = client.market(row["ticker"])
+        except Exception as exc:
+            log.debug("combo audit market lookup %s: %s", row["ticker"], exc)
+            continue
+        result = market.get("result")
+        if result in ("yes", "no"):
+            graded += store.grade_combo_prediction(row["ticker"], 1 if result == "yes" else 0)
+    return graded
+
+
 def grade(store, client):
     n_bets = settle_bets(store, client)
     n_mkts, changes = learn_from_markets(store, client)
     n_decisions = grade_decision_audits(store, client)
+    n_combos = grade_combo_predictions(store, client)
     monitor_model(store)
-    log.info("graded %d bets, %d markets, %d decision snapshots, weight changes: %s", n_bets, n_mkts, n_decisions,
+    log.info("graded %d bets, %d markets, %d decision snapshots, %d combo forecasts, weight changes: %s", n_bets, n_mkts, n_decisions, n_combos,
              json.dumps({k: [round(a, 3), round(b, 3)] for k, (a, b) in changes.items()}))
-    return {"bets": n_bets, "markets": n_mkts, "weight_changes": changes}
+    return {"bets": n_bets, "markets": n_mkts, "combo_forecasts": n_combos, "weight_changes": changes}
