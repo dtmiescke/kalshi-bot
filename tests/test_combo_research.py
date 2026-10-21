@@ -3,7 +3,7 @@ import tempfile
 import unittest
 
 from bot.storage import Store
-from bot.combo_research import _market_ask, combo_ranking_score, conservative_leg_probability, score_combo_probabilities
+from bot.combo_research import _market_ask, combo_audit_cutoff_ts, combo_ranking_score, conservative_leg_probability, score_combo_probabilities
 
 
 class TestComboResearch(unittest.TestCase):
@@ -81,6 +81,15 @@ class TestComboResearch(unittest.TestCase):
             store.record_combo_prediction({**row, "ts": 500, "predicted_yes": 0.99})
             self.assertEqual(store.q("SELECT predicted_yes FROM combo_prediction_audit")[0]["predicted_yes"], 0.45)
             self.assertEqual(store.combo_prediction_summary()[0]["markets"], 1)
+
+    def test_combo_audit_cutoff_requires_a_fixed_lead_time(self):
+        from datetime import datetime, timezone
+        close = "2026-10-21T18:00:00Z"
+        expected = int(datetime(2026, 10, 21, 17, 55, tzinfo=timezone.utc).timestamp())
+        self.assertEqual(combo_audit_cutoff_ts(close, 300), expected)
+        self.assertIsNone(combo_audit_cutoff_ts(None, 300))
+        self.assertIsNone(combo_audit_cutoff_ts("not-a-timestamp", 300))
+        self.assertEqual(combo_audit_cutoff_ts("2026-10-21T18:00:00", 300), expected)
 
     def test_uses_real_asks_or_mirrors_opposite_bid(self):
         self.assertEqual(_market_ask({"yes_ask_dollars": "0.4200"}, "yes"), 0.42)
