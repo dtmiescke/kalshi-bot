@@ -916,6 +916,12 @@ class Engine:
             self._record_decision(snap, readings, "rejected", why, prob, conf)
             self._skip(summary, why)
             return None
+        # Preserve any strategy-specific limits so the final execution-boundary
+        # recheck cannot accidentally loosen a stricter caller's budget.
+        plan["execution_min_edge"] = float(min_edge if min_edge is not None else self.s.min_edge)
+        plan["execution_max_per_bet"] = float(
+            max_per_bet if max_per_bet is not None else self.s.max_per_bet
+        )
         self._record_decision(snap, readings, "candidate", "passed deterministic risk checks",
                               prob, conf, side=plan["side"], market_price=plan["price"], edge=plan["edge"])
         return snap, plan, readings, prob, conf
@@ -947,8 +953,14 @@ class Engine:
             is_crypto = str(snap.get("series", "")).endswith("15M")
             fresh_plan, why = risk.decide(
                 self.s, self.store, snap, prob, conf, fresh_book,
-                min_edge=self.s.crypto_min_edge if is_crypto else self.s.min_edge,
-                max_per_bet=self.s.crypto_max_per_bet if is_crypto else self.s.max_per_bet,
+                min_edge=plan.get(
+                    "execution_min_edge",
+                    self.s.crypto_min_edge if is_crypto else self.s.min_edge
+                ),
+                max_per_bet=plan.get(
+                    "execution_max_per_bet",
+                    self.s.crypto_max_per_bet if is_crypto else self.s.max_per_bet
+                ),
                 maker=False,
             )
             if not fresh_plan:
