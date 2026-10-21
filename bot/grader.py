@@ -89,7 +89,7 @@ def learn_from_markets(store, client, max_fetch=150):
             continue
         g = {r["signal"]: r["prob"] for r in rows}
         g["_outcome"] = y
-        g["_domain"] = brain.domain_of(t)
+        g["_domain"] = brain.learning_domain_of(m.get("series_ticker") or t)
         graded.append(g)
         for r in rows:
             store.x("INSERT INTO signal_grades VALUES(?,?,?,?,?,?,?,?)",
@@ -98,7 +98,10 @@ def learn_from_markets(store, client, max_fetch=150):
         store.x("INSERT OR IGNORE INTO graded_markets VALUES(?,?,?,?)",
                 (t, now, y, m.get("event_ticker", "")))
     changes = {}
-    for dom in ("sports", "crypto"):
+    # Learn independently by identifiable league. Unknown leagues stay in the
+    # shared sports bucket; crypto remains isolated from all sports weights.
+    domains = sorted({g["_domain"] for g in graded})
+    for dom in domains:
         batch = [g for g in graded if g["_domain"] == dom]
         if batch:
             changes.update({f"{k}@{dom}": v for k, v in brain.learn(store, batch, dom).items()})
