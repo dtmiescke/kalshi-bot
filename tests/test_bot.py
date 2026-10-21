@@ -136,12 +136,17 @@ class TestEndToEnd(unittest.TestCase):
                 ts, mode, ticker, event, series, side, price, contracts, stake, fee, status, result, pnl = row
                 store.x("INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,stake,fee,status,result,pnl,graded_ts) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (ts, mode, ticker, event, series, side, price, contracts, stake, fee, status, result, pnl, int(time.time()) if status == "graded" else None))
+            store.x("UPDATE bets SET exit_ts=?, exit_price=? WHERE ticker='T3'",
+                    (int(time.time()) - 10, 0.60))
             page = dashboard.build(store, s, live_path=os.path.join(d, "missing.json"), briefing_path=os.path.join(d, "missing.txt"))
             self.assertIn("Overall · settled · won · win %", page)
             self.assertIn("Today · settled · won · win %", page)
             self.assertIn("2 · 1 · 50.0%", page)
             self.assertIn("All completed bets (3)", page)
-            self.assertIn("SOLD", page)
+            self.assertIn("SOLD EARLY", page)
+            self.assertIn("WON", page)
+            self.assertIn("LOST", page)
+            self.assertIn("exit $0.60", page)
             self.assertIn("T1", page)
 
     def test_cycle_bets_grades_and_learns(self):
