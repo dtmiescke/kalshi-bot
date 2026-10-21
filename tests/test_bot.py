@@ -98,6 +98,22 @@ class TestMath(unittest.TestCase):
         self.assertEqual(a["yes"][0][0], 0.55)
         self.assertEqual(a["no"][0][0], 0.46)
 
+    def test_calibration_uses_yes_probability_and_canonical_audits(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = Store(os.path.join(d, "calibration.sqlite"))
+            for i in range(10):
+                store.add_decision_audit({
+                    "ts": 100 + i, "ticker": f"T{i}", "event_ticker": f"E{i}",
+                    "series": "KXNBAGAME", "decision": "rejected", "reason": "test",
+                    "side": "no", "market_price": 0.25, "model_prob": 0.75,
+                    "side_prob": 0.25, "edge": 0.0, "confidence": 0.7,
+                })
+                store.grade_decision_audit(f"T{i}", 0, 1000, cutoff_ts=100 + i)
+            table = brain.calibration_table(store, domain="sports")
+            self.assertEqual(table[7]["n"], 10)
+            self.assertAlmostEqual(table[7]["predicted"], 0.75)
+            self.assertEqual(table[7]["actual"], 0.0)
+
     def test_blend_moves_toward_strong_signal(self):
         rs = [Reading("kalshi_market", 0.55, 1.0), Reading("book_consensus", 0.62, 1.0)]
         p, _ = brain.blend(rs, brain.DEFAULT_WEIGHTS)
