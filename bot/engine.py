@@ -53,6 +53,13 @@ def _series_sport(series, metadata=None):
     return "other"
 
 
+EXCLUDED_SPORT_CATEGORIES = {"mma", "boxing", "tennis", "motorsports", "golf", "esports"}
+
+
+def _sports_excluded(series, metadata=None):
+    return _series_sport(series, metadata) in EXCLUDED_SPORT_CATEGORIES
+
+
 def iso_to_ts(s):
     try:
         return int(datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp())
@@ -318,7 +325,7 @@ class Engine:
                     if not series:
                         event_ticker = str(ev.get("event_ticker") or "")
                         series = next((known for known in catalog if event_ticker.startswith(known + "-")), None)
-                    if not series or series not in catalog:
+                    if not series or series not in catalog or _sports_excluded(series, catalog.get(series)):
                         continue
                     series_map[series] = _series_sport(series, catalog.get(series))
                     events_by_series.setdefault(series, []).append(ev)
@@ -333,7 +340,7 @@ class Engine:
         elif sports and getattr(self.s, "sports_mode", "all") == "manual":
             selected = selected or set()
             series_map = {series: SPORTS.get(series, _series_sport(series))
-                          for series in selected}
+                          for series in selected if not _sports_excluded(series)}
             self.store.set_kv("sports_catalog_health", {
                 "ts": now, "series_selected": sorted(selected), "mode": "manual"})
         else:
