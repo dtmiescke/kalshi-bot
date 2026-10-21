@@ -68,7 +68,7 @@ def export_csv(store):
 
 def build(store, settings, live_path="data/live_summary.json", briefing_path="data/BRIEFING.txt"):
     now = time.time()
-    acct = store.account(settings.bankroll)
+    acct = store.account(settings.bankroll, mode=settings.mode)
     ok, why = guard.status(store, settings.bankroll, mode=settings.mode)
     health = store.get_kv("kalshi_health") or {}
     live = {}
