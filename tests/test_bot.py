@@ -485,6 +485,16 @@ class TestAdvanced(unittest.TestCase):
 
 
 class TestBacktestAndDomains(unittest.TestCase):
+    def test_backtest_weights_are_reconstructed_as_of_decision_time(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = Store(os.path.join(d, "weights.sqlite"))
+            store.x("INSERT INTO weight_history VALUES(?,?,?,?)",
+                    (100 * 1_000_000_000, "book_consensus", 2.0, "past"))
+            store.x("INSERT INTO weight_history VALUES(?,?,?,?)",
+                    (200 * 1_000_000_000, "book_consensus", 9.0, "future"))
+            weights = backtest._weights_as_of(store, "sports", 150)
+            self.assertEqual(weights["book_consensus"], 2.0)
+
     def test_backtest_and_separate_learning(self):
         from bot import backtest
         with tempfile.TemporaryDirectory() as d:
