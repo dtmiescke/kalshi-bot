@@ -301,7 +301,7 @@ class Engine:
         held = {b["event_ticker"] for b in self.store.open_bets()}
         if sports and getattr(self.s, "combos_enabled", False):
             from . import combo_research
-            summary["combos"] = combo_research.scan(self.data, self.store)
+            summary["combos"] = combo_research.scan(self.data, self.store, settings=self.s)
         weights = brain.get_weights(self.store, "sports")
         self.betting_ok, why = guard.status(self.store, self.s.bankroll)
         summary["betting"] = why
