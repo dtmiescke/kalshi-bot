@@ -86,7 +86,7 @@ def _iso_to_ts(value):
             return None
 
 def _clean(value, limit=4000):
-    return re.sub(r"\\s+", " ", str(value or "")).strip()[:limit]
+    return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
 
 def _request(url):
     response = requests.get(url, headers={"User-Agent": USER_AGENT, "Accept": "application/rss+xml, application/json, */*"},
