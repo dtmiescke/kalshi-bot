@@ -6,6 +6,7 @@ import os
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 
 from bot import brain, risk
@@ -148,6 +149,26 @@ class TestEndToEnd(unittest.TestCase):
             self.assertIn("LOST", page)
             self.assertIn("exit $0.60", page)
             self.assertIn("T1", page)
+
+    def test_dashboard_daily_win_rate_uses_central_time(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = Settings()
+            s.db_path = os.path.join(d, "t.db")
+            store = Store(s.db_path)
+            # At 04:30 UTC it is still 23:30 the prior day in Central time.
+            now_ts = datetime(2026, 10, 21, 4, 30, tzinfo=timezone.utc).timestamp()
+            settled_ts = datetime(2026, 10, 20, 23, 30, tzinfo=timezone.utc).timestamp()
+            store.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,
+                        contracts,stake,fee,status,result,pnl,graded_ts)
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (settled_ts - 3600, "paper", "TZ1", "E", "KXNBAGAME", "yes",
+                     0.5, 1, 0.5, 0.01, "graded", "yes", 0.49, int(settled_ts)))
+            with patch.dict(os.environ, {"BOT_TIMEZONE": "America/Chicago"}):
+                with patch("bot.dashboard.time.time", return_value=now_ts):
+                    page = dashboard.build(store, s,
+                        live_path=os.path.join(d, "missing.json"),
+                        briefing_path=os.path.join(d, "missing.txt"))
+            self.assertIn("Today · settled · won · win %</div><div class=\"v\">1 · 1 · 100.0%", page)
 
     def test_cycle_bets_grades_and_learns(self):
         with tempfile.TemporaryDirectory() as d:
