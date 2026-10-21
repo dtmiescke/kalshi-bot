@@ -90,14 +90,19 @@ def decision_cutoff(ticker, start):
 
 
 def get_weights(store, domain=None):
-    """Defaults, overridden by learned weights. With a domain, that domain's
-    own learned weights (stored as 'signal@domain') take priority."""
+    """Merge defaults, shared domain weights, then the most specific league weights.
+
+    A league inherits broad sports learning until it has its own evidence, then
+    its own learned values override the shared baseline signal by signal.
+    """
     w = dict(DEFAULT_WEIGHTS)
     learned = store.current_weights()
     w.update({k: v for k, v in learned.items() if "@" not in k})
     if domain:
-        suffix = "@" + domain
-        w.update({k[:-len(suffix)]: v for k, v in learned.items() if k.endswith(suffix)})
+        broad = "crypto" if domain == "crypto" else "sports"
+        for bucket in (broad, domain):
+            suffix = "@" + bucket
+            w.update({k[:-len(suffix)]: v for k, v in learned.items() if k.endswith(suffix)})
     return w
 
 
