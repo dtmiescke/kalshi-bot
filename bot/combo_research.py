@@ -6,6 +6,7 @@ to a distinct underlying event, and the actual combo market exposes a usable ask
 """
 import json
 import time
+from datetime import datetime
 
 from . import brain, risk
 from .signals.base import Reading
@@ -164,6 +165,23 @@ def _excluded(event, market, legs):
     return any(term in text for term in EXCLUDED_TERMS)
 
 
+def combo_audit_cutoff_ts(close_time, lead_seconds=300):
+    """Return the last timestamp at which a combo forecast may be recorded.
+
+    A fixed lead-time keeps the evaluation out-of-sample: stale exchange
+    listings cannot refresh a forecast after close, and forecasts near the
+    outcome are not compared with much earlier candidates. Missing/invalid
+    close times are not safe for audit grading.
+    """
+    if not close_time:
+        return None
+    try:
+        close_ts = datetime.fromisoformat(str(close_time).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return int(close_ts - max(0, int(lead_seconds)))
+
+
 def scan(client, store, settings=None, max_events=2000, max_age_s=7200):
     now = int(time.time())
     fee_rate = float(getattr(settings, "taker_fee_rate", 0.07))
@@ -287,16 +305,26 @@ def scan(client, store, settings=None, max_events=2000, max_age_s=7200):
             predicted_yes = None
             if scored.get("independence_product") is not None:
                 predicted_yes = max(0.0, min(1.0, float(scored["independence_product"])))
-            store.record_combo_prediction({
-                "ticker": mticker, "ts": now, "event_ticker": ticker,
-                "leg_count": len(legs), "side": best.get("side"),
-                "market_price": best.get("ask"), "predicted_yes": predicted_yes,
-                "predicted_side_prob": best.get("conservative_win_probability"),
-                "market_yes_proxy": yes_mid, "fee": best.get("fee_per_contract"),
-                "expected_profit": best.get("expected_profit_per_contract"),
-                "eligible": item.get("eligible"), "ranking_score": item.get("ranking_score"),
-                "legs": leg_details,
-            })
+            audit_close_time = market.get("close_time") or event.get("close_time")
+            audit_lead_seconds = int(getattr(settings, "combo_audit_lead_seconds", 300))
+            audit_cutoff = combo_audit_cutoff_ts(audit_close_time, audit_lead_seconds)
+            item["audit_snapshot_allowed"] = bool(audit_cutoff is not None and now < audit_cutoff)
+            item["audit_cutoff_ts"] = audit_cutoff
+            if item["audit_snapshot_allowed"]:
+                store.record_combo_prediction({
+                    "ticker": mticker, "ts": now, "event_ticker": ticker,
+                    "leg_count": len(legs), "side": best.get("side"),
+                    "market_price": best.get("ask"), "predicted_yes": predicted_yes,
+                    "predicted_side_prob": best.get("conservative_win_probability"),
+                    "market_yes_proxy": yes_mid, "fee": best.get("fee_per_contract"),
+                    "expected_profit": best.get("expected_profit_per_contract"),
+                    "eligible": item.get("eligible"), "ranking_score": item.get("ranking_score"),
+                    "legs": leg_details,
+                })
+            else:
+                reason = ("missing_close_time_for_audit" if audit_cutoff is None
+                          else "inside_combo_audit_lead_time")
+                skipped[reason] = skipped.get(reason, 0) + 1
             event_row["ranked_markets"].append(item)
             if item.get("best"):
                 ranked.append({**item, "event_ticker": ticker, "event_title": event_row["title"]})
