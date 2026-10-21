@@ -50,6 +50,10 @@ CRYPTO_15M = {
     "KXSOL15M": "SOL-USD",
 }
 
+# Sports selection is environment/config driven; it does not require UI changes.
+# SPORTS_MODE=all discovers the Kalshi sports catalog; manual uses comma-separated tickers.
+# COMBOS_ENABLED stays OFF until a separate supported-combo execution path is validated.
+
 # Sharper books get more weight in the consensus. Unknown books get weight 1.0.
 BOOK_WEIGHTS = {
     "pinnacle": 3.0,
@@ -85,6 +89,20 @@ class Settings:
 
     # --- storage ------------------------------------------------------------
     db_path: str = field(default_factory=lambda: _env("BOT_DB", "data/bot.sqlite"))
+
+    # --- sports intelligence and selection ---------------------------------
+    sports_mode: str = field(default_factory=lambda: _env("SPORTS_MODE", "all").strip().lower())
+    sports_selected: str = field(default_factory=lambda: _env("SPORTS_SELECTED", "").strip())
+    combos_enabled: bool = field(default_factory=lambda: _env("COMBOS_ENABLED", "no").strip().lower() in ("yes", "true", "1"))
+    combo_max_legs: int = field(default_factory=lambda: _env_int("COMBO_MAX_LEGS", 3))
+    combo_min_edge: float = field(default_factory=lambda: _env_pct("COMBO_MIN_EDGE", 6))
+
+    def selected_series(self):
+        if self.sports_mode == "all":
+            return None
+        if self.sports_mode != "manual":
+            raise ValueError("SPORTS_MODE must be all or manual")
+        return {item.strip().upper() for item in self.sports_selected.split(",") if item.strip()}
 
     # --- data budget --------------------------------------------------------
     # The Odds API free tier is ~500 credits/month. One h2h call per sport costs 1.
@@ -162,6 +180,12 @@ class Settings:
         return _env("KALSHI_DATA_URL", KALSHI_URLS["production"]).rstrip("/")
 
     def validate(self):
+        if self.sports_mode not in ("all", "manual"):
+            raise ValueError("SPORTS_MODE must be all/manual")
+        if not 2 <= self.combo_max_legs <= 10:
+            raise ValueError("COMBO_MAX_LEGS must be between 2 and 10")
+        if not 0 < self.combo_min_edge < 1:
+            raise ValueError("COMBO_MIN_EDGE must be between 0 and 1")
         if self.mode not in ("paper", "demo", "live"):
             raise ValueError(f"BOT_MODE must be paper/demo/live, got {self.mode!r}")
         if self.mode == "live" and not self.live_confirmed:
