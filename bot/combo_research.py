@@ -11,11 +11,9 @@ from datetime import datetime, timezone
 from . import brain, risk
 from .signals.base import Reading
 
-EXCLUDED_TERMS = (
-    "combat sports", "mma", "ufc", "boxing", "tennis", "golf", "pga", "lpga",
-    "motorsport", "formula 1", "formula-one", "nascar", "indycar", "esports",
-    "e-sports", "league of legends", "counter-strike", "dota",
-)
+# No sport is blanket-excluded from combo research. Each leg must still pass
+# freshness, evidence, distinct-event, price, fee, and uncertainty checks.
+EXCLUDED_TERMS = ()
 
 
 def _price(value):
@@ -306,8 +304,13 @@ def scan(client, store, settings=None, max_events=2000, max_age_s=7200):
             if yb is not None and ya is not None and yb <= ya:
                 yes_mid = round((yb + ya) / 2, 4)
             predicted_yes = None
-            if scored.get("independence_product") is not None:
-                predicted_yes = max(0.0, min(1.0, float(scored["independence_product"])))
+            if (scored.get("independence_product") is not None
+                    and scored.get("uncertainty_haircut") is not None):
+                # Grade the same conservative probability used for decision-making,
+                # not the optimistic raw independence product.
+                predicted_yes = max(0.0, min(
+                    1.0, float(scored["independence_product"])
+                    - float(scored["uncertainty_haircut"])))
             audit_close_time = market.get("close_time") or event.get("close_time")
             audit_lead_seconds = int(getattr(settings, "combo_audit_lead_seconds", 300))
             audit_cutoff = combo_audit_cutoff_ts(audit_close_time, audit_lead_seconds)
