@@ -163,13 +163,15 @@ class FakeCryptoKalshi(FakeKalshi):
     prices UP at 0.60 -> the model should see a big edge and buy YES."""
     def __init__(self):
         super().__init__(datetime.now(timezone.utc))
-        self.close = datetime.now(timezone.utc) + timedelta(minutes=6)
+        now = datetime.now(timezone.utc)
+        self.close = now + timedelta(minutes=6)
+        self.event_ticker = "KXBTC15M-" + now.strftime("%y%b%d%H%M").upper()
 
     def sports_events(self, series):
         if series != "KXBTC15M":
             return []
-        return [{"event_ticker": "KXBTC15M-26OCT191830", "series_ticker": series,
-                 "markets": [{"ticker": "KXBTC15M-26OCT191830-30", "status": "active",
+        return [{"event_ticker": self.event_ticker, "series_ticker": series,
+                 "markets": [{"ticker": self.event_ticker + "-30", "status": "active",
                               "floor_strike": 100000.0, "yes_bid": 59, "yes_ask": 60,
                               "close_time": iso(self.close)}]}]
 
