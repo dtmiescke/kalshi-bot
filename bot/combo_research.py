@@ -32,11 +32,11 @@ def _price(value):
 
 def _market_ask(market, side):
     """Use an actual displayed ask; if absent, mirror the opposite-side bid."""
-    ask = _price(market.get(f"{side}_ask_dollars", market.get(f"{side}_ask")))
+    ask = _price(market.get(f"{side}_ask_dollars") or market.get(f"{side}_ask"))
     if ask is not None:
         return ask
     opposite = "no" if side == "yes" else "yes"
-    bid = _price(market.get(f"{opposite}_bid_dollars", market.get(f"{opposite}_bid")))
+    bid = _price(market.get(f"{opposite}_bid_dollars") or market.get(f"{opposite}_bid"))
     return round(1.0 - bid, 4) if bid is not None else None
 
 
@@ -272,8 +272,8 @@ def scan(client, store, settings=None, max_events=2000, max_age_s=7200):
             # Once graded, Store refuses to overwrite it.
             best = item.get("best") or {}
             yes_mid = None
-            yb = _price(market.get("yes_bid_dollars", market.get("yes_bid")))
-            ya = _price(market.get("yes_ask_dollars", market.get("yes_ask")))
+            yb = _price(market.get("yes_bid_dollars") or market.get("yes_bid"))
+            ya = _price(market.get("yes_ask_dollars") or market.get("yes_ask"))
             if yb is not None and ya is not None and yb <= ya:
                 yes_mid = round((yb + ya) / 2, 4)
             predicted_yes = None
