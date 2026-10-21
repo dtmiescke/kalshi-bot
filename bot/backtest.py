@@ -70,6 +70,7 @@ def run(store, fee_rate=0.07, thresholds=THRESHOLDS):
             # current learned weights would leak future settlements into the backtest.
             w = _weights_as_of(store, dom, c["cutoff_ts"])
             p, conf = brain.blend(c["readings"], w)
+            p = brain.calibrate(p, store, domain=dom, as_of_ts=c["cutoff_ts"])
             model_brier += (p - c["y"]) ** 2
             market_brier += (c["mid"] - c["y"]) ** 2
             for side, pw, ask in (("yes", p, c["mid"] + c["spread"] / 2),
