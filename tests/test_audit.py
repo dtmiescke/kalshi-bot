@@ -37,6 +37,18 @@ class TestAudit(unittest.TestCase):
     def tearDown(self):
         self.d.cleanup()
 
+    def test_account_exposure_and_stakes_are_isolated_by_mode(self):
+        bet(self.st, mode="paper", ticker="PAPER-OPEN", event_ticker="PAPER-E")
+        bet(self.st, mode="live", ticker="LIVE-OPEN", event_ticker="LIVE-E")
+        live = self.st.account(100.0, mode="live")
+        self.assertEqual(live["open_positions"], 1)
+        self.assertAlmostEqual(live["open_cost"], 5.2)
+        self.assertAlmostEqual(live["cash"], 94.8)
+        self.assertEqual(self.st.staked_since(0, mode="live"), 5.0)
+        self.assertEqual(self.st.staked_on_event("PAPER-E", mode="live"), 0)
+        self.assertFalse(self.st.has_open_event_bet("PAPER-E", mode="live"))
+        self.assertTrue(self.st.has_open_event_bet("PAPER-E", mode="paper"))
+
     def test_earned_size_uses_only_selected_account_mode(self):
         paper_id = bet(self.st, mode="paper", ticker="PAPER-LOSS")
         live_id = bet(self.st, mode="live", ticker="LIVE-WIN")
