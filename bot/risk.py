@@ -85,12 +85,11 @@ def staked_on_window(store, event_ticker):
     return r[0]["s"]
 
 
-def earned_size(store, mkt, full_at=200, floor=0.25):
-    """Start small, size up only with proof. 25% of normal size with no record,
-    scaling to 100% after `full_at` graded bets in this domain — and only if
-    those bets are net profitable. A losing record stays at the floor."""
+def earned_size(store, mkt, full_at=200, floor=0.25, mode=None):
+    """Size up only on profitable graded history from this account mode/domain."""
     dom = brain.domain_of(mkt.get("series") or mkt.get("ticker"))
-    rows = store.q("SELECT series, pnl FROM bets WHERE status='graded'")
+    mode = mode or os.environ.get("BOT_MODE", "paper")
+    rows = store.q("SELECT series, pnl FROM bets WHERE status='graded' AND mode=?", (mode,))
     mine = [r for r in rows if brain.domain_of(r["series"]) == dom]
     if not mine or sum(r["pnl"] or 0 for r in mine) <= 0:
         return floor
@@ -144,7 +143,7 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
     if edge < min_edge:
         return None, f"best edge {edge:+.1%} below {min_edge:.0%}"
 
-    earned = earned_size(store, mkt)
+    earned = earned_size(store, mkt, mode=s.mode)
     if s.fixed_bet > 0:
         # A fixed target is still scaled by the earned-size safety ramp.
         want = s.fixed_bet * earned
