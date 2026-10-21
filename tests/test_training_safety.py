@@ -54,6 +54,51 @@ class TestTrainingSafety(unittest.TestCase):
         self.assertEqual(saved[0]["stake"], 1.00)
         self.assertEqual(saved[0]["fee"], 0.01)
 
+    def test_partial_two_leg_arb_fill_unwinds_only_filled_contracts(self):
+        for method in ("try_arb", "execute_ladder"):
+            with self.subTest(method=method):
+                obj = engine.Engine.__new__(engine.Engine)
+                obj.s = SimpleNamespace(mode="live", max_per_day=100.0,
+                                        max_per_game=100.0, taker_fee_rate=0.07)
+                obj.store = mock.Mock()
+                obj.store.has_open_event_bet.return_value = False
+                obj.store.staked_since.return_value = 0.0
+                low_book = {"yes": [(0.25, 100)], "no": [(0.70, 2)]}
+                high_book = {"yes": [(0.60, 2)], "no": [(0.55, 100)]}
+                obj.data = SimpleNamespace(orderbook=lambda ticker: (
+                    low_book if ticker in ("LOW", "A") else high_book
+                ))
+                calls = {"buy": 0, "sells": []}
+
+                def buy(ticker, side, qty, price):
+                    calls["buy"] += 1
+                    return {"order_id": "O1", "fill_count": 1}
+
+                def sell(ticker, side, qty, price):
+                    calls["sells"].append((ticker, side, qty, price))
+                    return {"fill_count": qty}
+
+                obj.trade = SimpleNamespace(place_limit_buy=buy, place_limit_sell=sell)
+                summary = {"bets": 0, "arbs": []}
+                with mock.patch("bot.engine.alerts.send"):
+                    if method == "try_arb":
+                        result = obj.try_arb(
+                            {"event_ticker": "EV", "series_ticker": "KXNBAGAME"},
+                            [{"ticker": "A", "yes_sub_title": "A"},
+                             {"ticker": "B", "yes_sub_title": "B"}],
+                            summary, 123
+                        )
+                        self.assertFalse(result)
+                    else:
+                        result = obj.execute_ladder(
+                            {"low": "LOW", "high": "HIGH"}, 123, summary
+                        )
+                        self.assertIsNone(result)
+                self.assertEqual(calls["buy"], 1)
+                self.assertEqual(calls["sells"], [("A" if method == "try_arb" else "LOW",
+                                                   "yes", 1, 0.25)])
+                obj.store.add_bet.assert_not_called()
+
     def test_train_command_exits_nonzero_when_data_is_insufficient(self):
         settings = SimpleNamespace(
             db_path="unused.sqlite",
