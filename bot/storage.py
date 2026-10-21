@@ -119,22 +119,37 @@ class Store:
             row.get("edge"), row.get("confidence"),
             json.dumps(row.get("signals", {}), ensure_ascii=False, default=str)))
 
-    def grade_decision_audit(self, ticker, outcome, settled_ts=None):
-        """Grade recorded snapshots without rewriting what the bot knew at decision time."""
+    def grade_decision_audit(self, ticker, outcome, settled_ts=None, cutoff_ts=None):
+        """Settle every audit row but score only the canonical pre-event snapshot.
+
+        With cutoff_ts supplied, only the latest forecast at/before that cutoff
+        receives Brier/P&L metrics. Later scans are retained as settled audit
+        history but left unscored so one market cannot inflate the sample.
+        """
         settled_ts = int(settled_ts or time.time())
         with self.lock:
-            rows = self.db.execute("SELECT id, model_prob, market_price, side, decision FROM decision_audit WHERE ticker=? AND outcome IS NULL", (ticker,)).fetchall()
+            rows = self.db.execute(
+                "SELECT id, ts, model_prob, market_price, side, decision FROM decision_audit "
+                "WHERE ticker=? AND outcome IS NULL ORDER BY ts, id", (ticker,)).fetchall()
+            if cutoff_ts is None:
+                scored_ids = {row["id"] for row in rows if row["model_prob"] is not None}
+            else:
+                eligible = [row for row in rows
+                            if row["model_prob"] is not None and row["ts"] <= int(cutoff_ts)]
+                scored_ids = {max(eligible, key=lambda row: (row["ts"], row["id"]))["id"]} if eligible else set()
+            y = int(outcome)
             for row in rows:
-                if row["model_prob"] is None:
-                    continue
-                y = int(outcome)
-                brier = (float(row["model_prob"]) - y) ** 2
-                pnl = None
-                if row["decision"] == "candidate" and row["side"] in ("yes", "no") and row["market_price"] is not None:
-                    p = float(row["market_price"])
-                    won = (row["side"] == "yes" and y == 1) or (row["side"] == "no" and y == 0)
-                    pnl = (1 - p) if won else -p
-                self.db.execute("UPDATE decision_audit SET outcome=?, brier=?, hypothetical_pnl=?, settled_ts=? WHERE id=?", (y, brier, pnl, settled_ts, row["id"]))
+                brier = pnl = None
+                if row["id"] in scored_ids:
+                    brier = (float(row["model_prob"]) - y) ** 2
+                    if (row["decision"] == "candidate" and row["side"] in ("yes", "no")
+                            and row["market_price"] is not None):
+                        p = float(row["market_price"])
+                        won = (row["side"] == "yes" and y == 1) or (row["side"] == "no" and y == 0)
+                        pnl = (1 - p) if won else -p
+                self.db.execute(
+                    "UPDATE decision_audit SET outcome=?, brier=?, hypothetical_pnl=?, settled_ts=? WHERE id=?",
+                    (y, brier, pnl, settled_ts, row["id"]))
             self.db.commit()
             return len(rows)
 
