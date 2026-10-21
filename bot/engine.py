@@ -3,6 +3,7 @@ import json
 import math
 import os
 import logging
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -23,6 +24,10 @@ from .signals import market_signals as ms
 from .signals import schedule as sched
 
 log = logging.getLogger("bot")
+
+
+# Serialize final risk recheck, order placement, and ledger update across async reviewers.
+_EXECUTION_LOCK = threading.RLock()
 
 
 def _series_sport(series, metadata=None):
@@ -905,6 +910,11 @@ class Engine:
                               prob, conf, side=plan["side"], market_price=plan["price"], edge=plan["edge"])
         return snap, plan, readings, prob, conf
     def place(self, snap, plan, readings, prob, conf, summary, now, executed=None):
+        """Serialize execution so concurrent reviewers cannot spend the same risk budget."""
+        with _EXECUTION_LOCK:
+            return self._place_locked(snap, plan, readings, prob, conf, summary, now, executed)
+
+    def _place_locked(self, snap, plan, readings, prob, conf, summary, now, executed=None):
         """Send (or simulate) the order and record the bet. `executed` = an order
         the live runner already filled as a resting maker order."""
         if not executed:
@@ -916,6 +926,26 @@ class Engine:
                 self._skip(summary, f"execution guard: {reason}")
                 log.warning("order blocked at execution boundary: %s", reason)
                 return
+            # Rebuild the plan against the latest book and latest account exposure.
+            # The lock makes the risk check + ledger update atomic among async reviewers.
+            try:
+                fresh_book = self.data.orderbook(snap["ticker"])
+            except Exception as exc:
+                self._skip(summary, f"execution recheck: orderbook unavailable ({exc})")
+                log.warning("execution recheck failed for %s: %s", snap["ticker"], exc)
+                return
+            is_crypto = str(snap.get("series", "")).endswith("15M")
+            fresh_plan, why = risk.decide(
+                self.s, self.store, snap, prob, conf, fresh_book,
+                min_edge=self.s.crypto_min_edge if is_crypto else self.s.min_edge,
+                max_per_bet=self.s.crypto_max_per_bet if is_crypto else self.s.max_per_bet,
+                maker=False,
+            )
+            if not fresh_plan:
+                self._skip(summary, f"execution recheck: {why}")
+                log.info("execution recheck blocked %s: %s", snap["ticker"], why)
+                return
+            plan = fresh_plan
         order_id = f"paper-{uuid.uuid4().hex[:10]}"
         if executed:
             order_id = executed.get("order_id", order_id)
