@@ -3,7 +3,7 @@ import tempfile
 import unittest
 
 from bot.storage import Store
-from bot.combo_research import _market_ask, combo_audit_cutoff_ts, combo_ranking_score, conservative_leg_probability, score_combo_probabilities
+from bot.combo_research import _market_ask, combo_audit_cutoff_ts, combo_ranking_score, conservative_leg_probability, conservative_yes_probability, score_combo_probabilities
 
 
 class TestComboResearch(unittest.TestCase):
@@ -81,6 +81,13 @@ class TestComboResearch(unittest.TestCase):
             store.record_combo_prediction({**row, "ts": 500, "predicted_yes": 0.99})
             self.assertEqual(store.q("SELECT predicted_yes FROM combo_prediction_audit")[0]["predicted_yes"], 0.45)
             self.assertEqual(store.combo_prediction_summary()[0]["markets"], 1)
+
+    def test_combo_grading_probability_uses_uncertainty_haircut(self):
+        self.assertEqual(conservative_yes_probability({
+            "independence_product": 0.60, "uncertainty_haircut": 0.06}), 0.54)
+        self.assertEqual(conservative_yes_probability({
+            "independence_product": 0.02, "uncertainty_haircut": 0.08}), 0.0)
+        self.assertIsNone(conservative_yes_probability({"independence_product": 0.6}))
 
     def test_combo_audit_cutoff_requires_a_fixed_lead_time(self):
         from datetime import datetime, timezone
