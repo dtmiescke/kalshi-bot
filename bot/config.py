@@ -186,6 +186,10 @@ class Settings:
     def validate(self):
         if self.sports_mode not in ("all", "manual"):
             raise ValueError("SPORTS_MODE must be all/manual")
+        if self.sports_mode == "manual" and not self.selected_series():
+            raise ValueError("SPORTS_MODE=manual requires at least one SPORTS_SELECTED series ticker")
+        if self.combo_audit_lead_seconds < 0:
+            raise ValueError("COMBO_AUDIT_LEAD_SECONDS must be non-negative")
         if not 3 <= self.combo_min_legs <= 8:
             raise ValueError("COMBO_MIN_LEGS must be between 3 and 8")
         if not self.combo_min_legs <= self.combo_max_legs <= 8:
