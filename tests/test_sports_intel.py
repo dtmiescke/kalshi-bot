@@ -47,6 +47,7 @@ class TestSportsIntelligence(unittest.TestCase):
         box = {
             "teams": [{"team": {"displayName": "Home Team"}, "statistics": [
                 {"name": "totalYards", "displayValue": "350"},
+                {"name": "rushingYards", "displayValue": "105"},
                 {"name": "turnovers", "displayValue": "1"},
             ]}],
             "players": [{"team": {"displayName": "Home Team"}, "statistics": [{
@@ -62,6 +63,8 @@ class TestSportsIntelligence(unittest.TestCase):
         self.assertEqual(profile["quarterbacks"][0]["name"], "Example QB")
         self.assertEqual(profile["quarterbacks"][0]["statistics"]["YDS"], "245")
         self.assertTrue(profile["data_quality"]["team_stats_available"])
+        self.assertIn("turnovers", profile["team_statistics"][0]["key_metrics"])
+        self.assertIn("rushing_yards", profile["team_statistics"][0]["key_metrics"])
         self.assertTrue(profile["data_quality"]["player_stats_available"])
         self.assertFalse(profile["data_quality"]["injury_data_available"])
         self.assertFalse(profile["lineups_confirmed"])
