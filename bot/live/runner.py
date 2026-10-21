@@ -461,7 +461,7 @@ class LiveRunner:
                     await asyncio.to_thread(self.poll_books, False, True)
                 last_poll = now
             if now - last_guard >= 60:
-                self.betting_ok, self.betting_why = guard.status(self.store, self.s.bankroll)
+                self.betting_ok, self.betting_why = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
                 asyncio.create_task(asyncio.to_thread(self.refresh_context))
                 last_guard = now
             for ticker, readings, ctx, plan in list(self.tick(now)):
