@@ -201,7 +201,7 @@ def _football_matchup_profile(event, box, raw, observed_at):
 
     team_rows = []
     metric_aliases = {
-        "total_yards": ("totalyards", "total yards", "yards"),
+        "total_yards": ("totalyards", "total yards"),
         "passing_yards": ("netpassingyards", "passingyards", "passing yards", "pass yards"),
         "rushing_yards": ("rushingyards", "rushing yards", "rush yards"),
         "turnovers": ("turnovers", "giveaways"),
@@ -226,10 +226,14 @@ def _football_matchup_profile(event, box, raw, observed_at):
                 stats[key] = _clean(value, 80)
         normalized_metrics = {}
         for metric, aliases in metric_aliases.items():
-            matches = [(key, value) for key, value in stats.items()
-                       if any(alias in key.replace("_", "").replace(" ", "") or
-                              alias.replace("_", "").replace(" ", "") in key.replace("_", "").replace(" ", "")
-                              for alias in aliases)]
+            matches = []
+            for key, value in stats.items():
+                normalized_key = key.replace("_", "").replace(" ", "").replace("-", "")
+                if any(normalized_key == alias.replace("_", "").replace(" ", "").replace("-", "")
+                       or (len(alias.replace("_", "").replace(" ", "").replace("-", "")) >= 7
+                           and alias.replace("_", "").replace(" ", "").replace("-", "") in normalized_key)
+                       for alias in aliases):
+                    matches.append((key, value))
             if matches:
                 normalized_metrics[metric] = [{"source_label": key, "value": value} for key, value in matches[:3]]
         team_rows.append({
