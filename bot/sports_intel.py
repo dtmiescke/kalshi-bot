@@ -321,7 +321,11 @@ def collect_event_news(store, events, max_events=12, now=None):
     budget = max(0, min(50, int(max_events)))
     if budget == 0:
         return {"queried": 0, "new_items": 0, "failures": 0}
-    for event in events:
+    def start_order(event):
+        stamp = _iso_to_ts(event.get("start_time") or event.get("commence_time")
+                           or event.get("strike_date") or event.get("date"))
+        return stamp if stamp and stamp >= now else now + 10 * 86400
+    for event in sorted(events, key=start_order):
         ticker = _clean(event.get("event_ticker") or event.get("ticker"), 180)
         if not ticker:
             continue
