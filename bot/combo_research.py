@@ -87,6 +87,25 @@ def score_combo_probabilities(leg_probabilities, yes_ask, no_ask,
     }
 
 
+def conservative_leg_probability(probability, confidence, signal_count=1):
+    """Shrink a raw leg forecast toward 50% unless confidence and signal diversity support it.
+
+    This is a deliberately conservative heuristic, not a learned calibration model.
+    Historical calibration is applied separately before this shrinkage.
+    """
+    try:
+        p = float(probability)
+        conf = max(0.0, min(1.0, float(confidence)))
+        n = max(0, int(signal_count))
+    except (TypeError, ValueError):
+        return 0.5
+    if not 0.0 < p < 1.0:
+        return 0.5
+    diversity = min(1.0, 0.70 + 0.10 * max(0, n - 1))
+    reliability = conf * diversity
+    return round(0.5 + (p - 0.5) * reliability, 6)
+
+
 def combo_ranking_score(leg_count, expected_profit, minimum_leg_confidence, min_edge):
     """Prefer 3-5 legs unless a longer combo has unusually strong evidence/value."""
     ev = float(expected_profit or 0.0)
@@ -204,11 +223,19 @@ def scan(client, store, settings=None, max_events=2000, max_age_s=7200):
                 if side not in ("yes", "no"):
                     missing = True
                     break
-                p_selected = forecast["prob_yes"] if side == "yes" else 1 - forecast["prob_yes"]
-                probabilities.append(max(0.001, min(0.999, p_selected)))
+                # Calibrate first, then shrink toward 50% when confidence or
+                # independent signal diversity is weak.
+                calibrated_yes = brain.calibrate(forecast["prob_yes"], store, "sports")
+                p_selected = calibrated_yes if side == "yes" else 1 - calibrated_yes
+                conservative_p = conservative_leg_probability(
+                    p_selected, forecast["confidence"], forecast["external_signal_count"])
+                probabilities.append(max(0.001, min(0.999, conservative_p)))
                 leg_details.append({
                     "market_ticker": lticker, "event_ticker": leg["event_ticker"],
-                    "side": side, "probability": round(p_selected, 4),
+                    "side": side, "raw_probability": round(p_selected, 4),
+                    "probability": round(conservative_p, 4),
+                    "probability_shrinkage": round(abs(p_selected - conservative_p), 4),
+                    "external_signal_count": forecast["external_signal_count"],
                     "confidence": round(forecast["confidence"], 3),
                     "signals": forecast["signals"], "latest_ts": forecast["latest_ts"],
                 })
@@ -219,6 +246,8 @@ def scan(client, store, settings=None, max_events=2000, max_age_s=7200):
             yes_ask, no_ask = _market_ask(market, "yes"), _market_ask(market, "no")
             scored = score_combo_probabilities(probabilities, yes_ask, no_ask, fee_rate, min_edge)
             min_confidence = min((x["confidence"] for x in leg_details), default=0.0)
+            mean_confidence = sum(x["confidence"] for x in leg_details) / len(leg_details)
+            min_signal_count = min((x["external_signal_count"] for x in leg_details), default=0)
             # Three-to-five-leg combos are preferred; 6-8 legs must earn their
             # way back into the top ranks through strong evidence and EV.
             best = scored.get("best") or {}
@@ -229,6 +258,8 @@ def scan(client, store, settings=None, max_events=2000, max_age_s=7200):
                 "ticker": mticker, "title": market.get("title") or market.get("subtitle") or "",
                 "leg_count": len(legs), "legs": leg_details,
                 "minimum_leg_confidence": round(min_confidence, 3),
+                "mean_leg_confidence": round(mean_confidence, 3),
+                "minimum_external_signal_count": min_signal_count,
                 **preference,
                 "yes_ask": yes_ask, "no_ask": no_ask, **scored,
                 "status": market.get("status"),
@@ -253,8 +284,8 @@ def scan(client, store, settings=None, max_events=2000, max_age_s=7200):
         "scanned_markets": sum(len(e["market_tickers"]) for e in rows),
         "ranked_count": len(ranked), "top_candidates": ranked[:25],
         "events": rows, "skipped": skipped, "execution_enabled": False,
-        "model": "independent-leg product with conservative uncertainty haircut and 3-5-leg preference",
-        "reason": "Scans all open multivariate markets returned within the bounded API batch, then ranks every qualifying 3-8-leg candidate. Three-to-five legs are preferred; 6-8 legs avoid the length penalty only with >=85% minimum leg confidence and exceptional conservative fee-adjusted EV. API coverage, freshness, correlation and joint-probability uncertainty remain limitations. Research only; no combo order is placed.",
+        "model": "historically calibrated, confidence-and-signal-diversity-shrunk leg probabilities; conservative joint haircut; 3-5-leg preference",
+        "reason": "Scans all open multivariate markets returned within the bounded API batch, then ranks every qualifying 3-8-leg candidate. Three-to-five legs are preferred; 6-8 legs avoid the length penalty only with >=85% minimum leg confidence and exceptional fee-adjusted EV. Leg forecasts are calibrated where enough historical data exists and shrunk toward 50% based on confidence and distinct external signal count. This is still a heuristic, not a validated joint-probability model. API coverage, freshness, correlation and outcome uncertainty remain limitations. Research only; no combo order is placed.",
     }
     store.set_kv("combo_research_health", result)
     return result
