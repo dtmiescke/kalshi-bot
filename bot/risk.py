@@ -118,8 +118,8 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
         # YES on Boston and NO on New York are the same bet; never double up
         return None, "already holding this game"
     is_crypto = str(mkt.get("series", "")).endswith("15M")
-    if is_crypto and store.q("SELECT 1 FROM bets WHERE event_ticker=? LIMIT 1",
-                             (mkt["event_ticker"],)):
+    if is_crypto and store.q("SELECT 1 FROM bets WHERE event_ticker=? AND mode=? LIMIT 1",
+                             (mkt["event_ticker"], s.mode)):
         # one entry per 15-minute window: after an early exit, re-buying the same
         # window just pays the spread and fees twice
         return None, "already traded this window"
