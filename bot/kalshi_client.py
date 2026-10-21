@@ -190,13 +190,8 @@ class KalshiClient:
             ticker = row.get("ticker")
             if not ticker:
                 continue
-            cats = row.get("categories") or []
-            tags = row.get("tags") or []
-            category_text = " ".join(str(v) for v in cats) + " " + str(row.get("category", ""))
-            tag_text = " ".join(str(v) for v in tags)
-            # Keep the API category filter as the primary source of truth.
-            if "sport" not in (category_text + " " + tag_text).lower():
-                continue
+            # The server-side category filter is the source of truth. Do not
+            # reject valid series just because a response omits category metadata.
             out[ticker] = row
         return out
 
