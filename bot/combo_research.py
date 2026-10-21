@@ -148,6 +148,7 @@ def _leg_forecast(store, ticker, now, max_age_s=7200):
     if prob is None:
         return None
     return {"prob_yes": prob, "confidence": confidence, "signals": sorted(r.name for r in readings),
+            "external_signal_count": len({r.name for r in readings if r.name != "kalshi_market"}),
             "latest_ts": max((int(row["ts"]) for row in rows), default=0)}
 
 
@@ -266,6 +267,28 @@ def scan(client, store, settings=None, max_events=2000, max_age_s=7200):
                 "close_time": market.get("close_time"),
                 "execution_enabled": False,
             }
+            # Keep one auditable observation per combo ticker. On each open-market
+            # scan, the latest pre-settlement forecast replaces the prior snapshot.
+            # Once graded, Store refuses to overwrite it.
+            best = item.get("best") or {}
+            yes_mid = None
+            yb = _price(market.get("yes_bid_dollars", market.get("yes_bid")))
+            ya = _price(market.get("yes_ask_dollars", market.get("yes_ask")))
+            if yb is not None and ya is not None and yb <= ya:
+                yes_mid = round((yb + ya) / 2, 4)
+            predicted_yes = None
+            if scored.get("independence_product") is not None:
+                predicted_yes = max(0.0, min(1.0, float(scored["independence_product"])))
+            store.record_combo_prediction({
+                "ticker": mticker, "ts": now, "event_ticker": ticker,
+                "leg_count": len(legs), "side": best.get("side"),
+                "market_price": best.get("ask"), "predicted_yes": predicted_yes,
+                "predicted_side_prob": best.get("conservative_win_probability"),
+                "market_yes_proxy": yes_mid, "fee": best.get("fee_per_contract"),
+                "expected_profit": best.get("expected_profit_per_contract"),
+                "eligible": item.get("eligible"), "ranking_score": item.get("ranking_score"),
+                "legs": leg_details,
+            })
             event_row["ranked_markets"].append(item)
             if item.get("best"):
                 ranked.append({**item, "event_ticker": ticker, "event_title": event_row["title"]})
@@ -285,6 +308,9 @@ def scan(client, store, settings=None, max_events=2000, max_age_s=7200):
         "ranked_count": len(ranked), "top_candidates": ranked[:25],
         "events": rows, "skipped": skipped, "execution_enabled": False,
         "model": "historically calibrated, confidence-and-signal-diversity-shrunk leg probabilities; conservative joint haircut; 3-5-leg preference",
+        "learning": {"table": "combo_prediction_audit", "graded_by": "actual Kalshi settlement",
+                     "summary_by_leg_count": store.combo_prediction_summary(),
+                     "note": "one latest snapshot per combo ticker; hypothetical P&L is not realized"},
         "reason": "Scans all open multivariate markets returned within the bounded API batch, then ranks every qualifying 3-8-leg candidate. Three-to-five legs are preferred; 6-8 legs avoid the length penalty only with >=85% minimum leg confidence and exceptional fee-adjusted EV. Leg forecasts are calibrated where enough historical data exists and shrunk toward 50% based on confidence and distinct external signal count. This is still a heuristic, not a validated joint-probability model. API coverage, freshness, correlation and outcome uncertainty remain limitations. Research only; no combo order is placed.",
     }
     store.set_kv("combo_research_health", result)
