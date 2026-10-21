@@ -88,6 +88,7 @@ def build(store, settings, live_path="data/live_summary.json", briefing_path="da
     today_win_pct = 100.0 * today_wins / len(today_settled) if today_settled else None
     today_win_pct_text = f"{today_win_pct:.1f}%" if today_win_pct is not None else "—"
     open_bets = store.q("SELECT * FROM bets WHERE status='open' ORDER BY ts DESC")
+    completed_bets = store.q("SELECT * FROM bets WHERE status IN ('graded','sold') ORDER BY COALESCE(graded_ts, ts) DESC")
     recent = store.q("SELECT * FROM bets WHERE status='graded' ORDER BY graded_ts DESC LIMIT 15")
 
     def last_quote(ticker):
@@ -107,6 +108,20 @@ def build(store, settings, live_path="data/live_summary.json", briefing_path="da
         f"<tr><td class='{'good' if (b['pnl'] or 0) > 0 else 'bad'}'><b>${(b['pnl'] or 0):+.2f}</b></td>"
         f"<td>{E(short(b['ticker']))}<div class='mut'>{E(b['side'].upper())} · {E(str(b['result']))}</div></td></tr>"
         for b in recent)
+
+    completed_rows = ""
+    for b in completed_bets:
+        result_label = str(b["result"] or b["status"]).upper()
+        pnl = float(b["pnl"] or 0)
+        closed_ts = b["graded_ts"] or b["ts"]
+        closed_at = time.strftime("%Y-%m-%d %H:%M", time.gmtime(closed_ts or 0))
+        completed_rows += (
+            f"<tr><td>{E(closed_at)} UTC</td>"
+            f"<td>{E(short(b['ticker']))}<div class='mut'>{E(str(b['mode']).upper())}</div></td>"
+            f"<td>{E(str(b['side']).upper())} · {b['contracts']} @ ${b['price']:.2f}</td>"
+            f"<td>{E(result_label)}</td>"
+            f"<td class='{'good' if pnl > 0 else 'bad' if pnl < 0 else ''}'><b>${pnl:+.2f}</b></td></tr>"
+        )
 
     coins = ""
     for s, c in (live.get("coins") or {}).items():
@@ -154,6 +169,7 @@ h1{{font-size:20px;margin:16px 0 4px}}h2{{font-size:13px;letter-spacing:.06em;te
 .grid{{display:grid;grid-template-columns:1fr 1fr;gap:10px}}.k{{color:var(--mut);font-size:12px}}.v{{font-size:20px;font-weight:600}}
 .good{{color:var(--good)}}.bad{{color:var(--bad)}}.warn{{color:var(--warn)}}
 .scroll{{overflow-x:auto}}table{{border-collapse:collapse;width:100%;font-size:13px}}td{{padding:6px 4px;border-top:1px solid var(--line);white-space:nowrap}}
+details{{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}}summary{{cursor:pointer;font-weight:600;padding:4px 0}}summary:focus-visible{{outline:2px solid var(--mut);outline-offset:3}}
 pre{{white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.5;margin:0}}
 td div.mut{{white-space:normal}}.mut{{color:var(--mut);font-size:12px}}a{{color:inherit}}
 </style></head><body>
@@ -175,6 +191,11 @@ td div.mut{{white-space:normal}}.mut{{color:var(--mut);font-size:12px}}a{{color:
 <tr><td class="k">Coin</td><td class="k">Price</td><td class="k">Regime</td><td class="k">Data</td><td class="k">Errors</td></tr>
 {coins or '<tr><td colspan=5 class="mut">no live burst yet</td></tr>'}</table></div></div>
 <div class="card"><h2>Recent results</h2><div class="scroll"><table>{rec_rows or '<tr><td class="mut">none yet</td></tr>'}</table></div>
+<details><summary>All completed bets ({len(completed_bets)})</summary>
+<div class="scroll"><table>
+<tr><td class="k">Closed (UTC)</td><td class="k">Market</td><td class="k">Position</td><td class="k">Outcome</td><td class="k">P&amp;L</td></tr>
+{completed_rows or '<tr><td colspan=5 class="mut">No completed bets yet.</td></tr>'}
+</table></div></details>
 <div class="mut"><a href="bets.csv">Download all trades (CSV)</a></div></div>
 <div class="card"><h2>Model</h2><div>{E(model)}</div><div class="mut">Top crypto weights: {E(top_w)}</div></div>
 <div class="card"><h2>AI briefing</h2><pre>{E(brief) or 'No briefing yet.'}</pre></div>
