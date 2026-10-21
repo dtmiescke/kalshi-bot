@@ -128,11 +128,14 @@ def _excluded(event, market, legs):
     return any(term in text for term in EXCLUDED_TERMS)
 
 
-def scan(client, store, settings=None, max_events=500, max_age_s=7200):
+def scan(client, store, settings=None, max_events=2000, max_age_s=7200):
     now = int(time.time())
     fee_rate = float(getattr(settings, "taker_fee_rate", 0.07))
     min_edge = float(getattr(settings, "combo_min_edge", 0.06))
-    max_legs = int(getattr(settings, "combo_max_legs", 3))
+    min_legs = max(3, int(getattr(settings, "combo_min_legs", 3)))
+    max_legs = max(min_legs, min(8, int(getattr(settings, "combo_max_legs", 8))))
+    # Search the widest bounded batch returned by the API before ranking; this is
+    # still constrained by upstream pagination/rate limits and available data.
     try:
         events = client.multivariate_events(status="open")
     except Exception as exc:
@@ -165,7 +168,7 @@ def scan(client, store, settings=None, max_events=500, max_age_s=7200):
             if _excluded(event, market, legs):
                 skipped["excluded_sport"] = skipped.get("excluded_sport", 0) + 1
                 continue
-            if len(legs) > max_legs or len(legs) < 2:
+            if len(legs) > max_legs or len(legs) < min_legs:
                 skipped["leg_count_out_of_range"] = skipped.get("leg_count_out_of_range", 0) + 1
                 continue
             leg_events = [leg.get("event_ticker") for leg in legs]
@@ -199,9 +202,26 @@ def scan(client, store, settings=None, max_events=500, max_age_s=7200):
 
             yes_ask, no_ask = _market_ask(market, "yes"), _market_ask(market, "no")
             scored = score_combo_probabilities(probabilities, yes_ask, no_ask, fee_rate, min_edge)
+            min_confidence = min((x["confidence"] for x in leg_details), default=0.0)
+            # Three-to-five-leg combos are preferred. Longer combos can compete
+            # without a length penalty only when every leg has strong model
+            # confidence and the conservative, fee-adjusted edge is exceptional.
+            best = scored.get("best") or {}
+            exceptional_long_combo = (
+                len(legs) > 5 and min_confidence >= 0.85
+                and best.get("expected_profit_per_contract", 0) >= max(0.12, 2 * min_edge)
+            )
+            length_multiplier = 1.0 if len(legs) <= 5 or exceptional_long_combo else {
+                6: 0.85, 7: 0.75, 8: 0.65
+            }.get(len(legs), 0.65)
+            best_ev = best.get("expected_profit_per_contract", 0.0) or 0.0
             item = {
                 "ticker": mticker, "title": market.get("title") or market.get("subtitle") or "",
                 "leg_count": len(legs), "legs": leg_details,
+                "minimum_leg_confidence": round(min_confidence, 3),
+                "exceptional_long_combo": exceptional_long_combo,
+                "length_preference_multiplier": length_multiplier,
+                "ranking_score": round(best_ev * length_multiplier, 4),
                 "yes_ask": yes_ask, "no_ask": no_ask, **scored,
                 "status": market.get("status"),
                 "close_time": market.get("close_time"),
@@ -215,15 +235,18 @@ def scan(client, store, settings=None, max_events=500, max_age_s=7200):
 
     ranked.sort(key=lambda x: (
         bool(x.get("eligible")),
-        x.get("best", {}).get("expected_profit_per_contract", -1e9),
+        x.get("ranking_score", -1e9),
         x.get("best", {}).get("expected_roi_on_cost", -1e9) or -1e9,
+        x.get("best", {}).get("expected_profit_per_contract", -1e9),
     ), reverse=True)
     result = {
         "enabled": True, "ok": True, "ts": now, "count": len(rows),
+        "min_legs": min_legs, "max_legs": max_legs,
+        "scanned_markets": sum(len(e["market_tickers"]) for e in rows),
         "ranked_count": len(ranked), "top_candidates": ranked[:25],
         "events": rows, "skipped": skipped, "execution_enabled": False,
-        "model": "independent-leg product with conservative uncertainty haircut",
-        "reason": "Research ranking only. It requires distinct events, fresh external leg forecasts and actual displayed combo asks; joint outcomes remain an estimate, not a guarantee. No combo order is placed.",
+        "model": "independent-leg product with conservative uncertainty haircut and 3-5-leg preference",
+        "reason": "Scans all open multivariate markets returned within the bounded API batch, then ranks every qualifying 3-8-leg candidate. Three-to-five legs are preferred; 6-8 legs avoid the length penalty only with >=85% minimum leg confidence and exceptional conservative fee-adjusted EV. API coverage, freshness, correlation and joint-probability uncertainty remain limitations. Research only; no combo order is placed.",
     }
     store.set_kv("combo_research_health", result)
     return result
