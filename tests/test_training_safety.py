@@ -87,7 +87,7 @@ class TestTrainingSafety(unittest.TestCase):
         for method in ("try_arb", "execute_ladder"):
             with self.subTest(method=method):
                 obj = engine.Engine.__new__(engine.Engine)
-                obj.s = SimpleNamespace(mode="live", max_per_day=100.0,
+                obj.s = SimpleNamespace(mode="live", bankroll=1000.0, max_per_day=100.0,
                                         max_per_game=100.0, taker_fee_rate=0.07)
                 obj.store = mock.Mock()
                 obj.store.has_open_event_bet.return_value = False
