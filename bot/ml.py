@@ -185,6 +185,15 @@ def learn_tails(store):
     return out
 
 
+def beats_champion(champion_present, champion_eval_ok, champion_loss, candidate_loss):
+    """Fail closed when an existing champion cannot be evaluated."""
+    if not champion_eval_ok:
+        return False
+    if not champion_present:
+        return True
+    return champion_loss is not None and candidate_loss < champion_loss
+
+
 def train(store, min_windows=300, fee_rate=0.07):
     from sklearn.ensemble import HistGradientBoostingClassifier
     from sklearn.linear_model import LogisticRegression
@@ -261,9 +270,8 @@ def train(store, min_windows=300, fee_rate=0.07):
     conf = paired_bootstrap(p_test, kalshi_p[te], y[te], groups[te])
     min_test = int(os.environ.get("ML_MIN_TEST_WINDOWS", 100))
     beats_kalshi = metrics["test_logloss_model"] < metrics["test_logloss_kalshi"] * 0.998
-    beats_champ = champion_eval_ok and (
-        not champion_present or
-        (champ_ll is not None and metrics["test_logloss_model"] < champ_ll)
+    beats_champ = beats_champion(
+        champion_present, champion_eval_ok, champ_ll, metrics["test_logloss_model"]
     )
     profitable = [t for t, v in metrics["test_trades"].items()
                   if v["trades"] >= 30 and (v["roi"] or 0) > 0]
