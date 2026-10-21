@@ -44,6 +44,14 @@ def run_scheduled(s, store, data):
       15-minute window is watched continuously, not glimpsed once.
       BURST_MINUTES=0 falls back to one quick snapshot.
     - grading, learning, AI briefing, and model retraining when due."""
+    # Free-first public sports intelligence collection; data only, never order authority.
+    if os.environ.get("SPORTS_INTEL_ENABLED", "yes").lower() in ("yes", "true", "1"):
+        try:
+            from . import sports_intel
+            intel_result = sports_intel.collect(store)
+            print("sports intelligence:", json.dumps(intel_result, default=str))
+        except Exception as e:
+            logging.warning("sports intelligence collection failed: %s", e)
     hours = float(os.environ.get("SPORTS_EVERY_HOURS", 5.5))
     burst = float(os.environ.get("BURST_MINUTES", 8))
     do_sports = time.time() - store.get_kv("last_sports_scan", 0) >= hours * 3600 - 300
@@ -134,6 +142,12 @@ def main(argv=None):
         if s.mode in ("demo", "live"):
             t = KalshiClient(s.base_url(), s.kalshi_key_id, s.kalshi_private_key)
             print("signed request OK, balance:", t.balance())
+        return
+    if cmd == "sports-intel":
+        from . import sports_intel
+        result = sports_intel.collect(store, force="--force" in argv)
+        print(json.dumps(result, indent=2, default=str))
+        print("latest evidence:", json.dumps(sports_intel.recent(store, limit=10), indent=2, default=str))
         return
     if cmd == "scheduled":
         run_scheduled(s, store, data)
