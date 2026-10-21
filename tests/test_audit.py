@@ -188,3 +188,36 @@ class TestAccountLimits(unittest.TestCase):
         ok, why = guard.status(self.st, 1000, daily_loss_limit=30)
         self.assertFalse(ok)
         self.assertIn("daily loss", why)
+
+    def test_decision_audit_never_creates_fake_bets(self):
+        self.st.add_decision_audit({
+            "ts": 100, "ticker": "KXNBA-TEST", "event_ticker": "E1",
+            "series": "KXNBAGAME", "decision": "rejected", "reason": "edge too small",
+            "side": "yes", "market_price": 0.55, "model_prob": 0.54,
+            "side_prob": 0.54, "edge": -0.01, "confidence": 0.7,
+            "signals": {"news": {"prob": 0.6}},
+        })
+        self.assertEqual(self.st.q("SELECT COUNT(*) AS n FROM bets")[0]["n"], 0)
+        self.assertEqual(self.st.q("SELECT COUNT(*) AS n FROM decision_audit")[0]["n"], 1)
+
+    def test_decision_audit_grades_only_after_settlement_and_labels_diagnostic_pnl(self):
+        self.st.add_decision_audit({
+            "ts": 100, "ticker": "KXNBA-TEST", "event_ticker": "E1",
+            "series": "KXNBAGAME", "decision": "candidate", "reason": "risk passed",
+            "side": "yes", "market_price": 0.4, "model_prob": 0.7,
+            "side_prob": 0.7, "edge": 0.3, "confidence": 0.8,
+        })
+        self.st.add_decision_audit({
+            "ts": 101, "ticker": "KXNBA-TEST", "event_ticker": "E1",
+            "series": "KXNBAGAME", "decision": "rejected", "reason": "manual filter",
+            "side": "yes", "market_price": 0.4, "model_prob": 0.6,
+            "side_prob": 0.6, "edge": 0.2, "confidence": 0.7,
+        })
+        self.assertEqual(self.st.q("SELECT COUNT(*) AS n FROM decision_audit WHERE outcome IS NOT NULL")[0]["n"], 0)
+        self.st.grade_decision_audit("KXNBA-TEST", 1, 200)
+        rows = self.st.q("SELECT decision, outcome, brier, hypothetical_pnl FROM decision_audit ORDER BY id")
+        self.assertEqual([r["outcome"] for r in rows], [1, 1])
+        self.assertAlmostEqual(rows[0]["brier"], 0.09)
+        self.assertAlmostEqual(rows[0]["hypothetical_pnl"], 0.6)
+        self.assertIsNone(rows[1]["hypothetical_pnl"])
+        self.assertEqual(self.st.q("SELECT COUNT(*) AS n FROM bets")[0]["n"], 0)
