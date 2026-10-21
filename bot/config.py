@@ -94,7 +94,8 @@ class Settings:
     sports_mode: str = field(default_factory=lambda: _env("SPORTS_MODE", "all").strip().lower())
     sports_selected: str = field(default_factory=lambda: _env("SPORTS_SELECTED", "").strip())
     combos_enabled: bool = field(default_factory=lambda: _env("COMBOS_ENABLED", "no").strip().lower() in ("yes", "true", "1"))
-    combo_max_legs: int = field(default_factory=lambda: _env_int("COMBO_MAX_LEGS", 3))
+    combo_min_legs: int = field(default_factory=lambda: _env_int("COMBO_MIN_LEGS", 3))
+    combo_max_legs: int = field(default_factory=lambda: _env_int("COMBO_MAX_LEGS", 8))
     combo_min_edge: float = field(default_factory=lambda: _env_pct("COMBO_MIN_EDGE", 6))
 
     def selected_series(self):
@@ -182,8 +183,10 @@ class Settings:
     def validate(self):
         if self.sports_mode not in ("all", "manual"):
             raise ValueError("SPORTS_MODE must be all/manual")
-        if not 2 <= self.combo_max_legs <= 10:
-            raise ValueError("COMBO_MAX_LEGS must be between 2 and 10")
+        if not 3 <= self.combo_min_legs <= 8:
+            raise ValueError("COMBO_MIN_LEGS must be between 3 and 8")
+        if not self.combo_min_legs <= self.combo_max_legs <= 8:
+            raise ValueError("COMBO_MAX_LEGS must be between COMBO_MIN_LEGS and 8")
         if not 0 < self.combo_min_edge < 1:
             raise ValueError("COMBO_MIN_EDGE must be between 0 and 1")
         if self.mode not in ("paper", "demo", "live"):
