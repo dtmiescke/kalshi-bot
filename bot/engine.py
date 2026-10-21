@@ -421,7 +421,7 @@ class Engine:
                 if self.betting_ok and ev_match and len(markets) == 2:
                     if self.try_arb(ev, markets, summary, now):
                         continue
-                benched = guard.league_benched(self.store, series)
+                benched = guard.league_benched(self.store, series, mode=self.s.mode)
                 candidates = []   # pick the single best bet per game
                 for m in markets:
                     summary["markets"] += 1
@@ -499,7 +499,7 @@ class Engine:
                     if not spot_fresh:
                         self._skip(summary, "spot price not fresh")
                         continue
-                    if not self.betting_ok or guard.league_benched(self.store, series):
+                    if not self.betting_ok or guard.league_benched(self.store, series, mode=self.s.mode):
                         self._skip(summary, "betting paused")
                         continue
                     if not (self.s.crypto_min_minutes <= left <= self.s.crypto_max_minutes):
@@ -574,7 +574,7 @@ class Engine:
                     self.store.set_kv(f"start_{m['ticker']}", int(t["close_ts"]))
                     self.store.set_kv(f"settle_after_{m['ticker']}", int(t["close_ts"]) + 600)
                     if not (lo_min <= left <= hi_min) or not self.betting_ok or \
-                            guard.league_benched(self.store, series):
+                            guard.league_benched(self.store, series, mode=self.s.mode):
                         continue
                     if pair not in cache:
                         cache[pair] = (self.price_feed(pair), *self.spot_feed(pair))
