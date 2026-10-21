@@ -83,6 +83,42 @@ class TestTrainingSafety(unittest.TestCase):
         self.assertEqual(saved[0]["stake"], 1.00)
         self.assertEqual(saved[0]["fee"], 0.01)
 
+    def test_arbitrage_budget_respects_open_position_and_cash_caps(self):
+        obj = engine.Engine.__new__(engine.Engine)
+        obj.s = SimpleNamespace(
+            mode="paper", bankroll=1000.0, max_per_day=100.0, max_per_game=50.0,
+            max_per_bet=25.0, max_open_cost=200.0, max_open_positions=5,
+            taker_fee_rate=0.07
+        )
+        obj.store = mock.Mock()
+        obj.store.staked_since.return_value = 0.0
+        obj.store.staked_on_event.return_value = 0.0
+        obj.store.account.return_value = {
+            "open_positions": 4, "open_cost": 0.0, "cash": 1000.0
+        }
+        self.assertEqual(obj._arbitrage_budget("EV"), 0.0)
+        obj.store.account.return_value = {
+            "open_positions": 0, "open_cost": 190.0, "cash": 20.0
+        }
+        budget = obj._arbitrage_budget("EV")
+        self.assertGreater(budget, 0.0)
+        self.assertLessEqual(budget, 9.95 / 1.07)
+
+    def test_incomplete_arbitrage_unwind_keeps_residual_position_in_ledger(self):
+        saved = []
+        obj = engine.Engine.__new__(engine.Engine)
+        obj.s = SimpleNamespace(mode="live", taker_fee_rate=0.07)
+        obj.store = SimpleNamespace(add_bet=lambda row: saved.append(row))
+        obj.data = SimpleNamespace(orderbook=lambda ticker: {"yes": [(0.25, 10)], "no": []})
+        obj.trade = SimpleNamespace(place_limit_sell=lambda *args: {"fill_count": 0})
+        with mock.patch("bot.engine.alerts.send"):
+            residual = obj._unwind_leg("T", "yes", 0.30, "BUY-1", 2,
+                                        "EVENT", "KXNBAGAME", team="Team")
+        self.assertEqual(residual, 2)
+        self.assertEqual(saved[0]["contracts"], 2)
+        self.assertEqual(saved[0]["event_ticker"], "EVENT")
+        self.assertTrue(saved[0]["signals"]["arbitrage"]["unwind_residual"])
+
     def test_partial_two_leg_arb_fill_unwinds_only_filled_contracts(self):
         for method in ("try_arb", "execute_ladder"):
             with self.subTest(method=method):
