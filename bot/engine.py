@@ -216,11 +216,16 @@ class Engine:
                         "motorsport_f1": "motorsports", "esports": "esports",
                     }
                     category = category_for.get(sport, sport if sport in sports_intel.SPORT_TERMS else None)
-                    if category:
-                        now_ts = int(time.time())
-                        for item in sports_intel.recent(self.store, limit=250, category=category, kind="news"):
+                    now_ts = int(time.time())
+                    categories = [category] if category else []
+                    categories.append("event_news")
+                    for news_category in set(categories):
+                        for item in sports_intel.recent(self.store, limit=250, category=news_category, kind="news"):
                             published = item.get("published_ts")
                             if published and now_ts - published > 48 * 3600:
+                                continue
+                            item_event = item.get("event_ticker")
+                            if item_event and mkt.get("event_ticker") and item_event != mkt.get("event_ticker"):
                                 continue
                             self._headlines[sport].append({
                                 "headline": item.get("title", ""),
