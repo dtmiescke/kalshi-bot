@@ -71,7 +71,7 @@ class TestAudit(unittest.TestCase):
         self.s.fixed_bet = 10.0
         self.s.max_per_bet = 1.0
         self.s.min_edge = 0.01
-        book = {"yes": [(0.49, 100)], "no": [(0.49, 100)]}
+        book = {"yes": [(0.49, 100)], "no": [(0.50, 100)]}
         plan, why = risk.decide(self.s, self.st, {"ticker": "T", "event_ticker": "E",
                                   "series": "KXNFLGAME"}, 0.8, 0.9, book)
         self.assertIsNotNone(plan, why)
