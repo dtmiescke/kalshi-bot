@@ -65,6 +65,17 @@ CREATE TABLE IF NOT EXISTS maker_attempts (
 );
 
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+
+-- Decision audit is not a trade ledger: rejected candidates never become fake bets.
+CREATE TABLE IF NOT EXISTS decision_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, ticker TEXT NOT NULL,
+    event_ticker TEXT, series TEXT, decision TEXT NOT NULL, reason TEXT,
+    side TEXT, market_price REAL, model_prob REAL, side_prob REAL, edge REAL,
+    confidence REAL, signals_json TEXT, outcome INTEGER, brier REAL,
+    hypothetical_pnl REAL, settled_ts INTEGER
+);
+CREATE INDEX IF NOT EXISTS ix_decision_audit_ticker_ts ON decision_audit(ticker, ts);
+CREATE INDEX IF NOT EXISTS ix_decision_audit_grade ON decision_audit(outcome, decision);
 """
 
 
@@ -83,6 +94,40 @@ class Store:
             if col not in cols:   # upgrade older databases in place
                 self.db.execute(f"ALTER TABLE bets ADD COLUMN {col} {typ}")
         self.db.commit()
+
+    def add_decision_audit(self, row):
+        """Record one decision snapshot; this table never creates a bet/order."""
+        self.x("""INSERT INTO decision_audit
+            (ts,ticker,event_ticker,series,decision,reason,side,market_price,
+             model_prob,side_prob,edge,confidence,signals_json)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            int(row.get("ts", time.time())), row["ticker"], row.get("event_ticker"),
+            row.get("series"), row["decision"], row.get("reason"), row.get("side"),
+            row.get("market_price"), row.get("model_prob"), row.get("side_prob"),
+            row.get("edge"), row.get("confidence"),
+            json.dumps(row.get("signals", {}), ensure_ascii=False, default=str)))
+
+    def grade_decision_audit(self, ticker, outcome, settled_ts=None):
+        """Grade recorded snapshots without rewriting what the bot knew at decision time."""
+        settled_ts = int(settled_ts or time.time())
+        with self.lock:
+            rows = self.db.execute("SELECT id, side_prob, market_price, side, decision FROM decision_audit WHERE ticker=? AND outcome IS NULL", (ticker,)).fetchall()
+            for row in rows:
+                if row["side_prob"] is None:
+                    continue
+                y = int(outcome)
+                brier = (float(row["side_prob"]) - y) ** 2
+                pnl = None
+                if row["decision"] == "candidate" and row["side"] in ("yes", "no") and row["market_price"] is not None:
+                    p = float(row["market_price"])
+                    won = (row["side"] == "yes" and y == 1) or (row["side"] == "no" and y == 0)
+                    pnl = (1 - p) if won else -p
+                self.db.execute("UPDATE decision_audit SET outcome=?, brier=?, hypothetical_pnl=?, settled_ts=? WHERE id=?", (y, brier, pnl, settled_ts, row["id"]))
+            self.db.commit()
+            return len(rows)
+
+    def decision_audit_summary(self):
+        return self.q("SELECT decision, COUNT(*) AS n, AVG(brier) AS brier, AVG(hypothetical_pnl) AS diagnostic_pnl FROM decision_audit WHERE outcome IS NOT NULL GROUP BY decision ORDER BY decision")
 
     # --- generic -----------------------------------------------------------
     def q(self, sql, args=()):
