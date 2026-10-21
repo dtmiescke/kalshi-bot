@@ -719,6 +719,11 @@ class Engine:
         return residual
 
     def execute_ladder(self, a, now, summary):
+        """Serialize arbitrage execution with every other order path."""
+        with _EXECUTION_LOCK:
+            return self._execute_ladder_locked(a, now, summary)
+
+    def _execute_ladder_locked(self, a, now, summary):
         """Re-check both books and global risk caps, then buy YES(low) + NO(high)."""
         try:
             b_low, b_high = self.data.orderbook(a["low"]), self.data.orderbook(a["high"])
@@ -778,6 +783,11 @@ class Engine:
         summary["bets"] += 2
 
     def try_arb(self, ev, markets, summary, now):
+        """Serialize sports arbitrage with other order paths."""
+        with _EXECUTION_LOCK:
+            return self._try_arb_locked(ev, markets, summary, now)
+
+    def _try_arb_locked(self, ev, markets, summary, now):
         """Buy YES on both teams when together they cost < $1 after fees."""
         if self.store.has_open_event_bet(ev["event_ticker"], mode=self.s.mode):
             return False
