@@ -22,18 +22,27 @@ class TestSportsSelection(unittest.TestCase):
             settings = Settings()
         self.assertEqual(settings.selected_series(), {"KXNFLGAME", "KXNBAGAME"})
 
-    def test_excluded_sports_are_classified_before_generic_routing(self):
+    def test_all_sports_are_researchable_and_classified_before_generic_routing(self):
         cases = [
-            ("KXUFCGAME", {"title": "UFC main event"}),
-            ("KXBOXING", {"title": "Championship boxing"}),
-            ("KXATPMATCH", {"title": "ATP tennis"}),
-            ("KXF1RACE", {"title": "Formula 1 Grand Prix"}),
-            ("KXPGA", {"title": "PGA golf"}),
-            ("KXESPORTS", {"title": "League of Legends"}),
+            ("KXUFCGAME", {"title": "UFC main event"}, "mma"),
+            ("KXBOXING", {"title": "Championship boxing"}, "boxing"),
+            ("KXATPMATCH", {"title": "ATP tennis"}, "tennis"),
+            ("KXF1RACE", {"title": "Formula 1 Grand Prix"}, "motorsports"),
+            ("KXPGA", {"title": "PGA golf"}, "golf"),
+            ("KXESPORTS", {"title": "League of Legends"}, "esports"),
         ]
-        for series, metadata in cases:
+        for series, metadata, category in cases:
             with self.subTest(series=series):
-                self.assertTrue(_sports_excluded(series, metadata))
+                self.assertEqual(_series_sport(series, metadata), category)
+                self.assertFalse(_sports_excluded(series, metadata))
+
+    def test_manual_selection_keeps_nontraditional_sports(self):
+        with patch.dict(os.environ, {"SPORTS_MODE": "manual",
+                                    "SPORTS_SELECTED": "KXATPMATCH,KXF1RACE,KXESPORTS"}):
+            settings = Settings()
+        selected = settings.selected_series()
+        series_map = {series: _series_sport(series) for series in selected}
+        self.assertEqual(set(series_map), {"KXATPMATCH", "KXF1RACE", "KXESPORTS"})
 
     def test_invalid_mode_fails_validation(self):
         with patch.dict(os.environ, {"SPORTS_MODE": "everything"}):
