@@ -667,6 +667,51 @@ class Engine:
             return 0.0
         return max(0.0, total_cap / (1 + self.s.taker_fee_rate))
 
+    def _unwind_leg(self, ticker, side, price, order_id, filled,
+                    event_ticker, series, team=None):
+        """Unwind a partially built arbitrage and ledger any residual exposure."""
+        if filled <= 0:
+            return 0
+        unwound = 0
+        failure = None
+        try:
+            book = self.data.orderbook(ticker)
+            bid = risk.bid_for(book, side)
+            if not bid:
+                raise RuntimeError("no bid available to unwind")
+            close = self.trade.place_limit_sell(ticker, side, filled, bid)
+            unwound = int(num(close, "fill_count") or num(close, "taker_fill_count") or 0)
+            if unwound < filled:
+                failure = f"unwind only filled {unwound}/{filled}"
+        except Exception as exc:
+            failure = str(exc)
+        residual = max(0, filled - unwound)
+        if residual:
+            # Do not leave a partial fill invisible to account exposure/risk checks.
+            try:
+                self.store.add_bet({
+                    "ts": int(time.time()), "mode": self.s.mode, "ticker": ticker,
+                    "event_ticker": event_ticker or ticker, "series": series or "ARB",
+                    "team": team, "side": side, "price": price, "contracts": residual,
+                    "stake": round(residual * price, 2),
+                    "fee": risk.taker_fee(residual, price, self.s.taker_fee_rate),
+                    "model_prob": None, "edge": None, "confidence": 1.0,
+                    "signals": {"arbitrage": {"unwind_residual": True,
+                                              "original_order_id": order_id,
+                                              "filled_before_unwind": filled,
+                                              "unwound": unwound,
+                                              "failure": failure}},
+                    "order_id": order_id, "style": "taker",
+                })
+            except Exception as ledger_error:
+                failure = f"{failure or 'unwind incomplete'}; residual ledger failed: {ledger_error}"
+            message = (f"{ticker}: {residual} contract(s) remain after arbitrage unwind "
+                       f"(original order {order_id}). {failure or ''} Check position manually.")
+            log.error(message)
+            alerts.send("URGENT: arbitrage unwind incomplete", message,
+                        priority="urgent", tags=["warning"])
+        return residual
+
     def execute_ladder(self, a, now, summary):
         """Re-check both books and global risk caps, then buy YES(low) + NO(high)."""
         try:
@@ -702,21 +747,11 @@ class Engine:
                         raise RuntimeError(f"leg only filled {filled}/{n} contracts")
                 except Exception as e:
                     log.error("LADDER LEG FAILED %s: %s", ticker, e)
-                    for t, sd, _, _, qty in placed:
-                        if qty <= 0:
-                            continue
-                        try:
-                            bid = risk.bid_for(self.data.orderbook(t), sd)
-                            if not bid:
-                                raise RuntimeError("no bid available to unwind")
-                            close = self.trade.place_limit_sell(t, sd, qty, bid)
-                            unwound = int(num(close, "fill_count") or num(close, "taker_fill_count") or 0)
-                            if unwound < qty:
-                                raise RuntimeError(f"unwind only filled {unwound}/{qty}")
-                        except Exception as e2:
-                            log.error("UNWIND FAILED %s: %s", t, e2)
-                            alerts.send("Unwind failed", f"{t}: {e2}; check position manually",
-                                        priority="urgent", tags=["warning"])
+                    for t, sd, px, original_order_id, qty in placed:
+                        self._unwind_leg(
+                            t, sd, px, original_order_id, qty, event_ticker,
+                            a.get("series") or "ARB"
+                        )
                     return
             else:
                 placed.append((ticker, side, px, oid, filled))
@@ -767,7 +802,8 @@ class Engine:
                         raise RuntimeError(f"leg only filled {filled}/{plan['contracts']} contracts")
                 except Exception as e:
                     log.error("ARB LEG FAILED %s: %s", m["ticker"], e)
-                    self.unwind(order_ids, plan["contracts"])
+                    self.unwind(order_ids, plan["contracts"],
+                                event_ticker=ev["event_ticker"], series=ev["series_ticker"])
                     return False
             else:
                 order_ids.append((m, px, oid, filled))
@@ -791,25 +827,14 @@ class Engine:
         log.info("ARB %s locked $%.2f", ev["event_ticker"], plan["locked_profit"])
         return True
 
-    def unwind(self, legs, contracts):
-        """Sell back the actually filled quantity of each half-built arb leg."""
-        for m, px, _, filled in legs:
-            if filled <= 0:
-                continue
-            try:
-                book = self.data.orderbook(m["ticker"])
-                bid = risk.bid_for(book, "yes")
-                if not bid:
-                    raise RuntimeError("no bid available to unwind")
-                close = self.trade.place_limit_sell(m["ticker"], "yes", filled, bid)
-                unwound = int(num(close, "fill_count") or num(close, "taker_fill_count") or 0)
-                if unwound < filled:
-                    raise RuntimeError(f"unwind only filled {unwound}/{filled}")
-                log.warning("unwound arb leg %s x%d at $%.2f", m["ticker"], filled, bid)
-            except Exception as e:
-                log.error("UNWIND FAILED %s: %s — check this position manually", m["ticker"], e)
-                alerts.send("Unwind failed", f"{m['ticker']}: {e}; check position manually",
-                            priority="urgent", tags=["warning"])
+    def unwind(self, legs, contracts, event_ticker=None, series=None):
+        """Sell back actual filled quantities and ledger any residual exposure."""
+        for m, px, order_id, filled in legs:
+            self._unwind_leg(
+                m["ticker"], "yes", px, order_id, filled,
+                event_ticker or m.get("event_ticker") or m["ticker"],
+                series or m.get("series") or "ARB", team=m.get("yes_sub_title")
+            )
 
     def _skip(self, summary, reason):
         # group by the reason's wording, without the numbers
