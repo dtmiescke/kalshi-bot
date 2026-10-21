@@ -664,6 +664,10 @@ class Engine:
         fees = risk.taker_fee(n, pl, self.s.taker_fee_rate) + risk.taker_fee(n, ph, self.s.taker_fee_rate)
         if n < 1 or n * (1 - pl - ph) - fees <= 0:
             return
+        allowed, reason = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
+        if not allowed:
+            log.warning("ladder arbitrage blocked at execution boundary: %s", reason)
+            return
         placed = []   # track each leg's actual fills before checking completeness
         for ticker, side, px in ((a["low"], "yes", pl), (a["high"], "no", ph)):
             oid = f"paper-ladder-{uuid.uuid4().hex[:8]}"
@@ -723,6 +727,10 @@ class Engine:
         plan = guard.arb_plan(ev["series_ticker"], books[0], books[1],
                               self.s.taker_fee_rate, min(self.s.max_per_game, left_day))
         if not plan:
+            return False
+        allowed, reason = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
+        if not allowed:
+            log.warning("sports arbitrage blocked at execution boundary: %s", reason)
             return False
         legs = [(markets[0], plan["price_a"]), (markets[1], plan["price_b"])]
         order_ids = []
