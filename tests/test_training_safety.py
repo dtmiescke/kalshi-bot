@@ -25,6 +25,15 @@ class TestTrainingSafety(unittest.TestCase):
         self.assertTrue(ml.beats_champion(False, True, None, 0.2))
         self.assertFalse(ml.beats_champion(False, False, None, 0.2))
 
+    def test_invalid_drawdown_circuit_breaker_setting_fails_closed(self):
+        for value in ("nan", "inf", "-1", "101", "not-a-number"):
+            with self.subTest(value=value), mock.patch.dict(
+                "os.environ", {"MAX_DRAWDOWN": value}
+            ):
+                store = mock.Mock()
+                self.assertTrue(guard.drawdown_tripped(store, 1000.0, mode="live"))
+                store.q.assert_not_called()
+
     def test_settings_reject_nonfinite_or_unsafe_risk_values(self):
         for field, value in (
             ("bankroll", float("nan")),
