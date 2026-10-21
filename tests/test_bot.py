@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 
-from bot import brain, risk
+from bot import backtest, brain, risk
 from bot.config import Settings
 from bot import dashboard
 from bot.engine import Engine, _fresh_odds_history
