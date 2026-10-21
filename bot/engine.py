@@ -71,6 +71,13 @@ def _sports_excluded(series, metadata=None):
     return _series_sport(series, metadata) in EXCLUDED_SPORT_CATEGORIES
 
 
+def _fresh_odds_history(rows, now, max_age_seconds):
+    """Drop stale/future sportsbook rows before they can manufacture apparent edge."""
+    cutoff = int(now) - max(0, int(max_age_seconds))
+    return [row for row in rows
+            if cutoff <= int(row.get("ts", 0)) <= int(now)]
+
+
 def iso_to_ts(s):
     try:
         return int(datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp())
@@ -120,8 +127,9 @@ class Engine:
                     "away": ev.get("away_team"), "team": team, "fair_prob": p,
                     "n_books": n, "raw": {"spread": spread}})
             slim.append({k: ev.get(k) for k in ("id", "home_team", "away_team", "commence_time")})
-        if events:
-            self.store.set_kv(f"odds_events_{sport}", slim)
+        # Empty/error-free responses must clear the cached event list too; keeping
+        # yesterday's events after a failed refresh can create stale matches.
+        self.store.set_kv(f"odds_events_{sport}", slim)
         self.store.set_kv(f"odds_last_{sport}", time.time())
         log.info("odds %s: %d events, credits left %s", sport, len(events), self.odds.last_remaining)
 
@@ -165,6 +173,7 @@ class Engine:
         mid = r.detail["mid"]
 
         hist = self.store.odds_history(ev_match["id"], book_team) if ev_match else []
+        hist = _fresh_odds_history(hist, now, self.odds_max_age * 60)
         if hist:
             last = hist[-1]
             bc = ms.book_consensus(last["fair_prob"], last["n_books"],
