@@ -6,7 +6,7 @@ to a distinct underlying event, and the actual combo market exposes a usable ask
 """
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from . import brain, risk
 from .signals.base import Reading
@@ -176,7 +176,10 @@ def combo_audit_cutoff_ts(close_time, lead_seconds=300):
     if not close_time:
         return None
     try:
-        close_ts = datetime.fromisoformat(str(close_time).replace("Z", "+00:00")).timestamp()
+        parsed = datetime.fromisoformat(str(close_time).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        close_ts = parsed.timestamp()
     except (TypeError, ValueError, OverflowError):
         return None
     return int(close_ts - max(0, int(lead_seconds)))
