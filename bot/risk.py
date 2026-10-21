@@ -78,10 +78,11 @@ def window_key(event_ticker):
     return event_ticker.split("-", 1)[1] if "-" in (event_ticker or "") else event_ticker
 
 
-def staked_on_window(store, event_ticker):
+def staked_on_window(store, event_ticker, mode=None):
     key = window_key(event_ticker)
     r = store.q("""SELECT COALESCE(SUM(stake),0) s FROM bets WHERE status='open'
-                   AND series LIKE '%15M' AND event_ticker LIKE ?""", (f"%-{key}",))
+                   AND series LIKE '%15M' AND event_ticker LIKE ?
+                   AND (? IS NULL OR mode=?)""", (f"%-{key}", mode, mode))
     return r[0]["s"]
 
 
@@ -113,7 +114,7 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
     max_per_bet = s.max_per_bet if max_per_bet is None else max_per_bet
     if confidence < s.min_confidence:
         return None, f"confidence {confidence:.0%} below {s.min_confidence:.0%}"
-    if store.has_open_event_bet(mkt["event_ticker"]):
+    if store.has_open_event_bet(mkt["event_ticker"], mode=s.mode):
         # YES on Boston and NO on New York are the same bet; never double up
         return None, "already holding this game"
     is_crypto = str(mkt.get("series", "")).endswith("15M")
@@ -152,17 +153,17 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
         kelly = max(0.0, (p_win - cost) / (1 - cost))
         want = s.bankroll * s.kelly_fraction * kelly * confidence * earned
 
-    acct = store.account(s.bankroll)
+    acct = store.account(s.bankroll, mode=s.mode)
     if acct["open_positions"] >= s.max_open_positions:
         return None, f"{acct['open_positions']} positions open (max {s.max_open_positions})"
-    left_day = s.max_per_day - store.staked_since(day_start_ts())
-    left_game = s.max_per_game - store.staked_on_event(mkt["event_ticker"])
+    left_day = s.max_per_day - store.staked_since(day_start_ts(), mode=s.mode)
+    left_game = s.max_per_game - store.staked_on_event(mkt["event_ticker"], mode=s.mode)
     left_open = s.max_open_cost - acct["open_cost"]
     # leave room for the fee too: a bet can never spend cash the account doesn't have
     left_cash = acct["cash"] - 0.05
     caps = [want, max_per_bet, left_day, left_game, left_open, left_cash]
     if str(mkt.get("series", "")).endswith("15M"):
-        caps.append(s.crypto_max_per_window - staked_on_window(store, mkt["event_ticker"]))
+        caps.append(s.crypto_max_per_window - staked_on_window(store, mkt["event_ticker"], mode=s.mode))
     budget = min(caps)
     if budget < 1.0:
         return None, "risk caps reached"
