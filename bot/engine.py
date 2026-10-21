@@ -295,7 +295,12 @@ class Engine:
                                 stat_rows.append({
                                     "event": item.get("title") or item.get("name"), "observed_ts": item.get("observed_ts"),
                                     "state": item.get("state"), "scoreboard": item.get("scoreboard") or item.get("competitors", []),
-                                    "team_stats": item.get("team_stats", []), "leaders": item.get("leaders", []),
+                                    "team_stats": item.get("team_stats", []), "player_stats": item.get("player_stats", []),
+                                    "leaders": item.get("leaders", []), "injuries": item.get("injuries"),
+                                    "lineups": item.get("lineups"), "rosters": item.get("rosters"),
+                                    "depth_charts": item.get("depth_charts"),
+                                    "season_series": item.get("season_series"),
+                                    "game_info": item.get("game_info"),
                                     "public_odds": item.get("odds", []), "predictor": item.get("predictor"),
                                 })
                     if stat_rows:
