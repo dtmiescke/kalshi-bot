@@ -5,6 +5,8 @@ import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+from . import brain
+
 
 
 def taker_fee(contracts, price, rate):
