@@ -46,6 +46,11 @@ def _series_sport(series, metadata=None):
         (("rugby",), "rugby"),
         (("volleyball",), "volleyball"),
         (("chess",), "chess"),
+        (("badminton",), "badminton"),
+        (("cycling", "tour de france"), "cycling"),
+        (("athletics", "track and field", "track_field"), "track_field"),
+        (("swimming",), "swimming"),
+        (("olympics", "olympic"), "olympics"),
     )
     for words, category in rules:
         if any(word in text for word in words):
