@@ -23,6 +23,35 @@ from .signals import schedule as sched
 log = logging.getLogger("bot")
 
 
+def _series_sport(series, metadata=None):
+    """Map a discovered Kalshi series to a known odds key or a research category."""
+    if series in SPORTS:
+        return SPORTS[series]
+    meta = metadata or {}
+    text = " ".join([str(series), str(meta.get("title", "")), str(meta.get("category", "")),
+                     " ".join(str(v) for v in (meta.get("tags") or []))]).lower()
+    rules = (
+        (("nfl", "college football", "football"), "football"),
+        (("basketball", "wnba", "nba", "ncaab"), "basketball"),
+        (("baseball", "mlb"), "baseball"),
+        (("hockey", "nhl"), "hockey"),
+        (("soccer", "premier league", "champions league", "mls"), "soccer"),
+        (("tennis", "atp", "wta"), "tennis"),
+        (("mma", "ufc", "mixed martial", "boxing"), "mma"),
+        (("golf", "pga", "lpga"), "golf"),
+        (("formula 1", "formula-one", "motorsport", "nascar", "racing"), "motorsports"),
+        (("esports", "e-sports", "league of legends", "counter-strike", "dota"), "esports"),
+        (("cricket",), "cricket"),
+        (("rugby",), "rugby"),
+        (("volleyball",), "volleyball"),
+        (("chess",), "chess"),
+    )
+    for words, category in rules:
+        if any(word in text for word in words):
+            return category
+    return "other"
+
+
 def iso_to_ts(s):
     try:
         return int(datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp())
@@ -230,22 +259,60 @@ class Engine:
         else:
             self.store.set_kv("pause_alerted", None)
 
-        for series, sport in (SPORTS.items() if sports else ()):
+        series_map = dict(SPORTS)
+        events_by_series = {}
+        selected = self.s.selected_series() if hasattr(self.s, "selected_series") else None
+        if sports and getattr(self.s, "sports_mode", "all") == "all":
+            try:
+                catalog = self.data.sports_series()
+                all_events = self.data.sports_events_all()
+                for ev in all_events:
+                    series = ev.get("series_ticker")
+                    if not series or series not in catalog:
+                        continue
+                    series_map[series] = _series_sport(series, catalog.get(series))
+                    events_by_series.setdefault(series, []).append(ev)
+                self.store.set_kv("sports_catalog_health", {
+                    "ts": now, "series_discovered": len(catalog),
+                    "open_events_seen": len(all_events), "sports_events_matched": sum(map(len, events_by_series.values())),
+                    "mode": "dynamic_all"})
+            except Exception as e:
+                log.warning("dynamic sports discovery failed; using configured series: %s", e)
+                events_by_series = {}
+        elif sports and getattr(self.s, "sports_mode", "all") == "manual":
+            selected = selected or set()
+            series_map = {series: SPORTS.get(series, _series_sport(series))
+                          for series in selected}
+            self.store.set_kv("sports_catalog_health", {
+                "ts": now, "series_selected": sorted(selected), "mode": "manual"})
+        else:
+            series_map = {}
+
+        for series, sport in (series_map.items() if sports else ()):
             if watch and not watch.wants_series(series) and not any(
                     h.startswith(series) for h in held):
                 continue
             try:
-                events = self.data.sports_events(series)
+                if series in events_by_series:
+                    events = events_by_series[series]
+                else:
+                    # Fallback for the original configured leagues when dynamic
+                    # catalog endpoints are unavailable; manual selections are explicit.
+                    events = self.data.sports_events(series)
             except Exception as e:
                 log.warning("events %s: %s", series, e)
                 continue
             if not events:
                 continue
-            try:
-                self.refresh_odds(sport)
-            except Exception as e:
-                log.warning("odds %s: %s", sport, e)
-            odds_events = self.store.get_kv(f"odds_events_{sport}", [])
+            supported_odds = sport in set(SPORTS.values())
+            if supported_odds:
+                try:
+                    self.refresh_odds(sport)
+                except Exception as e:
+                    log.warning("odds %s: %s", sport, e)
+                odds_events = self.store.get_kv(f"odds_events_{sport}", [])
+            else:
+                odds_events = []
 
             for ev in events:
                 ev.setdefault("series_ticker", series)
