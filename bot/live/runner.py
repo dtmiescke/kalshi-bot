@@ -16,6 +16,7 @@ import logging
 import math
 import os
 import subprocess
+import shlex
 import time
 
 from .. import alerts, brain, briefing, council, crypto_brain, guard, ml, risk
@@ -506,19 +507,53 @@ class LiveRunner:
                 await asyncio.to_thread(self.sports_cycle)
                 last_sports = now
             if save_cmd and now - last_save >= 1800:
-                # save memory mid-session so a crash never loses hours of learning
-                await asyncio.to_thread(subprocess.run, save_cmd, shell=True)
-                last_save = now
+                # Treat SAVE_CMD as an argument vector, not shell source.
+                # This avoids shell injection and reports failed persistence attempts.
+                try:
+                    await asyncio.to_thread(
+                        subprocess.run, shlex.split(save_cmd), check=True,
+                        capture_output=True, text=True
+                    )
+                    last_save = now
+                except Exception as exc:
+                    log.error("mid-session memory save failed: %s", exc)
+                    alerts.send("Memory save failed", str(exc)[:500],
+                                priority="high", tags=["warning"])
             await asyncio.sleep(max(0.0, 1.0 - (time.time() - now)))
         stop.set()
         for t in tasks + ([kalshi_task] if kalshi_task else []):
             t.cancel()
-        for ticker, mk in list(self.makers.items()):      # never leave orders behind
+        for ticker, mk in list(self.makers.items()):
+            # Reconcile cumulative fills after cancellation before the process exits;
+            # otherwise a last-second fill could be missing from the ledger.
             if self.s.mode in ("demo", "live"):
-                try:
-                    self.engine.trade.cancel(mk["order_id"])
-                except Exception:
-                    pass
+                filled = None
+                for attempt in range(3):
+                    filled = await asyncio.to_thread(
+                        self._cancel_and_reconcile_maker, mk["order_id"], mk["plan"]["contracts"]
+                    )
+                    if filled is not None:
+                        break
+                    if attempt < 2:
+                        await asyncio.sleep(1)
+                if filled is None:
+                    message = (f"Could not confirm cancellation/final fills for {ticker} "
+                               f"order {mk['order_id']}; check Kalshi immediately.")
+                    log.error(message)
+                    alerts.send("URGENT: maker order status unknown", message,
+                                priority="urgent", tags=["warning"])
+                    continue
+                if filled:
+                    self.engine.place(
+                        mk["snap"], dict(mk["plan"], contracts=filled), mk["readings"],
+                        mk["prob"], mk["conf"], summary=self.summary, now=int(time.time()),
+                        executed={"order_id": mk["order_id"], "contracts": filled}
+                    )
+                    self.store.log_maker(ticker, 1, "filled_on_shutdown", time.time() - mk["placed"])
+                else:
+                    self.store.log_maker(ticker, 0, "shutdown_cancelled", time.time() - mk["placed"])
+            else:
+                self.store.log_maker(ticker, 0, "shutdown_cancelled", time.time() - mk["placed"])
         self.makers.clear()
         await asyncio.to_thread(grade, self.store, self.rest)
         return self.summary
