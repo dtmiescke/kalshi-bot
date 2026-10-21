@@ -296,6 +296,7 @@ def train(store, min_windows=300, fee_rate=0.07):
     metrics["promotion_test_windows"] = fresh_windows
     metrics["promotion_logloss_model"] = round(promotion_ll, 5) if promotion_ll is not None else None
     metrics["promotion_logloss_kalshi"] = round(promotion_kalshi_ll, 5) if promotion_kalshi_ll is not None else None
+    metrics["promotion_logloss_champion"] = round(champ_ll, 5) if champ_ll is not None else None
     metrics["promotion_trades"] = promotion_trades
 
     # PROMOTION GATES — every one must pass:
@@ -374,10 +375,13 @@ def text(m):
     if m.get("status"):
         return f"Model training skipped: {m['status']} ({m.get('windows')} windows, need {m.get('needed')})."
     lines = ["=== MODEL TRAINING (walk-forward, newest 15% held out) ===",
-             f"{m['windows']} windows, {m['rows']} rows, tested on {m['test_windows']} unseen windows",
-             f"Log loss (lower = better): model {m['test_logloss_model']} | Kalshi price "
-             f"{m['test_logloss_kalshi']} | formula {m['test_logloss_formula']} | champion "
-             f"{m['test_logloss_champion']}"]
+             f"{m['windows']} windows, {m['rows']} rows, tested on {m['test_windows']} candidate holdout windows",
+             f"Candidate holdout log loss (lower = better): model {m['test_logloss_model']} | "
+             f"Kalshi price {m['test_logloss_kalshi']} | formula {m['test_logloss_formula']}",
+             f"Promotion comparison on {m.get('promotion_test_windows', 0)} windows newer than "
+             f"the champion: model {m.get('promotion_logloss_model')} | "
+             f"Kalshi {m.get('promotion_logloss_kalshi')} | "
+             f"champion {m.get('promotion_logloss_champion')}"]
     for t, v in m["test_trades"].items():
         lines.append(f"  edge >= {float(t):.0%}: {v['trades']} trades, win "
                      f"{(v['win_rate'] or 0):.0%}, return {(v['roi'] or 0):+.1%}")
