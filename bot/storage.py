@@ -352,9 +352,11 @@ class Store:
                 "realized": round(r["realized"], 2), "open_cost": round(r["open_cost"], 2),
                 "open_positions": int(r["open_n"]), "equity_at_cost": round(bankroll + r["realized"], 2)}
 
-    def realized_today(self, day_start):
-        r = self.q("SELECT COALESCE(SUM(pnl),0) p FROM bets WHERE status='graded' AND graded_ts>=?",
-                   (day_start,))
+    def realized_today(self, day_start, mode=None):
+        """Settled/closed P&L for the selected account mode, never paper+live mixed."""
+        r = self.q("""SELECT COALESCE(SUM(pnl),0) p FROM bets
+                      WHERE status='graded' AND graded_ts>=?
+                        AND (? IS NULL OR mode=?)""", (day_start, mode, mode))
         return r[0]["p"]
 
     def has_open_event_bet(self, event_ticker):
