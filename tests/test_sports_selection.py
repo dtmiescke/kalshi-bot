@@ -14,6 +14,8 @@ class TestSportsSelection(unittest.TestCase):
         self.assertIsNone(settings.selected_series())
         self.assertFalse(settings.combos_enabled)
         self.assertTrue(settings.combo_research_enabled)
+        self.assertEqual(settings.combo_min_legs, 3)
+        self.assertEqual(settings.combo_max_legs, 8)
 
     def test_manual_allowlist_is_normalized(self):
         with patch.dict(os.environ, {"SPORTS_MODE": "manual", "SPORTS_SELECTED": "kxnflgame, KXNBAGAME"}):
