@@ -1,29 +1,153 @@
-"""Read-only Kalshi combo discovery.
+"""Read-only, conservative Kalshi combo research and fee-aware opportunity ranking.
 
-The current trading client does not implement Kalshi's combo RFQ/quote lifecycle.
-This module intentionally discovers and records actual multivariate events only;
-it never fabricates a parlay price or submits an order.
+Never submits RFQs, accepts quotes, creates combo markets, or places orders.
+A combo is ranked only when every leg has fresh model evidence, each leg belongs
+to a distinct underlying event, and the actual combo market exposes a usable ask.
 """
+import json
 import time
 
+from . import brain, risk
+from .signals.base import Reading
 
-def scan(client, store, max_events=500):
+EXCLUDED_TERMS = (
+    "combat sports", "mma", "ufc", "boxing", "tennis", "golf", "pga", "lpga",
+    "motorsport", "formula 1", "formula-one", "nascar", "indycar", "esports",
+    "e-sports", "league of legends", "counter-strike", "dota",
+)
+
+
+def _price(value):
+    """Parse Kalshi dollar prices or legacy cents into a 0..1 price."""
+    if value is None or value == "":
+        return None
+    try:
+        p = float(str(value).replace("$", "").strip())
+    except (TypeError, ValueError):
+        return None
+    if p > 1:
+        p /= 100.0
+    return p if 0 < p < 1 else None
+
+
+def _market_ask(market, side):
+    """Use an actual displayed ask; if absent, mirror the opposite-side bid."""
+    ask = _price(market.get(f"{side}_ask_dollars", market.get(f"{side}_ask")))
+    if ask is not None:
+        return ask
+    opposite = "no" if side == "yes" else "yes"
+    bid = _price(market.get(f"{opposite}_bid_dollars", market.get(f"{opposite}_bid")))
+    return round(1.0 - bid, 4) if bid is not None else None
+
+
+def score_combo_probabilities(leg_probabilities, yes_ask, no_ask,
+                              fee_rate=0.07, min_edge=0.06):
+    """Score an ALL-legs-win combo using conservative joint-probability bounds.
+
+    Independence is only considered when the caller has already verified that
+    the legs belong to distinct events. The product is then discounted by a
+    leg-count-dependent uncertainty haircut. NO uses the opposite bound so
+    uncertainty cannot artificially improve either side's edge.
+    """
+    probs = [float(p) for p in leg_probabilities]
+    if len(probs) < 2 or any(not 0 < p < 1 for p in probs):
+        return {"eligible": False, "reason": "invalid leg probabilities"}
+    product = 1.0
+    for p in probs:
+        product *= p
+    haircut = min(0.10, 0.03 + 0.015 * (len(probs) - 2))
+    p_yes_conservative = max(0.0, product - haircut)
+    p_yes_upper = min(1.0, product + haircut)
+    scored = []
+    for side, ask, win_prob in (
+        ("yes", yes_ask, p_yes_conservative),
+        ("no", no_ask, 1.0 - p_yes_upper),
+    ):
+        price = _price(ask)
+        if price is None:
+            continue
+        fee = risk.taker_fee(1, price, fee_rate)
+        edge = win_prob - price - fee
+        cost = price + fee
+        scored.append({
+            "side": side, "ask": round(price, 4), "fee_per_contract": round(fee, 4),
+            "conservative_win_probability": round(win_prob, 4),
+            "expected_profit_per_contract": round(edge, 4),
+            "expected_roi_on_cost": round(edge / cost, 4) if cost else None,
+            "passes_min_edge": edge >= float(min_edge),
+        })
+    best = max(scored, key=lambda x: x["expected_profit_per_contract"], default=None)
+    return {
+        "eligible": bool(best and best["passes_min_edge"]),
+        "reason": None if best and best["passes_min_edge"] else "no side clears fee-adjusted minimum edge",
+        "independence_product": round(product, 4),
+        "uncertainty_haircut": round(haircut, 4),
+        "candidates": sorted(scored, key=lambda x: x["expected_profit_per_contract"], reverse=True),
+        "best": best,
+    }
+
+
+def _leg_forecast(store, ticker, now, max_age_s=7200):
+    """Blend the freshest per-signal readings for one underlying market."""
+    rows = store.q(
+        "SELECT ts, signal, prob, confidence, detail FROM signal_readings "
+        "WHERE ticker=? AND ts>=? ORDER BY ts DESC",
+        (ticker, now - max_age_s),
+    )
+    latest = {}
+    for row in rows:
+        if row["signal"] in latest:
+            continue
+        try:
+            detail = json.loads(row["detail"] or "{}")
+        except (TypeError, ValueError):
+            detail = {}
+        latest[row["signal"]] = Reading(
+            row["signal"], float(row["prob"]), float(row["confidence"]), detail
+        )
+    readings = list(latest.values())
+    # A market quote alone is not enough to claim the bot has an informational edge.
+    if not readings or not any(r.name != "kalshi_market" for r in readings):
+        return None
+    prob, confidence = brain.blend(readings, brain.get_weights(store, "sports"))
+    if prob is None:
+        return None
+    return {"prob_yes": prob, "confidence": confidence, "signals": sorted(r.name for r in readings),
+            "latest_ts": max((int(row["ts"]) for row in rows), default=0)}
+
+
+def _excluded(event, market, legs):
+    parts = [
+        event.get("title", ""), event.get("sub_title", ""), event.get("category", ""),
+        market.get("title", ""), market.get("subtitle", ""), market.get("yes_sub_title", ""),
+        market.get("no_sub_title", ""), market.get("ticker", ""),
+    ]
+    for leg in legs:
+        parts.extend([leg.get("market_ticker", ""), leg.get("event_ticker", "")])
+    text = " ".join(str(x).lower() for x in parts)
+    return any(term in text for term in EXCLUDED_TERMS)
+
+
+def scan(client, store, settings=None, max_events=500, max_age_s=7200):
     now = int(time.time())
+    fee_rate = float(getattr(settings, "taker_fee_rate", 0.07))
+    min_edge = float(getattr(settings, "combo_min_edge", 0.06))
+    max_legs = int(getattr(settings, "combo_max_legs", 3))
     try:
         events = client.multivariate_events(status="open")
     except Exception as exc:
         result = {"enabled": True, "ok": False, "ts": now, "count": 0,
-                  "execution_enabled": False, "error": str(exc)[:240]}
+                  "ranked_count": 0, "execution_enabled": False, "error": str(exc)[:240]}
         store.set_kv("combo_research_health", result)
         return result
 
-    rows = []
+    rows, ranked, skipped = [], [], {}
     for event in events[:max(1, min(2000, int(max_events)))]:
         ticker = event.get("event_ticker") or event.get("ticker")
         if not ticker:
             continue
         markets = event.get("markets") or []
-        rows.append({
+        event_row = {
             "event_ticker": ticker,
             "title": event.get("title") or event.get("sub_title") or "",
             "series_ticker": event.get("series_ticker"),
@@ -31,11 +155,75 @@ def scan(client, store, max_events=500):
             "market_tickers": [m.get("ticker") for m in markets if m.get("ticker")][:50],
             "status": event.get("status"),
             "close_time": event.get("close_time"),
-        })
+            "ranked_markets": [],
+        }
+        for market in markets:
+            mticker = market.get("ticker")
+            legs = market.get("mve_selected_legs") or []
+            if not mticker or not legs:
+                continue
+            if _excluded(event, market, legs):
+                skipped["excluded_sport"] = skipped.get("excluded_sport", 0) + 1
+                continue
+            if len(legs) > max_legs or len(legs) < 2:
+                skipped["leg_count_out_of_range"] = skipped.get("leg_count_out_of_range", 0) + 1
+                continue
+            leg_events = [leg.get("event_ticker") for leg in legs]
+            if any(not x for x in leg_events) or len(set(leg_events)) != len(leg_events):
+                skipped["correlated_or_unknown_event_legs"] = skipped.get("correlated_or_unknown_event_legs", 0) + 1
+                continue
+
+            leg_details, probabilities = [], []
+            missing = False
+            for leg in legs:
+                lticker = leg.get("market_ticker")
+                forecast = _leg_forecast(store, lticker, now, max_age_s) if lticker else None
+                if not forecast:
+                    missing = True
+                    break
+                side = str(leg.get("side", "yes")).lower()
+                if side not in ("yes", "no"):
+                    missing = True
+                    break
+                p_selected = forecast["prob_yes"] if side == "yes" else 1 - forecast["prob_yes"]
+                probabilities.append(max(0.001, min(0.999, p_selected)))
+                leg_details.append({
+                    "market_ticker": lticker, "event_ticker": leg["event_ticker"],
+                    "side": side, "probability": round(p_selected, 4),
+                    "confidence": round(forecast["confidence"], 3),
+                    "signals": forecast["signals"], "latest_ts": forecast["latest_ts"],
+                })
+            if missing:
+                skipped["missing_fresh_external_forecast"] = skipped.get("missing_fresh_external_forecast", 0) + 1
+                continue
+
+            yes_ask, no_ask = _market_ask(market, "yes"), _market_ask(market, "no")
+            scored = score_combo_probabilities(probabilities, yes_ask, no_ask, fee_rate, min_edge)
+            item = {
+                "ticker": mticker, "title": market.get("title") or market.get("subtitle") or "",
+                "leg_count": len(legs), "legs": leg_details,
+                "yes_ask": yes_ask, "no_ask": no_ask, **scored,
+                "status": market.get("status"),
+                "close_time": market.get("close_time"),
+                "execution_enabled": False,
+            }
+            event_row["ranked_markets"].append(item)
+            if item.get("best"):
+                ranked.append({**item, "event_ticker": ticker, "event_title": event_row["title"]})
+        if event_row["ranked_markets"] or event_row["market_count"]:
+            rows.append(event_row)
+
+    ranked.sort(key=lambda x: (
+        bool(x.get("eligible")),
+        x.get("best", {}).get("expected_profit_per_contract", -1e9),
+        x.get("best", {}).get("expected_roi_on_cost", -1e9) or -1e9,
+    ), reverse=True)
     result = {
         "enabled": True, "ok": True, "ts": now, "count": len(rows),
-        "events": rows, "execution_enabled": False,
-        "reason": "Discovery only: combo RFQ quotes, joint-probability validation, fees, fill state, and settlement reconciliation must be implemented and tested before order placement.",
+        "ranked_count": len(ranked), "top_candidates": ranked[:25],
+        "events": rows, "skipped": skipped, "execution_enabled": False,
+        "model": "independent-leg product with conservative uncertainty haircut",
+        "reason": "Research ranking only. It requires distinct events, fresh external leg forecasts and actual displayed combo asks; joint outcomes remain an estimate, not a guarantee. No combo order is placed.",
     }
     store.set_kv("combo_research_health", result)
     return result
