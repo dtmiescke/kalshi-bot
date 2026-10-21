@@ -35,6 +35,8 @@ Unofficial public endpoints may change or throttle requests. Each feed is best-e
 - Event/entity matching is required before evidence is passed into the existing team-specific AI review.
 - Headlines are explicitly treated as untrusted external claims, not instructions.
 - Old headlines are discarded from AI review; source and observation timestamps are preserved.
+- Football is the first sport-specific evidence profile: NFL and college-football event summaries preserve team identities/home-away/score, normalize exposed team metrics (yards, turnovers, sacks, downs, red zone, penalties, possession), and separate player evidence by quarterback, skill-position and defensive roles when ESPN exposes positions. The profile explicitly marks lineup confirmation false and records missing-data flags; it does not itself generate a probability or authorize a bet.
+- Football validation must separately measure probability calibration and market-relative performance by league, market type, and data availability before any feature is allowed to affect bet sizing.
 - New sports without supported independent odds/model coverage are research-only and cannot bypass existing pre-game matching and risk gates.
 - Collected data is stored in the existing SQLite database and does not require a new paid database or service.
 
