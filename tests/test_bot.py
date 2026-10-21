@@ -181,7 +181,7 @@ class FakeCryptoKalshi(FakeKalshi):
 
 def fake_candles(pair):
     now = int(time.time())
-    out, price = [], 99800.0
+    out, price = [], 100000.0
     for i in range(120):                    # gentle climb, small noise
         price += 2.5 + (3 if i % 2 else -3)
         out.append({"ts": now - (120 - i) * 60, "open": price - 1, "high": price + 2,
