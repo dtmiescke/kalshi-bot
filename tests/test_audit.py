@@ -300,6 +300,9 @@ class TestAccountLimits(unittest.TestCase):
         self.assertIsNone(rows[0]["hypothetical_pnl"])
         self.assertAlmostEqual(rows[1]["hypothetical_pnl"], 0.6)
         self.assertIsNone(rows[2]["hypothetical_pnl"])
+        summary = self.st.decision_audit_summary()[0]
+        self.assertEqual(summary["n"], 1)
+        self.assertEqual(summary["snapshots"], 3)
 
     def test_decision_audit_never_creates_fake_bets(self):
         self.st.add_decision_audit({
