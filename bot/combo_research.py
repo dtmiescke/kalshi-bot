@@ -199,6 +199,14 @@ def scan(client, store, settings=None, max_events=2000, max_age_s=7200):
         for market in markets:
             mticker = market.get("ticker")
             legs = market.get("mve_selected_legs") or []
+            # A stale parent event can briefly contain a settled child market.
+            # Never create or refresh a forecast once the exchange exposes outcome.
+            if market.get("result") in ("yes", "no"):
+                skipped["already_settled"] = skipped.get("already_settled", 0) + 1
+                continue
+            if market.get("status") not in (None, "", "active", "open"):
+                skipped["market_not_open"] = skipped.get("market_not_open", 0) + 1
+                continue
             if not mticker or not legs:
                 continue
             if _excluded(event, market, legs):
