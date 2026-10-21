@@ -311,7 +311,7 @@ class Engine:
             from . import combo_research
             summary["combos"] = combo_research.scan(self.data, self.store, settings=self.s)
         weights = brain.get_weights(self.store, "sports")
-        self.betting_ok, why = guard.status(self.store, self.s.bankroll)
+        self.betting_ok, why = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
         summary["betting"] = why
         if not self.betting_ok:
             log.warning("betting paused (%s): researching and learning only", why)
