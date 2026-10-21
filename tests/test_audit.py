@@ -4,6 +4,7 @@ import os
 import tempfile
 import time
 import unittest
+from unittest import mock
 from datetime import datetime, timezone
 
 from bot import brain, guard, history, ml, risk
@@ -34,6 +35,26 @@ class TestAudit(unittest.TestCase):
 
     def tearDown(self):
         self.d.cleanup()
+
+    def test_daily_loss_breaker_separates_paper_and_live_pnl(self):
+        now = int(time.time())
+        start = risk.day_start_ts(now, "America/Chicago")
+        self.st.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,
+                     stake,fee,status,result,pnl,graded_ts)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (now, "paper", "PAPER-LOSS", "PAPER-E", "KXNBAGAME", "yes",
+                   0.5, 1, 0.5, 0.01, "graded", "no", -100.0, now))
+        with mock.patch.dict(os.environ, {"BOT_TIMEZONE": "America/Chicago"}):
+            allowed, reason = guard.status(self.st, 1000, daily_loss_limit=30, mode="live")
+        self.assertTrue(allowed, reason)
+        self.st.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,
+                     stake,fee,status,result,pnl,graded_ts)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (now, "live", "LIVE-LOSS", "LIVE-E", "KXNBAGAME", "yes",
+                   0.5, 1, 0.5, 0.01, "graded", "no", -35.0, now))
+        allowed, reason = guard.status(self.st, 1000, daily_loss_limit=30, mode="live")
+        self.assertFalse(allowed)
+        self.assertIn("daily loss limit", reason)
 
     def test_daily_risk_day_start_matches_central_dashboard_day(self):
         # 04:30 UTC on Oct 21 is 23:30 CDT on Oct 20.
