@@ -2,6 +2,7 @@
 import math
 import time
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from . import brain
 
@@ -52,9 +53,22 @@ def fill_plan_contracts(asks, max_contracts, limit_price):
     return contracts, (cost / contracts if contracts else None)
 
 
-def day_start_ts():
-    now = datetime.now(timezone.utc)
-    return int(now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+def day_start_ts(now_ts=None, tz_name=None):
+    """UTC timestamp for midnight in the configured reporting/risk timezone.
+
+    Using one timezone for daily loss and daily spend limits avoids a reset
+    that disagrees with the dashboard. The UTC fallback is retained if a
+    configured timezone name is invalid.
+    """
+    tz_name = tz_name or os.environ.get("BOT_TIMEZONE", "America/Chicago")
+    try:
+        local_tz = ZoneInfo(tz_name)
+    except Exception:
+        local_tz = timezone.utc
+    now_utc = datetime.fromtimestamp(time.time() if now_ts is None else now_ts, timezone.utc)
+    local_now = now_utc.astimezone(local_tz)
+    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return int(local_midnight.astimezone(timezone.utc).timestamp())
 
 
 def window_key(event_ticker):
