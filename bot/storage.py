@@ -212,7 +212,11 @@ class Store:
             GROUP BY leg_count ORDER BY leg_count""")
 
     def decision_audit_summary(self):
-        return self.q("SELECT decision, COUNT(*) AS n, AVG(brier) AS brier, AVG(hypothetical_pnl) AS diagnostic_pnl FROM decision_audit WHERE outcome IS NOT NULL GROUP BY decision ORDER BY decision")
+        # n counts scored, canonical forecasts; snapshots preserves audit-volume context.
+        return self.q("""SELECT decision, COUNT(brier) AS n, COUNT(*) AS snapshots,
+                         AVG(brier) AS brier, AVG(hypothetical_pnl) AS diagnostic_pnl
+                         FROM decision_audit WHERE outcome IS NOT NULL
+                         GROUP BY decision ORDER BY decision""")
 
     # --- generic -----------------------------------------------------------
     def q(self, sql, args=()):
