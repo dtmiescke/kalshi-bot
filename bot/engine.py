@@ -785,6 +785,10 @@ class Engine:
         if executed:
             order_id = executed.get("order_id", order_id)
             plan["contracts"] = executed.get("contracts", plan["contracts"])
+            # Resting maker fills use the maker fee schedule, and only the
+            # contracts actually filled belong in the ledger.
+            plan["fee"] = risk.taker_fee(0, plan["price"], self.s.taker_fee_rate) + \
+                risk.taker_fee(plan["contracts"], plan["price"], self.s.maker_fee_rate)
         elif self.s.mode in ("demo", "live"):
             try:
                 order = self.trade.place_limit_buy(snap["ticker"], plan["side"],
@@ -800,6 +804,15 @@ class Engine:
                     plan["price"] = round(cost / filled / (100 if cost / filled > 1 else 1), 4)
                 plan["contracts"] = filled
                 plan["stake"] = round(filled * plan["price"], 2)
+                maker_filled = int(num(order, "maker_fill_count") or 0)
+                taker_filled = int(num(order, "taker_fill_count") or max(0, filled - maker_filled))
+                # Recompute fees on actual fill counts and the observed average
+                # price. If the exchange omits fill-type counts, conservatively
+                # treat the unclassified fills as taker fills.
+                plan["fee"] = (
+                    risk.taker_fee(taker_filled, plan["price"], self.s.taker_fee_rate)
+                    + risk.taker_fee(maker_filled, plan["price"], self.s.maker_fee_rate)
+                )
             except Exception as e:
                 log.error("order failed %s: %s", snap["ticker"], e)
                 return
