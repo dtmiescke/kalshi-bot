@@ -155,9 +155,12 @@ def _leg_forecast(store, ticker, now, max_age_s=7200):
     # A market quote alone is not enough to claim the bot has an informational edge.
     if not readings or not any(r.name != "kalshi_market" for r in readings):
         return None
-    prob, confidence = brain.blend(readings, brain.get_weights(store, "sports"))
+    prob, confidence = brain.blend(readings, brain.get_weights(store, brain.domain_of(ticker)))
     if prob is None:
         return None
+    # Calibrate once against prior settled canonical forecasts, then shrink the
+    # probability toward 50% for joint-combo uncertainty.
+    prob = brain.calibrate(prob, store, domain=brain.domain_of(ticker))
     return {"prob_yes": prob, "confidence": confidence, "signals": sorted(r.name for r in readings),
             "external_signal_count": len({r.name for r in readings if r.name != "kalshi_market"}),
             "latest_ts": max((int(row["ts"]) for row in rows), default=0)}
