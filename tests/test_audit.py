@@ -110,7 +110,9 @@ class TestAudit(unittest.TestCase):
         ):
             with self.subTest(final_state=final_state):
                 runner = LiveRunner.__new__(LiveRunner)
-                runner.s = type("SettingsStub", (), {"mode": "demo", "maker_wait_s": 30})()
+                runner.s = type("SettingsStub", (), {
+                    "mode": "demo", "maker_wait_s": 30, "bankroll": 1000.0
+                })()
                 trade = Trade(final_state)
                 recorded, skips, maker_logs = [], [], []
                 runner.engine = type("EngineStub", (), {"trade": trade,
