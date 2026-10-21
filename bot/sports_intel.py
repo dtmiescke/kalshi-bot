@@ -155,6 +155,9 @@ def _parse_espn(payload, source, category, observed_at):
             })
         status = event.get("status") or {}
         status_type = status.get("type") or {}
+        odds = comp.get("odds") or event.get("odds") or []
+        if not isinstance(odds, list):
+            odds = [odds]
         event_row = {
             "id": _clean(event.get("id")), "provider_event_id": _clean(event.get("id")),
             "source": source, "category": category,
@@ -164,7 +167,7 @@ def _parse_espn(payload, source, category, observed_at):
             "state": _clean(status_type.get("state")), "status": _clean(status_type.get("description")),
             "detail": _clean(status_type.get("detail")), "clock": _clean(status.get("displayClock")),
             "period": status.get("period"), "competitors": competitors,
-            "odds": (comp.get("odds") or event.get("odds") or [])[:10],
+            "odds": odds[:10],
             "predictor": event.get("predictor") or comp.get("predictor"),
             "verified": False,
         }
@@ -243,7 +246,7 @@ def collect(store, force=False, now=None):
             summary["scores_seen"] += len(events)
             normalized = []
             for event in events:
-                event["id"] = hashlib.sha256((key + ":" + event["id"]).encode()).hexdigest()
+                event["id"] = hashlib.sha256((key + ":" + event["provider_event_id"] + ":" + str(now // max(ttl, 600))).encode()).hexdigest()
                 event["confidence"] = 0.7 if event.get("state") == "in" else 0.55
                 normalized.append(event)
                 if event.get("state") in ("in", "post") and event.get("provider_event_id"):
@@ -348,6 +351,7 @@ def collect_event_news(store, events, max_events=12, now=None):
             response = _request(url)
             items = _parse_rss(response.content, "Google News RSS event search", "event_news", now)
             for item in items:
+                item["id"] = hashlib.sha256((item["id"] + ":" + ticker).encode()).hexdigest()
                 item["event_ticker"] = ticker
                 item["confidence"] = 0.4 if item.get("published_ts") else 0.2
             new_items += _record_items(store, items)
