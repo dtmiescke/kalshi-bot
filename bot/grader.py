@@ -73,7 +73,7 @@ def learn_from_markets(store, client, max_fetch=150):
             continue
         y = 1 if result == "yes" else 0
         try:
-            store.grade_decision_audit(t, y, now)
+            store.grade_decision_audit(t, y, now, brain.decision_cutoff(t, start))
         except Exception as e:
             log.warning("decision audit grading failed for %s: %s", t, e)
         ml.label(store, t, y)      # live decisions become training rows
@@ -119,7 +119,10 @@ def grade_decision_audits(store, client, max_fetch=150):
         result = market.get("result")
         if result not in ("yes", "no"):
             continue
-        graded += store.grade_decision_audit(ticker, 1 if result == "yes" else 0)
+        start = store.get_kv(f"start_{ticker}")
+        cutoff = brain.decision_cutoff(ticker, start) if start else 0
+        graded += store.grade_decision_audit(
+            ticker, 1 if result == "yes" else 0, cutoff_ts=cutoff)
     return graded
 
 
