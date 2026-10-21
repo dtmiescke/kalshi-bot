@@ -302,6 +302,9 @@ def collect_event_news(store, events, max_events=12, now=None):
     new_items = 0
     failures = 0
     candidates = []
+    budget = max(0, min(50, int(max_events)))
+    if budget == 0:
+        return {"queried": 0, "new_items": 0, "failures": 0}
     for event in events:
         ticker = _clean(event.get("event_ticker") or event.get("ticker"), 180)
         if not ticker:
@@ -324,7 +327,7 @@ def collect_event_news(store, events, max_events=12, now=None):
         query_text += " (injury OR lineup OR roster OR suspension OR starter OR preview OR odds)"
         url = "https://news.google.com/rss/search?q=" + urllib.parse.quote(query_text) + "&hl=en-US&gl=US&ceid=US:en"
         candidates.append((key, ticker, url))
-        if len(candidates) >= max(0, int(max_events)):
+        if len(candidates) >= budget:
             break
     for key, ticker, url in candidates:
         queried += 1
