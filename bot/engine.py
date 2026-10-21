@@ -772,6 +772,10 @@ class Engine:
             self._skip(summary, "sportsbook odds too old")
             return None
         prob, conf = brain.blend(readings, weights)
+        if prob is not None:
+            # Calibrate using settled canonical audits across candidates and
+            # rejections, not just the subset the bot happened to bet.
+            prob = brain.calibrate(prob, self.store, domain=brain.domain_of(snap.get("series", "")))
         if prob is None:
             self._record_decision(snap, readings, "rejected", "no calibrated probability", conf=conf)
             return None
