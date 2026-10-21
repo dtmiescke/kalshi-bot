@@ -164,6 +164,8 @@ def _parse_espn(payload, source, category, observed_at):
             "state": _clean(status_type.get("state")), "status": _clean(status_type.get("description")),
             "detail": _clean(status_type.get("detail")), "clock": _clean(status.get("displayClock")),
             "period": status.get("period"), "competitors": competitors,
+            "odds": (comp.get("odds") or event.get("odds") or [])[:10],
+            "predictor": event.get("predictor") or comp.get("predictor"),
             "verified": False,
         }
         if event_row["id"] and competitors:
