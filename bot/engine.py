@@ -171,6 +171,37 @@ class Engine:
         if intel.news_due(self.store, mkt["ticker"]):
             if sport not in self._headlines:
                 self._headlines[sport] = intel.fetch_headlines(sport)
+                # Merge the free-first scheduled web collector into the existing
+                # event-specific news analysis. Collected claims remain unverified
+                # evidence and cannot independently authorize a trade.
+                try:
+                    from . import sports_intel
+                    category_for = {
+                        "americanfootball_nfl": "football", "americanfootball_ncaaf": "football",
+                        "basketball_nba": "basketball", "basketball_wnba": "basketball",
+                        "basketball_ncaab": "basketball", "baseball_mlb": "baseball",
+                        "icehockey_nhl": "hockey", "soccer_mls": "soccer",
+                        "soccer_epl": "soccer", "soccer_uefa": "soccer",
+                        "tennis_atp": "tennis", "tennis_wta": "tennis",
+                        "mma_mixed_martial_arts": "mma", "golf_pga": "golf",
+                        "motorsport_f1": "motorsports", "esports": "esports",
+                    }
+                    category = category_for.get(sport)
+                    if category:
+                        now_ts = int(time.time())
+                        for item in sports_intel.recent(self.store, limit=250, category=category, kind="news"):
+                            published = item.get("published_ts")
+                            if published and now_ts - published > 48 * 3600:
+                                continue
+                            self._headlines[sport].append({
+                                "headline": item.get("title", ""),
+                                "description": item.get("summary", ""),
+                                "published": published or item.get("observed_ts"),
+                                "source": item.get("source", ""),
+                                "url": item.get("url", ""),
+                            })
+                except Exception as e:
+                    log.debug("cached web intelligence unavailable for %s: %s", sport, e)
             heads = intel.relevant(self._headlines[sport], [team, opp or ""])
             book = hist[-1]["fair_prob"] if hist else None
             r = intel.ai_news(self.llm, team, opp, mid, book, heads, context)
