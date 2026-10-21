@@ -13,10 +13,10 @@ This is an implementation note for the existing Kalshi Intelligence Bot. It must
 - A gated, read-only discovery pass for actual Kalshi multivariate/combo events.
 
 ## Sports selection
-- `SPORTS_MODE=all` (default): discover the public Kalshi Sports series catalog and open events.
-- `SPORTS_MODE=manual`: only scan the comma-separated series tickers in `SPORTS_SELECTED`.
+- `SPORTS_MODE=all` (default): discover the public Kalshi Sports series catalog and open events across all available sport categories.
+- `SPORTS_MODE=manual`: only scan the comma-separated series tickers in `SPORTS_SELECTED`; validation fails if the list is empty.
 - Existing configured odds-backed series are NFL, NBA, MLB, NHL and college football.
-- Other discovered sports are scanned and recorded, but remain research-only unless the bot has a verified independent probability source and a supported odds mapping. Do not assume that catalog discovery alone qualifies a series for automated trading.
+- Other discovered sports are scanned and recorded too, but remain research-only unless the bot has a verified independent probability source and supported odds mapping. Catalog discovery alone never qualifies a series for automated trading.
 
 Example manual allowlist:
 `SPORTS_MODE=manual`
@@ -39,7 +39,8 @@ Unofficial public endpoints may change or throttle requests. Each feed is best-e
 - Collected data is stored in the existing SQLite database and does not require a new paid database or service.
 
 ## Combos
-`COMBOS_ENABLED=no` by default. If enabled, the bot discovers and records actual open Kalshi multivariate events. This is **research-only**: the current client does not yet implement the complete combo RFQ/quote, joint-probability, fees, fill/reconciliation and settlement lifecycle, so it does not place combo orders. Do not set this to yes expecting combo execution.
+`COMBO_RESEARCH_ENABLED=yes` enables read-only combo discovery and ranking; the default leg range is 3–8, with ranking preference for 3–5. Combo research uses actual market asks, fee estimates, fresh per-leg model evidence, distinct-event checks and an uncertainty haircut, and it can audit only before the configured close cutoff. Combo forecasts are graded after real settlement.
+`COMBOS_ENABLED=no` must remain off: the current client does not implement the complete combo RFQ/quote, joint-probability, fees, fill/reconciliation and settlement lifecycle. Setting it to yes now fails validation instead of silently implying orders can be placed. No combo orders are submitted.
 
 ## CI and validation
 The staging branch adds a free GitHub Actions workflow that compiles Python modules and runs the unittest suite on branch pushes and pull requests. Do not merge until CI passes and the data/API behavior is reviewed.
