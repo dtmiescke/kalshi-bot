@@ -72,6 +72,10 @@ def learn_from_markets(store, client, max_fetch=150):
         if result not in ("yes", "no"):
             continue
         y = 1 if result == "yes" else 0
+        try:
+            store.grade_decision_audit(t, y, now)
+        except Exception as e:
+            log.warning("decision audit grading failed for %s: %s", t, e)
         ml.label(store, t, y)      # live decisions become training rows
         # the last reading of each signal before the game started
         rows = store.q("""SELECT signal, prob FROM signal_readings r
