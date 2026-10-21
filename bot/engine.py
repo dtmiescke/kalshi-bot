@@ -288,12 +288,21 @@ class Engine:
                     team_terms = [str(x).lower() for x in (team, opp) if x and len(str(x)) > 2]
                     for stat_category in stat_categories.get(sport, []):
                         for kind in ("stats", "score"):
-                            for item in sports_intel.recent(self.store, limit=30, category=stat_category, kind=kind):
+                            for item in sports_intel.recent(self.store, limit=100, category=stat_category, kind=kind):
+                                # Do not let a stale box score or an unrelated event
+                                # masquerade as current matchup evidence. Public feeds
+                                # can retain old games and entity names can overlap.
+                                observed = int(item.get("observed_ts") or 0)
+                                age_seconds = max(0, int(time.time()) - observed) if observed else None
+                                if age_seconds is None or age_seconds > 72 * 3600:
+                                    continue
                                 serialized = json.dumps(item, ensure_ascii=False).lower()
-                                if team_terms and not any(term in serialized for term in team_terms):
+                                if team_terms and not all(term in serialized for term in team_terms):
                                     continue
                                 stat_rows.append({
-                                    "event": item.get("title") or item.get("name"), "observed_ts": item.get("observed_ts"),
+                                    "event": item.get("title") or item.get("name"), "observed_ts": observed,
+                                    "evidence_age_seconds": age_seconds,
+                                    "source": item.get("source"), "verified": item.get("verified", False),
                                     "state": item.get("state"), "scoreboard": item.get("scoreboard") or item.get("competitors", []),
                                     "team_stats": item.get("team_stats", []), "player_stats": item.get("player_stats", []),
                                     "leaders": item.get("leaders", []), "injuries": item.get("injuries"),
