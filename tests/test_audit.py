@@ -60,7 +60,8 @@ class TestAudit(unittest.TestCase):
     def test_04_real_fee_edge_check(self):
         # $1 = 10 contracts at $0.10: per-100 fee estimate says 3.03% edge, but the
         # real order's fee rounds up from 6.3c to 7c and leaves only 2.96%
-        self.s.fixed_bet = 1.0
+        # The 25% earned-size floor means a $4 request produces this $1 test budget.
+        self.s.fixed_bet = 4.0
         book = {"yes": [(0.09, 50)], "no": [(0.90, 50)]}
         plan, why = risk.decide(self.s, self.st, {"ticker": "T", "event_ticker": "E"},
                                 0.1366, 0.9, book, min_edge=0.03)
