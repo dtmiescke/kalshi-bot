@@ -133,21 +133,30 @@ def learn(store, graded, domain=None):
 
 # --- calibration ---------------------------------------------------------------
 def calibration_table(store, buckets=10, domain=None):
-    """Bucket graded model probabilities and compare with actual win rates.
-    Sports and crypto are calibrated SEPARATELY: mixing them would let one
-    domain's over-confidence wrongly correct the other."""
-    rows = store.q("""SELECT model_prob, side, result, series FROM bets
-                      WHERE status='graded' AND result IN ('yes','no')
-                      AND model_prob IS NOT NULL""")
+    """Calibrate YES probabilities against settled outcomes from one forecast per market.
+
+    Decision-audit rows are scored only at the canonical pre-event cutoff, so
+    rejected opportunities contribute without counting repeated scans as new samples.
+    Older installations fall back to settled bets until audit history is available.
+    """
+    rows = store.q("""SELECT model_prob, outcome, series FROM decision_audit
+                      WHERE brier IS NOT NULL AND model_prob IS NOT NULL
+                      AND outcome IN (0,1)""")
+    audit_source = bool(rows)
+    if not rows:
+        rows = store.q("""SELECT model_prob, result, series FROM bets
+                          WHERE status='graded' AND result IN ('yes','no')
+                          AND model_prob IS NOT NULL""")
     if domain:
         rows = [r for r in rows if domain_of(r["series"]) == domain]
     table = defaultdict(lambda: [0, 0])
     for r in rows:
-        p = r["model_prob"] if r["side"] == "yes" else 1 - r["model_prob"]
-        won = 1 if r["result"] == r["side"] else 0
+        p = float(r["model_prob"])
+        outcome = (int(r["outcome"]) if audit_source
+                   else 1 if r["result"] == "yes" else 0)
         b = min(int(p * buckets), buckets - 1)
         table[b][0] += 1
-        table[b][1] += won
+        table[b][1] += outcome
     return {b: {"n": n, "predicted": (b + 0.5) / buckets, "actual": w / n}
             for b, (n, w) in sorted(table.items())}
 
