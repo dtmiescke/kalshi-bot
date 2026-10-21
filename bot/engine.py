@@ -198,7 +198,8 @@ class Engine:
         start = iso_to_ts(ev_match.get("commence_time")) if ev_match else None
         if not (self.llm and team and start and 0 < start - now < 24 * 3600):
             return None
-        if intel.news_due(self.store, mkt["ticker"]):
+        if intel.news_due(self.store, mkt["ticker"],
+                          minutes=max(5, int(os.environ.get("SPORTS_AI_NEWS_REFRESH_MINUTES", "30")))):
             if sport not in self._headlines:
                 self._headlines[sport] = intel.fetch_headlines(sport)
                 # Merge the free-first scheduled web collector into the existing
