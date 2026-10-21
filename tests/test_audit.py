@@ -37,6 +37,13 @@ class TestAudit(unittest.TestCase):
     def tearDown(self):
         self.d.cleanup()
 
+    def test_earned_size_uses_only_selected_account_mode(self):
+        bet(self.st, mode="paper", ticker="PAPER-LOSS", status="graded", pnl=-20.0)
+        bet(self.st, mode="live", ticker="LIVE-WIN", status="graded", pnl=20.0)
+        market = {"series": "KXNBAGAME", "ticker": "T"}
+        self.assertEqual(risk.earned_size(self.st, market, full_at=1, mode="paper"), 0.25)
+        self.assertEqual(risk.earned_size(self.st, market, full_at=1, mode="live"), 1.0)
+
     def test_daily_loss_breaker_separates_paper_and_live_pnl(self):
         now = int(time.time())
         start = risk.day_start_ts(now, "America/Chicago")
