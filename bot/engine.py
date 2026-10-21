@@ -31,7 +31,15 @@ def _series_sport(series, metadata=None):
     meta = metadata or {}
     text = " ".join([str(series), str(meta.get("title", "")), str(meta.get("category", "")),
                      " ".join(str(v) for v in (meta.get("tags") or []))]).lower()
+    # Apply exclusions before broad category keywords so excluded sports cannot
+    # fall through as "other" and evade the intended exclusion.
     rules = (
+        (("mma", "ufc", "mixed martial arts", "ultimate fighting"), "mma"),
+        (("boxing", "boxer"), "boxing"),
+        (("tennis", "atp", "wta"), "tennis"),
+        (("motorsport", "formula 1", "formula-one", "f1", "nascar", "indycar", "racing"), "motorsports"),
+        (("golf", "pga", "lpga", "liv golf"), "golf"),
+        (("esports", "e-sports", "league of legends", "counter-strike", "dota", "valorant"), "esports"),
         (("nfl", "college football", "football"), "football"),
         (("basketball", "wnba", "nba", "ncaab"), "basketball"),
         (("baseball", "mlb"), "baseball"),
