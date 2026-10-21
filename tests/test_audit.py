@@ -128,7 +128,8 @@ class TestAudit(unittest.TestCase):
                 runner._maker_edge_gone = lambda *args: False
                 runner._side_edge = lambda *args: 0.1
                 runner._skip = lambda why: skips.append(why)
-                runner.check_makers(101)
+                with mock.patch("bot.live.runner.guard.status", return_value=(True, "ok")):
+                    runner.check_makers(101)
                 self.assertEqual(trade.cancel_calls, 1)
                 self.assertEqual(bool(recorded), should_record)
                 if should_record:
