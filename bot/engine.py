@@ -234,6 +234,33 @@ class Engine:
                                 "source": item.get("source", ""),
                                 "url": item.get("url", ""),
                             })
+                    # Include recent live/final scoreboard and box-score evidence
+                    # for these teams, without treating an unverified feed as truth.
+                    stat_categories = {
+                        "americanfootball_nfl": ["nfl"], "americanfootball_ncaaf": ["college_football"],
+                        "basketball_nba": ["nba"], "basketball_wnba": ["wnba"],
+                        "baseball_mlb": ["mlb"], "icehockey_nhl": ["nhl"],
+                        "soccer_epl": ["soccer_epl"], "soccer_mls": ["soccer_mls"],
+                        "soccer_uefa": ["soccer_uefa"], "tennis_atp": ["tennis_atp"],
+                        "tennis_wta": ["tennis_wta"], "golf_pga": ["golf_pga"],
+                        "mma_mixed_martial_arts": ["mma_ufc"],
+                    }
+                    stat_rows = []
+                    team_terms = [str(x).lower() for x in (team, opp) if x and len(str(x)) > 2]
+                    for stat_category in stat_categories.get(sport, []):
+                        for item in sports_intel.recent(self.store, limit=30, category=stat_category, kind="stats"):
+                            serialized = json.dumps(item, ensure_ascii=False).lower()
+                            if team_terms and not any(term in serialized for term in team_terms):
+                                continue
+                            stat_rows.append({
+                                "event": item.get("title"), "observed_ts": item.get("observed_ts"),
+                                "state": item.get("state"), "scoreboard": item.get("scoreboard", []),
+                                "team_stats": item.get("team_stats", []),
+                                "leaders": item.get("leaders", []),
+                            })
+                    if stat_rows:
+                        context = dict(context or {})
+                        context["recent_scoreboard_stats"] = stat_rows[:3]
                 except Exception as e:
                     log.debug("cached web intelligence unavailable for %s: %s", sport, e)
             heads = intel.relevant(self._headlines[sport], [team, opp or ""])
