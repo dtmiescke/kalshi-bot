@@ -725,7 +725,8 @@ class Engine:
         (pl, ql), (ph, qh) = yes_low[0], no_high[0]
         event_ticker = a.get("event_ticker") or a["low"]
         budget = self._arbitrage_budget(event_ticker)
-        n = int(min(ql, qh, budget // (pl + ph))) if budget > 0 else 0
+        per_leg_cap = int(self.s.max_per_bet // max(pl, ph)) if max(pl, ph) > 0 else 0
+        n = int(min(ql, qh, per_leg_cap, budget // (pl + ph))) if budget > 0 else 0
         fees = risk.taker_fee(n, pl, self.s.taker_fee_rate) + risk.taker_fee(n, ph, self.s.taker_fee_rate)
         if n < 1 or n * (1 - pl - ph) - fees <= 0:
             return
@@ -781,6 +782,15 @@ class Engine:
         budget = self._arbitrage_budget(ev["event_ticker"])
         plan = guard.arb_plan(ev["series_ticker"], books[0], books[1],
                               self.s.taker_fee_rate, budget)
+        if not plan:
+            return False
+        # Each leg is an individual bet and must independently respect MAX_PER_BET.
+        per_leg_cap = int(self.s.max_per_bet // max(plan["price_a"], plan["price_b"]))
+        if plan["contracts"] > per_leg_cap:
+            plan = guard.arb_plan(
+                ev["series_ticker"], books[0], books[1], self.s.taker_fee_rate,
+                per_leg_cap * (plan["price_a"] + plan["price_b"])
+            )
         if not plan:
             return False
         allowed, reason = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
