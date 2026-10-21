@@ -236,30 +236,41 @@ def train(store, min_windows=300, fee_rate=0.07):
         metrics["top_features"] = [["error", str(e)]]
 
     champ = load_meta()
+    champ_path = os.path.join(MODEL_DIR, "crypto_model.joblib")
+    champion_present = bool(champ) or os.path.exists(champ_path)
     champ_ll = None
-    if champ and os.path.exists(os.path.join(MODEL_DIR, "crypto_model.joblib")):
+    champion_eval_ok = not champion_present
+    if champion_present and champ and os.path.exists(champ_path):
         try:
-            cm = joblib.load(os.path.join(MODEL_DIR, "crypto_model.joblib"))
+            cm = joblib.load(champ_path)
             champ_ll = logloss(cm["iso"].predict_with(cm["model"], X[te]), y[te], w[te])
-        except Exception:
+            champion_eval_ok = math.isfinite(champ_ll)
+        except Exception as e:
+            # Fail closed: never replace an existing champion that could not be evaluated.
+            log.exception("Could not evaluate existing champion; candidate cannot be promoted: %s", e)
             champ_ll = None
-    metrics["test_logloss_champion"] = round(champ_ll, 5) if champ_ll else None
+            champion_eval_ok = False
+    metrics["test_logloss_champion"] = round(champ_ll, 5) if champ_ll is not None else None
 
     # PROMOTION GATES — every one must pass:
     # 1. better than Kalshi's own price on unseen windows...
     # 2. ...and not by luck: wins in >= 90% of bootstrap resamples of those windows
-    # 3. better than the current champion
+    # 3. better than the current champion; if a champion exists but cannot be evaluated, reject promotion
     # 4. enough unseen windows to judge at all
     # 5. simulated trades on unseen data made money (>= 30 trades)
     conf = paired_bootstrap(p_test, kalshi_p[te], y[te], groups[te])
     min_test = int(os.environ.get("ML_MIN_TEST_WINDOWS", 100))
     beats_kalshi = metrics["test_logloss_model"] < metrics["test_logloss_kalshi"] * 0.998
-    beats_champ = champ_ll is None or metrics["test_logloss_model"] < champ_ll
+    beats_champ = champion_eval_ok and (
+        not champion_present or
+        (champ_ll is not None and metrics["test_logloss_model"] < champ_ll)
+    )
     profitable = [t for t, v in metrics["test_trades"].items()
                   if v["trades"] >= 30 and (v["roi"] or 0) > 0]
     enough = metrics["test_windows"] >= min_test
     promoted = beats_kalshi and conf >= 0.90 and beats_champ and bool(profitable) and enough
     metrics.update({"beats_kalshi": beats_kalshi, "bootstrap_confidence": round(conf, 3),
+                    "champion_present": champion_present, "champion_evaluation_ok": champion_eval_ok,
                     "beats_champion": beats_champ, "enough_test_windows": enough,
                     "profitable_thresholds": profitable, "promoted": promoted})
     if promoted:
