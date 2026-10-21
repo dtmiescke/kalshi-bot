@@ -200,6 +200,20 @@ def _football_matchup_profile(event, box, raw, observed_at):
         })
 
     team_rows = []
+    metric_aliases = {
+        "total_yards": ("totalyards", "total yards", "yards"),
+        "passing_yards": ("netpassingyards", "passingyards", "passing yards", "pass yards"),
+        "rushing_yards": ("rushingyards", "rushing yards", "rush yards"),
+        "turnovers": ("turnovers", "giveaways"),
+        "takeaways": ("takeaways", "defensive takeaways"),
+        "sacks_allowed": ("sacksallowed", "sacks against"),
+        "sacks": ("sacks", "sacks made"),
+        "third_down": ("thirddowneff", "third down", "3rd down"),
+        "fourth_down": ("fourthdowneff", "fourth down", "4th down"),
+        "red_zone": ("redzone", "red zone"),
+        "penalties": ("penalties",),
+        "time_of_possession": ("possessiontime", "time of possession"),
+    }
     for team_block in (box.get("teams") or [])[:4]:
         team_obj = team_block.get("team") or {}
         stats = {}
@@ -210,9 +224,18 @@ def _football_matchup_profile(event, box, raw, observed_at):
             value = stat.get("displayValue", stat.get("value", stat.get("display")))
             if key and value is not None:
                 stats[key] = _clean(value, 80)
+        normalized_metrics = {}
+        for metric, aliases in metric_aliases.items():
+            matches = [(key, value) for key, value in stats.items()
+                       if any(alias in key.replace("_", "").replace(" ", "") or
+                              alias.replace("_", "").replace(" ", "") in key.replace("_", "").replace(" ", "")
+                              for alias in aliases)]
+            if matches:
+                normalized_metrics[metric] = [{"source_label": key, "value": value} for key, value in matches[:3]]
         team_rows.append({
             "team": _clean(team_obj.get("displayName") or team_obj.get("name"), 100),
             "statistics": stats,
+            "key_metrics": normalized_metrics,
         })
 
     player_rows = []
