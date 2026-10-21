@@ -114,6 +114,30 @@ class TestMath(unittest.TestCase):
             self.assertAlmostEqual(table[7]["predicted"], 0.75)
             self.assertEqual(table[7]["actual"], 0.0)
 
+    def test_learning_domains_are_league_specific_without_changing_calibration_domain(self):
+        cases = {
+            "KXNBAGAME-26OCT20BOSNYK": "nba",
+            "KXNFLGAME-26OCT20": "nfl",
+            "KXMLBGAME-26OCT20": "mlb",
+            "KXNHLGAME-26OCT20": "nhl",
+            "KXBTC15M-ABC": "crypto",
+            "KXUNKNOWNSPORT-ABC": "sports",
+        }
+        for ticker, expected in cases.items():
+            self.assertEqual(brain.learning_domain_of(ticker), expected, ticker)
+        self.assertEqual(brain.domain_of("KXNBAGAME-26OCT20"), "sports")
+        self.assertEqual(brain.domain_of("KXBTC15M-ABC"), "crypto")
+
+    def test_league_weights_override_shared_sports_weights_only_for_that_league(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = Store(os.path.join(d, "weights.sqlite"))
+            store.set_weight("book_consensus@sports", 1.1, "shared sports")
+            store.set_weight("book_consensus@nba", 2.2, "NBA-specific")
+            self.assertEqual(brain.get_weights(store, "nba")["book_consensus"], 2.2)
+            self.assertEqual(brain.get_weights(store, "nfl")["book_consensus"], 1.1)
+            self.assertEqual(brain.get_weights(store, "crypto")["book_consensus"],
+                             brain.DEFAULT_WEIGHTS["book_consensus"])
+
     def test_blend_moves_toward_strong_signal(self):
         rs = [Reading("kalshi_market", 0.55, 1.0), Reading("book_consensus", 0.62, 1.0)]
         p, _ = brain.blend(rs, brain.DEFAULT_WEIGHTS)
