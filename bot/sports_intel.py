@@ -235,9 +235,14 @@ def collect(store, force=False, now=None):
 
     summary_candidates = []
     # Scoreboard JSON endpoints; one request per configured league per TTL window.
+    high_frequency_scoreboards = {
+        "nfl", "college_football", "nba", "wnba", "college_basketball",
+        "mlb", "nhl", "soccer_mls", "soccer_epl", "soccer_uefa",
+    }
     for category, (sport, league) in ESPN_SCOREBOARDS.items():
         key = "espn:" + category
-        if not force and not _due(store, key, ttl, now):
+        source_ttl = ttl if category in high_frequency_scoreboards else max(ttl, 3600)
+        if not force and not _due(store, key, source_ttl, now):
             continue
         url = f"https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/scoreboard"
         try:
@@ -268,7 +273,8 @@ def collect(store, force=False, now=None):
     for category, sport, league, event in summary_candidates[:max_summaries]:
         provider_id = event["provider_event_id"]
         key = f"summary:{category}:{provider_id}"
-        if not force and not _due(store, key, ttl, now):
+        source_ttl = ttl if category in high_frequency_scoreboards else max(ttl, 3600)
+        if not force and not _due(store, key, source_ttl, now):
             continue
         url = f"https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/summary"
         try:
@@ -276,7 +282,7 @@ def collect(store, force=False, now=None):
             raw = response.json()
             box = raw.get("boxscore") or {}
             payload = {
-                "id": hashlib.sha256(f"{key}:{now // max(ttl, 600)}".encode()).hexdigest(),
+                "id": hashlib.sha256(f"{key}:{now // max(source_ttl, 600)}".encode()).hexdigest(),
                 "kind": "stats", "category": category, "source": "ESPN event summary",
                 "title": event.get("name") or event.get("short_name") or provider_id,
                 "observed_ts": now, "published_ts": None, "confidence": 0.65,
