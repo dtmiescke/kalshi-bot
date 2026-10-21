@@ -38,6 +38,11 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           ML_MIN_WINDOWS: ${{ vars.ML_MIN_WINDOWS || '300' }}
+          ML_MIN_TEST_WINDOWS: ${{ vars.ML_MIN_TEST_WINDOWS || '100' }}
+          # signed reads get better rate limits than anonymous GitHub servers
+          KALSHI_DATA_URL: ${{ vars.KALSHI_DATA_URL }}
+          KALSHI_DATA_KEY_ID: ${{ secrets.KALSHI_DATA_KEY_ID }}
+          KALSHI_DATA_PRIVATE_KEY: ${{ secrets.KALSHI_DATA_PRIVATE_KEY }}
         run: |
           python -m bot.main history ${{ github.event.inputs.days || '7' }}
           python -m bot.main train
@@ -45,4 +50,11 @@ jobs:
         if: always()
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # The save step rebuilds the dashboard + bets.csv, so it needs the same
+          # mode/bankroll/timezone as the run. Without these it always showed PAPER.
+          BOT_MODE: ${{ vars.BOT_MODE || 'paper' }}
+          LIVE_TRADING_CONFIRMED: ${{ vars.LIVE_TRADING_CONFIRMED || 'no' }}
+          BANKROLL: ${{ vars.BANKROLL || '1000' }}
+          DAILY_LOSS_LIMIT: ${{ vars.DAILY_LOSS_LIMIT || '30' }}
+          BOT_TIMEZONE: ${{ vars.BOT_TIMEZONE || 'America/Chicago' }}
         run: bash .github/save.sh
