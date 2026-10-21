@@ -145,7 +145,8 @@ def _parse_espn(payload, source, category, observed_at):
         status = event.get("status") or {}
         status_type = status.get("type") or {}
         event_row = {
-            "id": _clean(event.get("id")), "source": source, "category": category,
+            "id": _clean(event.get("id")), "provider_event_id": _clean(event.get("id")),
+            "source": source, "category": category,
             "kind": "score", "name": _clean(event.get("name")),
             "short_name": _clean(event.get("shortName")),
             "start_time": event.get("date"), "observed_ts": observed_at,
@@ -216,6 +217,7 @@ def collect(store, force=False, now=None):
             log.warning("sports intelligence source %s failed: %s", key, exc)
         store.set_kv("sports_intel_fetch:" + key, now)
 
+    summary_candidates = []
     # Scoreboard JSON endpoints; one request per configured league per TTL window.
     for category, (sport, league) in ESPN_SCOREBOARDS.items():
         key = "espn:" + category
@@ -229,10 +231,50 @@ def collect(store, force=False, now=None):
             normalized = []
             for event in events:
                 event["id"] = hashlib.sha256((key + ":" + event["id"]).encode()).hexdigest()
-                event["confidence"] = 0.7 if event.get("state") in ("in", "post") else 0.5
+                event["confidence"] = 0.7 if event.get("state") == "in" else 0.55
                 normalized.append(event)
+                if event.get("state") in ("in", "post") and event.get("provider_event_id"):
+                    summary_candidates.append((category, sport, league, event))
             summary["new_items"] += _record_items(store, normalized)
             _source_status(store, key, {"ok": True, "ts": now, "count": len(events)})
+            summary["sources_ok"] += 1
+        except Exception as exc:
+            summary["sources_failed"] += 1
+            summary["errors"].append({"source": key, "error": _clean(exc, 240)})
+            _source_status(store, key, {"ok": False, "ts": now, "error": _clean(exc, 240)})
+            log.warning("sports intelligence source %s failed: %s", key, exc)
+        store.set_kv("sports_intel_fetch:" + key, now)
+
+    # Fetch detailed live/final box scores for a small bounded sample. Scoreboard
+    # payloads stay lightweight; detailed stats are cached per event and time window.
+    max_summaries = max(0, min(10, int(os.environ.get("SPORTS_INTEL_MAX_BOX_SCORES", "5"))))
+    summary_candidates.sort(key=lambda item: 0 if item[3].get("state") == "in" else 1)
+    for category, sport, league, event in summary_candidates[:max_summaries]:
+        provider_id = event["provider_event_id"]
+        key = f"summary:{category}:{provider_id}"
+        if not force and not _due(store, key, ttl, now):
+            continue
+        url = f"https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/summary"
+        try:
+            response = _request(url + "?event=" + urllib.parse.quote(provider_id))
+            raw = response.json()
+            box = raw.get("boxscore") or {}
+            payload = {
+                "id": hashlib.sha256(f"{key}:{now // max(ttl, 600)}".encode()).hexdigest(),
+                "kind": "stats", "category": category, "source": "ESPN event summary",
+                "title": event.get("name") or event.get("short_name") or provider_id,
+                "observed_ts": now, "published_ts": None, "confidence": 0.65,
+                "provider_event_id": provider_id, "state": event.get("state"),
+                "scoreboard": event.get("competitors", []),
+                "team_stats": box.get("teams", [])[:10],
+                "player_stats": box.get("players", [])[:20],
+                "leaders": raw.get("leaders", [])[:20],
+                "scoring_plays": raw.get("scoringPlays", [])[:30],
+                "win_probability": raw.get("winprobability", [])[-20:],
+                "verified": False,
+            }
+            summary["new_items"] += _record_items(store, [payload])
+            _source_status(store, key, {"ok": True, "ts": now, "count": 1})
             summary["sources_ok"] += 1
         except Exception as exc:
             summary["sources_failed"] += 1
