@@ -190,6 +190,10 @@ class TestEndToEnd(unittest.TestCase):
                                    briefing_path=os.path.join(d, "missing.txt"))
             self.assertIn("Overall · settled · won · win %</div><div class=\"v\">1 · 1 · 100.0%", page)
             self.assertIn("Today · settled · won · win %</div><div class=\"v\">1 · 1 · 100.0%", page)
+            self.assertNotIn("LIVE-LOSS", page)
+            paper_csv = dashboard.export_csv(store, mode="paper")
+            self.assertIn("PAPER-WIN", paper_csv)
+            self.assertNotIn("LIVE-LOSS", paper_csv)
 
     def test_dashboard_daily_win_rate_uses_central_time(self):
         with tempfile.TemporaryDirectory() as d:
