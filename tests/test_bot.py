@@ -114,6 +114,20 @@ class TestMath(unittest.TestCase):
             self.assertAlmostEqual(table[7]["predicted"], 0.75)
             self.assertEqual(table[7]["actual"], 0.0)
 
+    def test_league_learning_waits_for_minimum_sample_and_averages_evidence(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = Store(os.path.join(d, "learning.sqlite"))
+            graded = [{"kalshi_market": 0.5, "book_consensus": 0.8, "_outcome": 1}
+                      for _ in range(brain.MIN_LEARN_SAMPLES - 1)]
+            self.assertEqual(brain.learn(store, graded, "nba"), {})
+            self.assertEqual(brain.get_weights(store, "nba")["book_consensus"],
+                             brain.DEFAULT_WEIGHTS["book_consensus"])
+            graded.append({"kalshi_market": 0.5, "book_consensus": 0.8, "_outcome": 1})
+            changes = brain.learn(store, graded, "nba")
+            self.assertIn("book_consensus", changes)
+            self.assertGreater(brain.get_weights(store, "nba")["book_consensus"],
+                               brain.DEFAULT_WEIGHTS["book_consensus"])
+
     def test_learning_domains_are_league_specific_without_changing_calibration_domain(self):
         cases = {
             "KXNBAGAME-26OCT20BOSNYK": "nba",
