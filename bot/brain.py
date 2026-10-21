@@ -37,10 +37,45 @@ CAL_MIN_SAMPLES = 60  # don't trust calibration until this many graded markets
 
 
 def domain_of(ticker_or_series):
-    """Sports and 15-minute crypto behave differently, so each learns its own
-    weights (e.g. how much to trust the Kalshi price on BTC vs on NBA games)."""
+    """Broad calibration domain: sports vs short-window crypto."""
     t = (ticker_or_series or "").upper()
     return "crypto" if t.startswith(("KXBTC", "KXETH", "KXSOL")) or "15M" in t else "sports"
+
+
+def learning_domain_of(ticker_or_series):
+    """Return a conservative league-level learning bucket when identifiable.
+
+    Keep calibration and risk compatibility on the broad sports/crypto domains,
+    but let each league learn its own signal weights. Unknown series stay in the
+    shared sports bucket until there is enough evidence to classify them.
+    """
+    t = str(ticker_or_series or "").upper().replace("-", "_")
+    if domain_of(t) == "crypto":
+        return "crypto"
+    # Match specific league tokens, not generic sport words, to avoid accidental
+    # cross-sport contamination. Prefix variants are common across Kalshi series.
+    groups = (
+        ("nfl", ("KXNFL", "NFLGAME", "AMERICANFOOTBALL_NFL")),
+        ("college_football", ("NCAAF", "COLLEGE_FOOTBALL", "KXCFB")),
+        ("nba", ("KXNBA", "NBAGAME", "BASKETBALL_NBA")),
+        ("wnba", ("KXWNBA", "WNBAGAME", "BASKETBALL_WNBA")),
+        ("college_basketball", ("NCAAB", "COLLEGE_BASKETBALL", "BASKETBALL_NCAAB")),
+        ("mlb", ("KXMLB", "MLBGAME", "BASEBALL_MLB")),
+        ("nhl", ("KXNHL", "NHLGAME", "ICEHOCKEY_NHL")),
+        ("tennis", ("TENNIS", "ATP", "WTA")),
+        ("mma", ("MMA", "UFC")),
+        ("boxing", ("BOXING",)),
+        ("golf", ("GOLF", "PGA", "LPGA")),
+        ("motorsports", ("F1", "NASCAR", "MOTORSPORT", "RACING")),
+        ("soccer", ("SOCCER", "EPL", "MLS", "UEFA", "LALIGA", "SERIEA", "BUNDESLIGA")),
+        ("cricket", ("CRICKET", "IPL")),
+        ("rugby", ("RUGBY",)),
+        ("esports", ("ESPORT", "LEAGUEOFLEGENDS", "DOTA", "COUNTERSTRIKE", "CS2")),
+    )
+    for domain, tokens in groups:
+        if any(token in t for token in tokens):
+            return domain
+    return "sports"
 
 
 def decision_cutoff(ticker, start):
