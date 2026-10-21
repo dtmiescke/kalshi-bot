@@ -48,6 +48,7 @@ class TestAudit(unittest.TestCase):
         self.assertEqual(self.st.staked_on_event("PAPER-E", mode="live"), 0)
         self.assertFalse(self.st.has_open_event_bet("PAPER-E", mode="live"))
         self.assertTrue(self.st.has_open_event_bet("PAPER-E", mode="paper"))
+        self.assertEqual([row["ticker"] for row in self.st.open_bets(mode="live")], ["LIVE-OPEN"])
 
     def test_earned_size_uses_only_selected_account_mode(self):
         paper_id = bet(self.st, mode="paper", ticker="PAPER-LOSS")
