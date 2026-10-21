@@ -197,6 +197,8 @@ class LiveRunner:
             return None
         prob, conf = brain.blend(readings, weights)
         info = self.markets[ticker]
+        if prob is not None:
+            prob = brain.calibrate(prob, self.store, domain=brain.domain_of(info["series"]))
         snap = {"ticker": ticker, "event_ticker": info["event"], "series": info["series"],
                 "team": "UP"}
         if maker is None:
