@@ -87,6 +87,22 @@ def score_combo_probabilities(leg_probabilities, yes_ask, no_ask,
     }
 
 
+def combo_ranking_score(leg_count, expected_profit, minimum_leg_confidence, min_edge):
+    """Prefer 3-5 legs unless a longer combo has unusually strong evidence/value."""
+    ev = float(expected_profit or 0.0)
+    conf = float(minimum_leg_confidence or 0.0)
+    exceptional = (
+        int(leg_count) > 5 and conf >= 0.85
+        and ev >= max(0.12, 2 * float(min_edge))
+    )
+    multiplier = 1.0 if int(leg_count) <= 5 or exceptional else {
+        6: 0.85, 7: 0.75, 8: 0.65
+    }.get(int(leg_count), 0.0)
+    return {"ranking_score": round(ev * multiplier, 4),
+            "length_preference_multiplier": multiplier,
+            "exceptional_long_combo": exceptional}
+
+
 def _leg_forecast(store, ticker, now, max_age_s=7200):
     """Blend the freshest per-signal readings for one underlying market."""
     rows = store.q(
@@ -203,25 +219,17 @@ def scan(client, store, settings=None, max_events=2000, max_age_s=7200):
             yes_ask, no_ask = _market_ask(market, "yes"), _market_ask(market, "no")
             scored = score_combo_probabilities(probabilities, yes_ask, no_ask, fee_rate, min_edge)
             min_confidence = min((x["confidence"] for x in leg_details), default=0.0)
-            # Three-to-five-leg combos are preferred. Longer combos can compete
-            # without a length penalty only when every leg has strong model
-            # confidence and the conservative, fee-adjusted edge is exceptional.
+            # Three-to-five-leg combos are preferred; 6-8 legs must earn their
+            # way back into the top ranks through strong evidence and EV.
             best = scored.get("best") or {}
-            exceptional_long_combo = (
-                len(legs) > 5 and min_confidence >= 0.85
-                and best.get("expected_profit_per_contract", 0) >= max(0.12, 2 * min_edge)
-            )
-            length_multiplier = 1.0 if len(legs) <= 5 or exceptional_long_combo else {
-                6: 0.85, 7: 0.75, 8: 0.65
-            }.get(len(legs), 0.65)
-            best_ev = best.get("expected_profit_per_contract", 0.0) or 0.0
+            preference = combo_ranking_score(
+                len(legs), best.get("expected_profit_per_contract", 0),
+                min_confidence, min_edge)
             item = {
                 "ticker": mticker, "title": market.get("title") or market.get("subtitle") or "",
                 "leg_count": len(legs), "legs": leg_details,
                 "minimum_leg_confidence": round(min_confidence, 3),
-                "exceptional_long_combo": exceptional_long_combo,
-                "length_preference_multiplier": length_multiplier,
-                "ranking_score": round(best_ev * length_multiplier, 4),
+                **preference,
                 "yes_ask": yes_ask, "no_ask": no_ask, **scored,
                 "status": market.get("status"),
                 "close_time": market.get("close_time"),
