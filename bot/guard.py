@@ -96,8 +96,13 @@ def league_benched(store, series, n=40, mode=None):
 def status(store, bankroll, daily_loss_limit=None, mode=None):
     """(betting_allowed, reason)."""
     from .risk import day_start_ts
-    limit = daily_loss_limit if daily_loss_limit is not None else \
-        float(os.environ.get("DAILY_LOSS_LIMIT", 30))
+    try:
+        limit = (float(daily_loss_limit) if daily_loss_limit is not None
+                 else float(os.environ.get("DAILY_LOSS_LIMIT", 30)))
+    except (TypeError, ValueError):
+        return False, "invalid daily loss limit configuration; betting paused"
+    if not math.isfinite(limit) or limit < 0:
+        return False, "invalid daily loss limit configuration; betting paused"
     mode = mode or os.environ.get("BOT_MODE", "paper")
     lost = store.realized_today(day_start_ts(), mode=mode)
     if lost <= -limit:
