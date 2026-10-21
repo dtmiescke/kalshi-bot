@@ -13,6 +13,7 @@ import os
 import re
 import time
 import urllib.parse
+from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -109,6 +110,8 @@ def _parse_rss(payload, source, category, observed_at):
                 value = child.attrib.get("href") or child.text
             else:
                 value = "".join(child.itertext())
+            if name == "source" and child.attrib.get("url"):
+                fields["publisher_url"] = child.attrib.get("url")
             if name not in fields and value:
                 fields[name] = _clean(value, 8000)
         title = fields.get("title", "")
@@ -118,12 +121,20 @@ def _parse_rss(payload, source, category, observed_at):
         published = _iso_to_ts(fields.get("pubdate") or fields.get("published") or fields.get("updated") or fields.get("date"))
         description = fields.get("description") or fields.get("summary") or fields.get("content", "")
         canonical = hashlib.sha256((link.strip() + "\n" + title.strip()).encode("utf-8")).hexdigest()
+        publisher_url = fields.get("publisher_url", "")
+        publisher_host = urlparse(publisher_url).netloc.lower()
+        official_hosts = ("nfl.com", "nba.com", "wnba.com", "mlb.com", "nhl.com",
+                          "espn.com", "bbc.co.uk", "reuters.com", "apnews.com", "olympics.com")
+        is_official_or_major = any(publisher_host == host or publisher_host.endswith("." + host)
+                                   for host in official_hosts)
         rows.append({
-            "id": canonical, "source": source, "category": category, "title": title,
-            "url": link, "summary": re.sub(r"<[^>]+>", " ", description)[:3000],
+            "id": canonical, "source": source, "publisher": fields.get("source", ""),
+            "publisher_url": publisher_url, "publisher_host": publisher_host,
+            "category": category, "title": title, "url": link,
+            "summary": re.sub(r"<[^>]+>", " ", description)[:3000],
             "published_ts": published, "observed_ts": observed_at,
             "source_age_seconds": max(0, observed_at - published) if published else None,
-            "confidence": 0.45 if published else 0.25,
+            "confidence": (0.6 if is_official_or_major else 0.4) if published else 0.2,
             "kind": "news", "verified": False,
         })
     return rows
