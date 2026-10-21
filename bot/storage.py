@@ -349,8 +349,9 @@ class Store:
                   pnl=?, graded_ts=? WHERE id=?""",
                (exit_price, int(time.time()), round(pnl, 2), int(time.time()), bet_id))
 
-    def open_bets(self):
-        return self.q("SELECT * FROM bets WHERE status='open'")
+    def open_bets(self, mode=None):
+        return self.q("""SELECT * FROM bets WHERE status='open'
+                          AND (? IS NULL OR mode=?) ORDER BY ts""", (mode, mode))
 
     def staked_since(self, ts, mode=None):
         r = self.q("""SELECT COALESCE(SUM(stake),0) s FROM bets
