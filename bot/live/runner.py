@@ -252,6 +252,11 @@ class LiveRunner:
 
     # --- maker orders: rest at a better price, cancel if not filled ---------------------
     def start_maker(self, ticker, snap, plan, readings, prob, conf):
+        allowed, reason = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
+        if not allowed:
+            self.betting_ok, self.betting_why = False, reason
+            self._skip(f"maker blocked at execution boundary: {reason}")
+            return
         order_id = f"paper-maker-{int(time.time())}"
         if self.s.mode in ("demo", "live"):
             try:
