@@ -42,12 +42,13 @@ def short(ticker):
     return f"{name} {parts[-1]}" if len(parts) >= 3 else name
 
 
-def export_csv(store):
-    """Export the full trade lifecycle, including both entry and exit timestamps."""
+def export_csv(store, mode=None):
+    """Export the full trade lifecycle, optionally scoped to one account mode."""
     rows = store.q("""SELECT id, ts, exit_ts, mode, ticker, event_ticker, series, team,
                       side, price, contracts, stake, fee, model_prob, edge, confidence,
                       style, order_id, status, result, closing_price, exit_price,
-                      pnl, clv, graded_ts FROM bets ORDER BY ts, id""")
+                      pnl, clv, graded_ts FROM bets
+                      WHERE (? IS NULL OR mode=?) ORDER BY ts, id""", (mode, mode))
     buf = io.StringIO()
     w = csv.writer(buf)
     cols = list(rows[0].keys()) if rows else [
@@ -99,9 +100,9 @@ def build(store, settings, live_path="data/live_summary.json", briefing_path="da
     today_wins = sum(1 for b in today_settled if b["result"] == b["side"])
     today_win_pct = 100.0 * today_wins / len(today_settled) if today_settled else None
     today_win_pct_text = f"{today_win_pct:.1f}%" if today_win_pct is not None else "—"
-    open_bets = store.q("SELECT * FROM bets WHERE status='open' ORDER BY ts DESC")
-    completed_bets = store.q("SELECT * FROM bets WHERE status IN ('graded','sold') ORDER BY COALESCE(exit_ts, graded_ts, ts) DESC")
-    recent = store.q("SELECT * FROM bets WHERE status='graded' ORDER BY graded_ts DESC LIMIT 15")
+    open_bets = store.q("SELECT * FROM bets WHERE status='open' AND mode=? ORDER BY ts DESC", (settings.mode,))
+    completed_bets = store.q("SELECT * FROM bets WHERE status IN ('graded','sold') AND mode=? ORDER BY COALESCE(exit_ts, graded_ts, ts) DESC", (settings.mode,))
+    recent = store.q("SELECT * FROM bets WHERE status='graded' AND mode=? ORDER BY graded_ts DESC LIMIT 15", (settings.mode,))
 
     def last_quote(ticker):
         r = store.q("""SELECT ts, yes_bid, yes_ask FROM market_snapshots WHERE ticker=?
@@ -236,5 +237,5 @@ def write(store, settings, out_dir="data/site"):
     with open(os.path.join(out_dir, "index.html"), "w") as f:
         f.write(build(store, settings))
     with open(os.path.join(out_dir, "bets.csv"), "w") as f:
-        f.write(export_csv(store))
+        f.write(export_csv(store, mode=settings.mode))
     return out_dir
