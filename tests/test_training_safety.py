@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from bot import engine, main, ml
+from bot import engine, guard, main, ml
 from bot.config import Settings
 
 
@@ -82,6 +82,19 @@ class TestTrainingSafety(unittest.TestCase):
         self.assertEqual(saved[0]["contracts"], 2)
         self.assertEqual(saved[0]["stake"], 1.00)
         self.assertEqual(saved[0]["fee"], 0.01)
+
+    def test_sports_arbitrage_fails_closed_for_unverified_or_draw_capable_series(self):
+        book_a = {"yes": [(0.40, 10)], "no": [(0.65, 10)]}
+        book_b = {"yes": [(0.50, 10)], "no": [(0.60, 10)]}
+        self.assertIsNone(guard.arb_plan(
+            "KXSOCCERGAME", book_a, book_b, 0.07, 20.0
+        ))
+        self.assertIsNone(guard.arb_plan(
+            "KXNFLGAME", book_a, book_b, 0.07, 20.0
+        ))
+        self.assertIsNotNone(guard.arb_plan(
+            "KXNBAGAME", book_a, book_b, 0.07, 20.0
+        ))
 
     def test_arbitrage_budget_respects_open_position_and_cash_caps(self):
         obj = engine.Engine.__new__(engine.Engine)
