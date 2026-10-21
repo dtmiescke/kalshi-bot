@@ -39,6 +39,22 @@ class TestTrainingSafety(unittest.TestCase):
         settings.mode = "paper"
         settings.validate()
 
+    def test_execution_boundary_blocks_new_order_when_circuit_breaker_trips(self):
+        obj = engine.Engine.__new__(engine.Engine)
+        obj.s = SimpleNamespace(mode="live", bankroll=1000.0, taker_fee_rate=0.07)
+        obj.store = mock.Mock()
+        obj.trade = mock.Mock()
+        summary = {"bets": 0, "skipped": {}, "alerts": []}
+        snap = {"ticker": "T", "event_ticker": "E", "series": "KXNBAGAME", "team": "X"}
+        plan = {"side": "yes", "limit": 0.50, "price": 0.50, "contracts": 1,
+                "stake": 0.50, "fee": 0.02, "edge": 0.10}
+        with mock.patch("bot.engine.guard.status", return_value=(False, "daily loss limit hit")):
+            obj.place(snap, plan, [], 0.60, 0.80, summary, 123)
+        obj.trade.place_limit_buy.assert_not_called()
+        obj.store.add_bet.assert_not_called()
+        self.assertEqual(summary["bets"], 0)
+        self.assertTrue(summary["skipped"])
+
     def test_partial_maker_fill_records_only_filled_stake_and_fee(self):
         saved = []
         obj = engine.Engine.__new__(engine.Engine)
