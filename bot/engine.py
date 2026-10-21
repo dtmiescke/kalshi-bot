@@ -345,7 +345,7 @@ class Engine:
                 except Exception as e:
                     log.warning("events %s: %s", selected_series, e)
                     events_by_series[selected_series] = []
-        if sports and events_by_series and os.environ.get("SPORTS_INTEL_EVENT_SEARCH", "yes").lower() in ("yes", "true", "1"):
+        if sports and events_by_series and os.environ.get("SPORTS_INTEL_EVENT_SEARCH", "no").lower() in ("yes", "true", "1"):
             try:
                 from . import sports_intel
                 candidates = [ev for grouped in events_by_series.values() for ev in grouped]
