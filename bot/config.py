@@ -93,6 +93,8 @@ class Settings:
     # --- sports intelligence and selection ---------------------------------
     sports_mode: str = field(default_factory=lambda: _env("SPORTS_MODE", "all").strip().lower())
     sports_selected: str = field(default_factory=lambda: _env("SPORTS_SELECTED", "").strip())
+    # Research is on by default; order execution remains a separate, disabled capability.
+    combo_research_enabled: bool = field(default_factory=lambda: _env("COMBO_RESEARCH_ENABLED", "yes").strip().lower() in ("yes", "true", "1"))
     combos_enabled: bool = field(default_factory=lambda: _env("COMBOS_ENABLED", "no").strip().lower() in ("yes", "true", "1"))
     combo_min_legs: int = field(default_factory=lambda: _env_int("COMBO_MIN_LEGS", 3))
     combo_max_legs: int = field(default_factory=lambda: _env_int("COMBO_MAX_LEGS", 8))
