@@ -12,8 +12,8 @@ class TestComboResearch(unittest.TestCase):
         self.assertTrue(result["eligible"])
 
     def test_fee_can_turn_apparent_edge_into_rejection(self):
-        no_fee = score_combo_probabilities([0.8, 0.8], 0.55, 0.45, fee_rate=0.0, min_edge=0.02)
-        with_fee = score_combo_probabilities([0.8, 0.8], 0.55, 0.45, fee_rate=0.07, min_edge=0.02)
+        no_fee = score_combo_probabilities([0.8, 0.8], 0.55, 0.45, fee_rate=0.0, min_edge=0.05)
+        with_fee = score_combo_probabilities([0.8, 0.8], 0.55, 0.45, fee_rate=0.07, min_edge=0.05)
         self.assertTrue(no_fee["eligible"])
         self.assertFalse(with_fee["eligible"])
         self.assertGreater(with_fee["candidates"][0]["fee_per_contract"], 0)
