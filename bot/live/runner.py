@@ -185,7 +185,7 @@ class LiveRunner:
             mins_left = (terms["close_ts"] - now) / 60
             if not (self.s.crypto_min_minutes <= mins_left <= self.s.crypto_max_minutes):
                 continue
-            if not self.betting_ok or guard.league_benched(self.store, info["series"]):
+            if not self.betting_ok or guard.league_benched(self.store, info["series"], mode=self.s.mode):
                 continue
             plan = self.plan_for(ticker, readings, weights)
             if plan:
