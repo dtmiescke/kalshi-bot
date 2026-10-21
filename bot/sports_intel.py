@@ -183,7 +183,7 @@ def _parse_espn(payload, source, category, observed_at):
             events.append(event_row)
     return events
 
-def _football_matchup_profile(event, box, raw, observed_at):
+def _football_matchup_profile(event, box, raw, observed_at, league_domain):
     """Build a cautious football-specific evidence profile from fields ESPN exposes.
 
     This is descriptive evidence, not a win-probability model. Missing statistics
@@ -273,6 +273,11 @@ def _football_matchup_profile(event, box, raw, observed_at):
     lineups_present = bool(raw.get("lineups") or raw.get("roster") or raw.get("rosters"))
     return {
         "sport_profile": "american_football",
+        # NFL and NCAA are deliberately separate learning domains. Shared schema
+        # does not mean shared baselines, calibration, or player/team histories.
+        "league_domain": "nfl" if league_domain == "nfl" else "ncaa_football",
+        "competition_level": "professional" if league_domain == "nfl" else "college",
+        "learning_partition": "sports:nfl" if league_domain == "nfl" else "sports:ncaa_football",
         "event_id": event.get("provider_event_id"),
         "event": event.get("name") or event.get("short_name"),
         "observed_ts": observed_at,
@@ -449,7 +454,7 @@ def collect(store, force=False, now=None):
                 "verified": False,
             }
             if category in ("nfl", "college_football"):
-                payload["football_matchup_profile"] = _football_matchup_profile(event, box, raw, now)
+                payload["football_matchup_profile"] = _football_matchup_profile(event, box, raw, now, category)
             summary["new_items"] += _record_items(store, [payload])
             _source_status(store, key, {"ok": True, "ts": now, "count": 1})
             summary["sources_ok"] += 1
