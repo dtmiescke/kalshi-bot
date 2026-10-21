@@ -154,6 +154,27 @@ class TestEndToEnd(unittest.TestCase):
             self.assertIn("exit_ts", csv_text.splitlines()[0])
             self.assertIn("exit_price", csv_text.splitlines()[0])
 
+    def test_dashboard_win_rate_is_scoped_to_selected_mode(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = Settings()
+            s.mode = "paper"
+            s.db_path = os.path.join(d, "t.db")
+            store = Store(s.db_path)
+            now = int(time.time())
+            for mode, ticker, result, side in (
+                ("paper", "PAPER-WIN", "yes", "yes"),
+                ("live", "LIVE-LOSS", "no", "yes"),
+            ):
+                store.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,
+                            stake,fee,status,result,pnl,graded_ts)
+                            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (now, mode, ticker, "E", "KXNBAGAME", side, 0.5, 1, 0.5,
+                         0.01, "graded", result, 0.49 if result == side else -0.51, now))
+            page = dashboard.build(store, s, live_path=os.path.join(d, "missing.json"),
+                                   briefing_path=os.path.join(d, "missing.txt"))
+            self.assertIn("Overall · settled · won · win %</div><div class=\"v\">1 · 1 · 100.0%", page)
+            self.assertIn("Today · settled · won · win %</div><div class=\"v\">1 · 1 · 100.0%", page)
+
     def test_dashboard_daily_win_rate_uses_central_time(self):
         with tempfile.TemporaryDirectory() as d:
             s = Settings()
