@@ -38,8 +38,10 @@ class TestAudit(unittest.TestCase):
         self.d.cleanup()
 
     def test_earned_size_uses_only_selected_account_mode(self):
-        bet(self.st, mode="paper", ticker="PAPER-LOSS", status="graded", pnl=-20.0)
-        bet(self.st, mode="live", ticker="LIVE-WIN", status="graded", pnl=20.0)
+        paper_id = bet(self.st, mode="paper", ticker="PAPER-LOSS")
+        live_id = bet(self.st, mode="live", ticker="LIVE-WIN")
+        self.st.x("UPDATE bets SET status='graded', pnl=-20.0 WHERE id=?", (paper_id,))
+        self.st.x("UPDATE bets SET status='graded', pnl=20.0 WHERE id=?", (live_id,))
         market = {"series": "KXNBAGAME", "ticker": "T"}
         self.assertEqual(risk.earned_size(self.st, market, full_at=1, mode="paper"), 0.25)
         self.assertEqual(risk.earned_size(self.st, market, full_at=1, mode="live"), 1.0)
