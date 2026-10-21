@@ -57,9 +57,16 @@ class TestSportsIntelligence(unittest.TestCase):
                               "starter": True, "stats": ["20/30", "245", "2", "0"]}],
             }]}],
         }
-        profile = _football_matchup_profile(event, box, {}, 1792600000)
+        profile = _football_matchup_profile(event, box, {}, 1792600000, "nfl")
         self.assertEqual(profile["sport_profile"], "american_football")
+        self.assertEqual(profile["league_domain"], "nfl")
+        self.assertEqual(profile["competition_level"], "professional")
+        self.assertEqual(profile["learning_partition"], "sports:nfl")
         self.assertEqual(profile["event_id"], "nfl-123")
+        college_profile = _football_matchup_profile(event, box, {}, 1792600000, "college_football")
+        self.assertEqual(college_profile["league_domain"], "ncaa_football")
+        self.assertEqual(college_profile["competition_level"], "college")
+        self.assertEqual(college_profile["learning_partition"], "sports:ncaa_football")
         self.assertEqual(profile["quarterbacks"][0]["name"], "Example QB")
         self.assertEqual(profile["quarterbacks"][0]["statistics"]["YDS"], "245")
         self.assertTrue(profile["data_quality"]["team_stats_available"])
