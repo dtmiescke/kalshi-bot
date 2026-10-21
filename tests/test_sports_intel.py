@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 
-from bot.sports_intel import _parse_espn, _parse_rss, ensure_schema, recent, _record_items
+from bot.sports_intel import _football_matchup_profile, _parse_espn, _parse_rss, ensure_schema, recent, _record_items
 from bot.storage import Store
 
 
@@ -35,6 +35,37 @@ class TestSportsIntelligence(unittest.TestCase):
         self.assertEqual(events[0]["state"], "in")
         self.assertEqual(events[0]["competitors"][0]["score"], "98")
         self.assertFalse(events[0]["verified"])
+
+    def test_football_profile_extracts_roles_and_keeps_missing_fields_unknown(self):
+        event = {
+            "provider_event_id": "nfl-123", "name": "Away at Home",
+            "competitors": [
+                {"name": "Home Team", "abbreviation": "HOM", "home_away": "home", "score": "21"},
+                {"name": "Away Team", "abbreviation": "AWY", "home_away": "away", "score": "17"},
+            ],
+        }
+        box = {
+            "teams": [{"team": {"displayName": "Home Team"}, "statistics": [
+                {"name": "totalYards", "displayValue": "350"},
+                {"name": "turnovers", "displayValue": "1"},
+            ]}],
+            "players": [{"team": {"displayName": "Home Team"}, "statistics": [{
+                "labels": ["CMP/ATT", "YDS", "TD", "INT"],
+                "athletes": [{"athlete": {"displayName": "Example QB",
+                                           "position": {"abbreviation": "QB"}},
+                              "starter": True, "stats": ["20/30", "245", "2", "0"]}],
+            }]}],
+        }
+        profile = _football_matchup_profile(event, box, {}, 1792600000)
+        self.assertEqual(profile["sport_profile"], "american_football")
+        self.assertEqual(profile["event_id"], "nfl-123")
+        self.assertEqual(profile["quarterbacks"][0]["name"], "Example QB")
+        self.assertEqual(profile["quarterbacks"][0]["statistics"]["YDS"], "245")
+        self.assertTrue(profile["data_quality"]["team_stats_available"])
+        self.assertTrue(profile["data_quality"]["player_stats_available"])
+        self.assertFalse(profile["data_quality"]["injury_data_available"])
+        self.assertFalse(profile["lineups_confirmed"])
+        self.assertIn("confirmed_starting_lineups", profile["missing_information"])
 
     def test_store_deduplicates_repeated_items(self):
         item = {"id": "same", "kind": "news", "category": "football", "source": "fixture",
