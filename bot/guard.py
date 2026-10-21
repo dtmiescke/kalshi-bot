@@ -131,6 +131,8 @@ def ladder_arbs(markets, fee_rate, min_profit_per=0.01):
                 profit = 1 - cost - fees
                 if profit >= min_profit_per:
                     found.append({"low": low["ticker"], "high": high["ticker"],
+                                  "event_ticker": low.get("event_ticker"),
+                                  "series": low.get("series"),
                                   "yes_low": yes_low, "no_high": round(no_high, 4),
                                   "profit_per": round(profit, 4)})
     return sorted(found, key=lambda x: -x["profit_per"])
