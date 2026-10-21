@@ -174,6 +174,34 @@ class TestEndToEnd(unittest.TestCase):
                         briefing_path=os.path.join(d, "missing.txt"))
             self.assertIn("Today · settled · won · win %</div><div class=\"v\">1 · 1 · 100.0%", page)
 
+    def test_live_partial_fill_records_only_filled_contract_fees(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = Settings()
+            s.mode = "demo"
+            s.db_path = os.path.join(d, "bot.sqlite")
+            store = Store(s.db_path)
+            start = datetime.now(timezone.utc) + timedelta(hours=5)
+            engine = Engine(s, store, data_client=FakeKalshi(start),
+                            odds_client=FakeOdds(start), schedule_fetch=lambda sp: [])
+
+            class FilledTrade:
+                def place_limit_buy(self, ticker, side, contracts, limit):
+                    return {"order_id": "ORDER-1", "fill_count": 1,
+                            "taker_fill_count": 1, "maker_fill_count": 0,
+                            "taker_fill_cost": 50, "maker_fill_cost": 0}
+
+            engine.trade = FilledTrade()
+            plan = {"side": "yes", "limit": 0.50, "price": 0.50, "contracts": 10,
+                    "stake": 5.00, "fee": risk.taker_fee(10, 0.50, s.taker_fee_rate),
+                    "edge": 0.10}
+            engine.place({"ticker": "T1", "event_ticker": "E1", "series": "KXNBAGAME",
+                          "team": "Boston"}, plan, [], 0.60, 0.90,
+                         summary={"bets": 0, "skipped": {}, "alerts": []}, now=int(time.time()))
+            saved = store.q("SELECT * FROM bets")[0]
+            self.assertEqual(saved["contracts"], 1)
+            self.assertEqual(saved["stake"], 0.50)
+            self.assertEqual(saved["fee"], risk.taker_fee(1, 0.50, s.taker_fee_rate))
+
     def test_cycle_bets_grades_and_learns(self):
         with tempfile.TemporaryDirectory() as d:
             os.environ["BOT_DB"] = os.path.join(d, "bot.sqlite")
