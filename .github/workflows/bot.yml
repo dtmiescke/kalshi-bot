@@ -52,7 +52,7 @@ jobs:
           SPORTS_SELECTED: ${{ vars.SPORTS_SELECTED || '' }}
           SPORTS_INTEL_ENABLED: ${{ vars.SPORTS_INTEL_ENABLED || 'yes' }}
           SPORTS_INTEL_EVENT_SEARCH: ${{ vars.SPORTS_INTEL_EVENT_SEARCH || 'yes' }}
-          SPORTS_INTEL_EVENT_BUDGET: ${{ vars.SPORTS_INTEL_EVENT_BUDGET || '12' }}
+          SPORTS_INTEL_EVENT_BUDGET: ${{ vars.SPORTS_INTEL_EVENT_BUDGET || '6' }}
           SPORTS_INTEL_TTL_SECONDS: ${{ vars.SPORTS_INTEL_TTL_SECONDS || '600' }}
           COMBOS_ENABLED: ${{ vars.COMBOS_ENABLED || 'no' }}
           COMBO_MAX_LEGS: ${{ vars.COMBO_MAX_LEGS || '3' }}
