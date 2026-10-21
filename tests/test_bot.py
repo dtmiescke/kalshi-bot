@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from bot import brain, risk
 from bot.config import Settings
 from bot import dashboard
-from bot.engine import Engine
+from bot.engine import Engine, _fresh_odds_history
 from bot.grader import grade
 from bot.odds import american_to_prob, consensus, devig_power
 from bot.report import build
@@ -302,6 +302,16 @@ class TestCrypto(unittest.TestCase):
         self.assertAlmostEqual(finish_above(100, 100, 0.001, 10), 0.5)
         self.assertGreater(finish_above(101, 100, 0.001, 5), 0.9)
         self.assertEqual(finish_above(99, 100, 0.001, 0), 0.0)
+
+    def test_stale_and_future_sportsbook_rows_are_ignored(self):
+        rows = [
+            {"ts": 940, "fair_prob": 0.7},
+            {"ts": 995, "fair_prob": 0.6},
+            {"ts": 1005, "fair_prob": 0.9},
+            {"ts": 800, "fair_prob": 0.99},
+        ]
+        self.assertEqual(_fresh_odds_history(rows, now=1000, max_age_seconds=100),
+                         rows[:2])
 
     def test_bets_lagging_kalshi_price(self):
         with tempfile.TemporaryDirectory() as d:
