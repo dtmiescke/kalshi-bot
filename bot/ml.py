@@ -194,6 +194,14 @@ def beats_champion(champion_present, champion_eval_ok, champion_loss, candidate_
     return champion_loss is not None and candidate_loss < champion_loss
 
 
+def fresh_test_mask(groups, ts, champion_trained_at):
+    """Keep only whole test windows whose first decision is after the champion trained."""
+    first = {}
+    for group, stamp in zip(groups, ts):
+        first[group] = min(first.get(group, stamp), stamp)
+    return np.array([first[group] > champion_trained_at for group in groups], dtype=bool)
+
+
 def train(store, min_windows=300, fee_rate=0.07):
     from sklearn.ensemble import HistGradientBoostingClassifier
     from sklearn.linear_model import LogisticRegression
@@ -247,35 +255,65 @@ def train(store, min_windows=300, fee_rate=0.07):
     champ = load_meta()
     champ_path = os.path.join(MODEL_DIR, "crypto_model.joblib")
     champion_present = bool(champ) or os.path.exists(champ_path)
+    test_groups, test_ts = groups[te], ts[te]
+    if champion_present:
+        try:
+            trained_at = float(champ["trained"]) if champ and champ.get("trained") is not None else None
+            if trained_at is None or not math.isfinite(trained_at):
+                raise ValueError("existing champion has no valid training timestamp")
+            fresh_mask = fresh_test_mask(test_groups, test_ts, trained_at)
+        except Exception as e:
+            log.warning("Cannot identify unseen windows after champion training: %s", e)
+            fresh_mask = np.zeros(len(test_groups), dtype=bool)
+    else:
+        fresh_mask = np.ones(len(test_groups), dtype=bool)
+
+    X_test, y_test, w_test = X[te], y[te], w[te]
+    p_fresh = p_test[fresh_mask]
+    X_fresh, y_fresh, w_fresh = X_test[fresh_mask], y_test[fresh_mask], w_test[fresh_mask]
+    groups_fresh = test_groups[fresh_mask]
+    kalshi_fresh = kalshi_p[te][fresh_mask]
+    fresh_windows = len(set(groups_fresh.tolist()))
+    promotion_ll = logloss(p_fresh, y_fresh, w_fresh) if len(y_fresh) else None
+    promotion_kalshi_ll = logloss(kalshi_fresh, y_fresh, w_fresh) if len(y_fresh) else None
+    promotion_trades = sim_trades(p_fresh, X_fresh, cols, y_fresh, groups_fresh, fee_rate) if len(y_fresh) else {}
+
     champ_ll = None
     champion_eval_ok = not champion_present
-    if champion_present and champ and os.path.exists(champ_path):
+    if champion_present and champ and os.path.exists(champ_path) and len(y_fresh):
         try:
             cm = joblib.load(champ_path)
-            champ_ll = logloss(cm["iso"].predict_with(cm["model"], X[te]), y[te], w[te])
+            champ_ll = logloss(cm["iso"].predict_with(cm["model"], X_fresh), y_fresh, w_fresh)
             champion_eval_ok = math.isfinite(champ_ll)
         except Exception as e:
             # Fail closed: never replace an existing champion that could not be evaluated.
             log.exception("Could not evaluate existing champion; candidate cannot be promoted: %s", e)
             champ_ll = None
             champion_eval_ok = False
+    elif champion_present:
+        champion_eval_ok = False
     metrics["test_logloss_champion"] = round(champ_ll, 5) if champ_ll is not None else None
+    metrics["promotion_test_windows"] = fresh_windows
+    metrics["promotion_logloss_model"] = round(promotion_ll, 5) if promotion_ll is not None else None
+    metrics["promotion_logloss_kalshi"] = round(promotion_kalshi_ll, 5) if promotion_kalshi_ll is not None else None
+    metrics["promotion_trades"] = promotion_trades
 
     # PROMOTION GATES — every one must pass:
-    # 1. better than Kalshi's own price on unseen windows...
+    # 1. better than Kalshi's own price on test windows never available to the champion
     # 2. ...and not by luck: wins in >= 90% of bootstrap resamples of those windows
-    # 3. better than the current champion; if a champion exists but cannot be evaluated, reject promotion
-    # 4. enough unseen windows to judge at all
-    # 5. simulated trades on unseen data made money (>= 30 trades)
-    conf = paired_bootstrap(p_test, kalshi_p[te], y[te], groups[te])
+    # 3. better than the current champion; if it cannot be evaluated, reject promotion
+    # 4. enough truly fresh unseen windows to judge at all
+    # 5. simulated trades on fresh unseen data made money (>= 30 trades)
+    conf = paired_bootstrap(p_fresh, kalshi_fresh, y_fresh, groups_fresh) if len(y_fresh) else 0.0
     min_test = int(os.environ.get("ML_MIN_TEST_WINDOWS", 100))
-    beats_kalshi = metrics["test_logloss_model"] < metrics["test_logloss_kalshi"] * 0.998
-    beats_champ = beats_champion(
-        champion_present, champion_eval_ok, champ_ll, metrics["test_logloss_model"]
+    beats_kalshi = (
+        promotion_ll is not None and promotion_kalshi_ll is not None
+        and promotion_ll < promotion_kalshi_ll * 0.998
     )
-    profitable = [t for t, v in metrics["test_trades"].items()
+    beats_champ = beats_champion(champion_present, champion_eval_ok, champ_ll, promotion_ll)
+    profitable = [t for t, v in promotion_trades.items()
                   if v["trades"] >= 30 and (v["roi"] or 0) > 0]
-    enough = metrics["test_windows"] >= min_test
+    enough = fresh_windows >= min_test
     promoted = beats_kalshi and conf >= 0.90 and beats_champ and bool(profitable) and enough
     metrics.update({"beats_kalshi": beats_kalshi, "bootstrap_confidence": round(conf, 3),
                     "champion_present": champion_present, "champion_evaluation_ok": champion_eval_ok,
