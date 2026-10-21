@@ -209,7 +209,7 @@ class KalshiClient:
         """Read-only discovery for Kalshi's multivariate/combo event catalog."""
         out, cursor = [], None
         for _ in range(10):
-            params = {"status": status, "limit": 200}
+            params = {"status": status, "limit": 200, "with_nested_markets": "true"}
             if cursor:
                 params["cursor"] = cursor
             data = self._req("GET", "/events/multivariate", params=params)
