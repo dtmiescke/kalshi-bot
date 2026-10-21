@@ -312,8 +312,9 @@ class TestEndToEnd(unittest.TestCase):
             self.assertGreaterEqual(out["markets"], 1)
             b = store.q("SELECT * FROM bets")[0]
             self.assertGreater(b["pnl"], 0)
-            # weights change, and old values stay in history (nothing deleted)
-            self.assertTrue(store.q("SELECT * FROM weight_history"))
+            # One settled game is not enough to adjust league weights: the
+            # learner requires MIN_LEARN_SAMPLES to reduce small-sample overfit.
+            self.assertEqual(store.q("SELECT * FROM weight_history"), [])
             self.assertIn("Signal weights", build(store))
             del os.environ["BOT_DB"]
 
