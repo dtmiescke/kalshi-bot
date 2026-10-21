@@ -288,6 +288,28 @@ class Engine:
         else:
             series_map = {}
 
+        if sports and not events_by_series and series_map:
+            for selected_series in series_map:
+                try:
+                    events_by_series[selected_series] = self.data.sports_events(selected_series)
+                except Exception as e:
+                    log.warning("events %s: %s", selected_series, e)
+                    events_by_series[selected_series] = []
+        if sports and events_by_series and os.environ.get("SPORTS_INTEL_EVENT_SEARCH", "yes").lower() in ("yes", "true", "1"):
+            try:
+                from . import sports_intel
+                candidates = [ev for grouped in events_by_series.values() for ev in grouped]
+                # Upcoming event news is the most actionable. Unknown start times sort last.
+                def event_start(ev):
+                    value = iso_to_ts(ev.get("start_time") or ev.get("commence_time") or ev.get("date"))
+                    return value if value and value >= now else now + 10 * 86400
+                candidates.sort(key=event_start)
+                event_news = sports_intel.collect_event_news(
+                    self.store, candidates, max_events=int(os.environ.get("SPORTS_INTEL_EVENT_BUDGET", 12)), now=now)
+                self.store.set_kv("sports_intel_event_news_health", {"ts": now, **event_news})
+            except Exception as e:
+                log.warning("event-specific news collection failed: %s", e)
+
         for series, sport in (series_map.items() if sports else ()):
             if watch and not watch.wants_series(series) and not any(
                     h.startswith(series) for h in held):
