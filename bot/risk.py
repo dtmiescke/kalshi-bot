@@ -1,5 +1,6 @@
 """Fees, edge, bet sizing and hard risk caps."""
 import math
+import os
 import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
