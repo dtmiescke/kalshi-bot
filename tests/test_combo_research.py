@@ -1,6 +1,6 @@
 import unittest
 
-from bot.combo_research import _market_ask, score_combo_probabilities
+from bot.combo_research import _market_ask, combo_ranking_score, score_combo_probabilities
 
 
 class TestComboResearch(unittest.TestCase):
@@ -27,6 +27,16 @@ class TestComboResearch(unittest.TestCase):
     def test_invalid_probabilities_are_not_scored(self):
         self.assertFalse(score_combo_probabilities([0.8], 0.2, 0.8)["eligible"])
         self.assertFalse(score_combo_probabilities([0.8, 1.0], 0.2, 0.8)["eligible"])
+
+    def test_prefers_three_to_five_legs_unless_long_combo_is_exceptional(self):
+        five = combo_ranking_score(5, 0.10, 0.70, 0.06)
+        six_ordinary = combo_ranking_score(6, 0.11, 0.70, 0.06)
+        six_exceptional = combo_ranking_score(6, 0.15, 0.90, 0.06)
+        self.assertEqual(five["length_preference_multiplier"], 1.0)
+        self.assertEqual(six_ordinary["length_preference_multiplier"], 0.85)
+        self.assertFalse(six_ordinary["exceptional_long_combo"])
+        self.assertEqual(six_exceptional["length_preference_multiplier"], 1.0)
+        self.assertTrue(six_exceptional["exceptional_long_combo"])
 
     def test_uses_real_asks_or_mirrors_opposite_bid(self):
         self.assertEqual(_market_ask({"yes_ask_dollars": "0.4200"}, "yes"), 0.42)
