@@ -61,10 +61,13 @@ def _series_sport(series, metadata=None):
     return "other"
 
 
-EXCLUDED_SPORT_CATEGORIES = {"mma", "boxing", "tennis", "motorsports", "golf", "esports"}
+# Every discovered Kalshi sport is eligible for research. Categories without
+# external odds coverage still need sufficient independent evidence to qualify.
+EXCLUDED_SPORT_CATEGORIES = set()
 
 
 def _sports_excluded(series, metadata=None):
+    """Compatibility helper: no sport category is blanket-excluded."""
     return _series_sport(series, metadata) in EXCLUDED_SPORT_CATEGORIES
 
 
@@ -333,7 +336,7 @@ class Engine:
                     if not series:
                         event_ticker = str(ev.get("event_ticker") or "")
                         series = next((known for known in catalog if event_ticker.startswith(known + "-")), None)
-                    if not series or series not in catalog or _sports_excluded(series, catalog.get(series)):
+                    if not series or series not in catalog:
                         continue
                     series_map[series] = _series_sport(series, catalog.get(series))
                     events_by_series.setdefault(series, []).append(ev)
@@ -348,7 +351,7 @@ class Engine:
         elif sports and getattr(self.s, "sports_mode", "all") == "manual":
             selected = selected or set()
             series_map = {series: SPORTS.get(series, _series_sport(series))
-                          for series in selected if not _sports_excluded(series)}
+                          for series in selected}
             self.store.set_kv("sports_catalog_health", {
                 "ts": now, "series_selected": sorted(selected), "mode": "manual"})
         else:
