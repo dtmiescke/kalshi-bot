@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from bot import brain, risk
 from bot.config import Settings
+from bot import dashboard
 from bot.engine import Engine
 from bot.grader import grade
 from bot.odds import american_to_prob, consensus, devig_power
@@ -120,6 +121,25 @@ class TestMath(unittest.TestCase):
 
 
 class TestEndToEnd(unittest.TestCase):
+    def test_dashboard_settled_win_percentage_excludes_open_and_sold(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = Settings()
+            s.db_path = os.path.join(d, "t.db")
+            store = Store(s.db_path)
+            rows = [
+                (1, "paper", "T1", "E", "KXNBAGAME", "yes", 0.5, 1, 0.5, 0.01, "graded", "yes", 0.49),
+                (2, "paper", "T2", "E", "KXNBAGAME", "no", 0.5, 1, 0.5, 0.01, "graded", "yes", -0.51),
+                (3, "paper", "T3", "E", "KXNBAGAME", "yes", 0.5, 1, 0.5, 0.01, "graded", "sold", 0.10),
+                (4, "paper", "T4", "E", "KXNBAGAME", "yes", 0.5, 1, 0.5, 0.01, "open", None, None),
+            ]
+            for row in rows:
+                ts, mode, ticker, event, series, side, price, contracts, stake, fee, status, result, pnl = row
+                store.x("INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,stake,fee,status,result,pnl,graded_ts) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (ts, mode, ticker, event, series, side, price, contracts, stake, fee, status, result, pnl, int(time.time()) if status == "graded" else None))
+            page = dashboard.build(store, s, live_path=os.path.join(d, "missing.json"), briefing_path=os.path.join(d, "missing.txt"))
+            self.assertIn("Settled · won · win %", page)
+            self.assertIn("2 · 1 · 50.0%", page)
+
     def test_cycle_bets_grades_and_learns(self):
         with tempfile.TemporaryDirectory() as d:
             os.environ["BOT_DB"] = os.path.join(d, "bot.sqlite")
