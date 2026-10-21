@@ -75,10 +75,10 @@ def build(store, settings, live_path="data/live_summary.json", briefing_path="da
     wins = sum(1 for b in settled if b["result"] == b["side"])
     win_pct = 100.0 * wins / len(settled) if settled else None
     win_pct_text = f"{win_pct:.1f}%" if win_pct is not None else "—"
-    # Daily stats use the configured BOT_TIMEZONE (UTC fallback) and settlement
+    # Daily stats use the configured BOT_TIMEZONE (America/Chicago fallback) and settlement
     # time, not bet-placement time. Historical overall stats remain unchanged.
     try:
-        report_tz = ZoneInfo(os.environ.get("BOT_TIMEZONE", "UTC"))
+        report_tz = ZoneInfo(os.environ.get("BOT_TIMEZONE", "America/Chicago"))
     except Exception:
         report_tz = timezone.utc
     today = datetime.fromtimestamp(now, timezone.utc).astimezone(report_tz).date()
