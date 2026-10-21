@@ -664,35 +664,50 @@ class Engine:
         fees = risk.taker_fee(n, pl, self.s.taker_fee_rate) + risk.taker_fee(n, ph, self.s.taker_fee_rate)
         if n < 1 or n * (1 - pl - ph) - fees <= 0:
             return
-        placed = []   # place BOTH legs first; record only a complete arbitrage
+        placed = []   # track each leg's actual fills before checking completeness
         for ticker, side, px in ((a["low"], "yes", pl), (a["high"], "no", ph)):
             oid = f"paper-ladder-{uuid.uuid4().hex[:8]}"
+            filled = n
             if self.s.mode in ("demo", "live"):
                 try:
                     o = self.trade.place_limit_buy(ticker, side, n, px)
                     oid = o.get("order_id", "")
-                    if int(num(o, "fill_count") or num(o, "taker_fill_count") or 0) < n:
-                        raise RuntimeError("leg not fully filled")
+                    filled = int(num(o, "fill_count") or num(o, "taker_fill_count") or 0)
+                    placed.append((ticker, side, px, oid, filled))
+                    if filled < n:
+                        raise RuntimeError(f"leg only filled {filled}/{n} contracts")
                 except Exception as e:
                     log.error("LADDER LEG FAILED %s: %s", ticker, e)
-                    for t, sd, _, _ in placed:          # sell back what did fill
+                    for t, sd, _, _, qty in placed:
+                        if qty <= 0:
+                            continue
                         try:
                             bid = risk.bid_for(self.data.orderbook(t), sd)
-                            if bid:
-                                self.trade.place_limit_sell(t, sd, n, bid)
+                            if not bid:
+                                raise RuntimeError("no bid available to unwind")
+                            close = self.trade.place_limit_sell(t, sd, qty, bid)
+                            unwound = int(num(close, "fill_count") or num(close, "taker_fill_count") or 0)
+                            if unwound < qty:
+                                raise RuntimeError(f"unwind only filled {unwound}/{qty}")
                         except Exception as e2:
                             log.error("UNWIND FAILED %s: %s", t, e2)
-                            alerts.send("Unwind failed", f"{t}: check manually", priority="urgent")
+                            alerts.send("Unwind failed", f"{t}: {e2}; check position manually",
+                                        priority="urgent", tags=["warning"])
                     return
-            placed.append((ticker, side, px, oid))
-        for ticker, side, px, oid in placed:
+            else:
+                placed.append((ticker, side, px, oid, filled))
+        for ticker, side, px, oid, filled in placed:
+            if filled != n:
+                log.error("LADDER incomplete fill unexpectedly reached ledger: %s %s/%s",
+                          ticker, filled, n)
+                return
             self.store.add_bet({
                 "ts": now, "mode": self.s.mode, "ticker": ticker, "event_ticker": ticker,
-                "series": "ARB", "team": None, "side": side, "price": px, "contracts": n,
-                "stake": round(n * px, 2), "fee": risk.taker_fee(n, px, self.s.taker_fee_rate),
+                "series": "ARB", "team": None, "side": side, "price": px, "contracts": filled,
+                "stake": round(filled * px, 2), "fee": risk.taker_fee(filled, px, self.s.taker_fee_rate),
                 "model_prob": None, "edge": None, "confidence": 1.0,
                 "signals": {"arbitrage": {"pair": [a["low"], a["high"]],
-                                          "locked": round(n * (1 - pl - ph) - fees, 2)}},
+                                          "locked": round(filled * (1 - pl - ph) - fees, 2)}},
                 "order_id": oid, "style": "taker"})
         summary["bets"] += 2
 
@@ -713,24 +728,32 @@ class Engine:
         order_ids = []
         for m, px in legs:
             oid = f"paper-arb-{uuid.uuid4().hex[:8]}"
+            filled = plan["contracts"]
             if self.s.mode in ("demo", "live"):
                 try:
                     o = self.trade.place_limit_buy(m["ticker"], "yes", plan["contracts"], px)
                     oid = o.get("order_id", "")
-                    if int(num(o, "fill_count") or num(o, "taker_fill_count") or 0) < plan["contracts"]:
-                        raise RuntimeError("leg not fully filled")
+                    filled = int(num(o, "fill_count") or num(o, "taker_fill_count") or 0)
+                    order_ids.append((m, px, oid, filled))
+                    if filled < plan["contracts"]:
+                        raise RuntimeError(f"leg only filled {filled}/{plan['contracts']} contracts")
                 except Exception as e:
                     log.error("ARB LEG FAILED %s: %s", m["ticker"], e)
                     self.unwind(order_ids, plan["contracts"])
                     return False
-            order_ids.append((m, px, oid))
-        for m, px, oid in order_ids:
-            fee = risk.taker_fee(plan["contracts"], px, self.s.taker_fee_rate)
+            else:
+                order_ids.append((m, px, oid, filled))
+        for m, px, oid, filled in order_ids:
+            if filled != plan["contracts"]:
+                log.error("ARB incomplete fill unexpectedly reached ledger: %s %s/%s",
+                          m["ticker"], filled, plan["contracts"])
+                return False
+            fee = risk.taker_fee(filled, px, self.s.taker_fee_rate)
             self.store.add_bet({
                 "ts": now, "mode": self.s.mode, "ticker": m["ticker"],
                 "event_ticker": ev["event_ticker"], "series": ev["series_ticker"],
                 "team": m.get("yes_sub_title"), "side": "yes", "price": px,
-                "contracts": plan["contracts"], "stake": round(plan["contracts"] * px, 2),
+                "contracts": filled, "stake": round(filled * px, 2),
                 "fee": fee, "model_prob": None, "edge": None, "confidence": 1.0,
                 "signals": {"arbitrage": {"locked_profit": plan["locked_profit"]}},
                 "order_id": oid})
@@ -741,18 +764,24 @@ class Engine:
         return True
 
     def unwind(self, legs, contracts):
-        """A half-built arbitrage is just an unhedged bet. Sell back any leg that
-        already filled, immediately, at whatever the market bids."""
-        for m, px, _ in legs:
+        """Sell back the actually filled quantity of each half-built arb leg."""
+        for m, px, _, filled in legs:
+            if filled <= 0:
+                continue
             try:
                 book = self.data.orderbook(m["ticker"])
                 bid = risk.bid_for(book, "yes")
-                if bid:
-                    self.trade.place_limit_sell(m["ticker"], "yes", contracts, bid)
-                    log.warning("unwound arb leg %s at $%.2f", m["ticker"], bid)
+                if not bid:
+                    raise RuntimeError("no bid available to unwind")
+                close = self.trade.place_limit_sell(m["ticker"], "yes", filled, bid)
+                unwound = int(num(close, "fill_count") or num(close, "taker_fill_count") or 0)
+                if unwound < filled:
+                    raise RuntimeError(f"unwind only filled {unwound}/{filled}")
+                log.warning("unwound arb leg %s x%d at $%.2f", m["ticker"], filled, bid)
             except Exception as e:
                 log.error("UNWIND FAILED %s: %s — check this position manually", m["ticker"], e)
-                alerts.send("Unwind failed", f"{m['ticker']}: check manually", priority="urgent")
+                alerts.send("Unwind failed", f"{m['ticker']}: {e}; check position manually",
+                            priority="urgent", tags=["warning"])
 
     def _skip(self, summary, reason):
         # group by the reason's wording, without the numbers
