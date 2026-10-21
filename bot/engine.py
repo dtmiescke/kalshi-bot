@@ -226,14 +226,13 @@ class Engine:
                             if published and now_ts - published > 48 * 3600:
                                 continue
                             item_event = item.get("event_ticker")
-                            if item_event and mkt.get("event_ticker") and item_event != mkt.get("event_ticker"):
-                                continue
                             self._headlines[sport].append({
                                 "headline": f"[{item.get('publisher') or item.get('source') or 'unknown source'}] {item.get('title', '')}",
                                 "description": item.get("summary", ""),
                                 "published": published or item.get("observed_ts"),
                                 "source": item.get("source", ""),
                                 "url": item.get("url", ""),
+                                "event_ticker": item_event,
                             })
                     # Include recent live/final scoreboard and box-score evidence
                     # for these teams, without treating an unverified feed as truth.
@@ -266,7 +265,9 @@ class Engine:
                         context["recent_scoreboard_stats"] = stat_rows[:3]
                 except Exception as e:
                     log.debug("cached web intelligence unavailable for %s: %s", sport, e)
-            heads = intel.relevant(self._headlines[sport], [team, opp or ""])
+            event_headlines = [h for h in self._headlines[sport]
+                               if not h.get("event_ticker") or h.get("event_ticker") == mkt.get("event_ticker")]
+            heads = intel.relevant(event_headlines, [team, opp or ""])
             book = hist[-1]["fair_prob"] if hist else None
             r = intel.ai_news(self.llm, team, opp, mid, book, heads, context)
             self.store.set_kv(f"news_last_{mkt['ticker']}", time.time())
