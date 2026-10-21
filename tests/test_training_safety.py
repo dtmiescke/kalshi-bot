@@ -87,11 +87,18 @@ class TestTrainingSafety(unittest.TestCase):
         for method in ("try_arb", "execute_ladder"):
             with self.subTest(method=method):
                 obj = engine.Engine.__new__(engine.Engine)
-                obj.s = SimpleNamespace(mode="live", bankroll=1000.0, max_per_day=100.0,
-                                        max_per_game=100.0, taker_fee_rate=0.07)
+                obj.s = SimpleNamespace(
+                    mode="live", bankroll=1000.0, max_per_day=100.0, max_per_game=100.0,
+                    max_per_bet=25.0, max_open_cost=200.0, max_open_positions=5,
+                    taker_fee_rate=0.07
+                )
                 obj.store = mock.Mock()
                 obj.store.has_open_event_bet.return_value = False
                 obj.store.staked_since.return_value = 0.0
+                obj.store.staked_on_event.return_value = 0.0
+                obj.store.account.return_value = {
+                    "open_positions": 0, "open_cost": 0.0, "cash": 1000.0
+                }
                 low_book = {"yes": [(0.25, 100)], "no": [(0.70, 2)]}
                 high_book = {"yes": [(0.60, 2)], "no": [(0.55, 100)]}
                 obj.data = SimpleNamespace(orderbook=lambda ticker: (
