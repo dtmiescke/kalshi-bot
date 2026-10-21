@@ -485,6 +485,22 @@ class TestAdvanced(unittest.TestCase):
 
 
 class TestBacktestAndDomains(unittest.TestCase):
+    def test_calibration_table_excludes_outcomes_settled_after_as_of_time(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = Store(os.path.join(d, "calibration-time.sqlite"))
+            for i, settled_ts in enumerate((1000, 2000)):
+                ticker = f"ASOF-{i}"
+                store.add_decision_audit({
+                    "ts": 100 + i, "ticker": ticker, "event_ticker": f"E{i}",
+                    "series": "KXNBAGAME", "decision": "rejected", "reason": "test",
+                    "side": "yes", "market_price": 0.5, "model_prob": 0.7,
+                    "side_prob": 0.7, "edge": 0.2, "confidence": 0.8,
+                })
+                store.grade_decision_audit(ticker, 1, settled_ts=settled_ts, cutoff_ts=100 + i)
+            table = brain.calibration_table(store, domain="sports", as_of_ts=1500)
+            self.assertEqual(table[7]["n"], 1)
+            self.assertEqual(table[7]["actual"], 1.0)
+
     def test_backtest_weights_are_reconstructed_as_of_decision_time(self):
         with tempfile.TemporaryDirectory() as d:
             store = Store(os.path.join(d, "weights.sqlite"))
