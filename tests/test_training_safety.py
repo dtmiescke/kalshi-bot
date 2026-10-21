@@ -34,6 +34,13 @@ class TestTrainingSafety(unittest.TestCase):
                 with self.assertRaises((ValueError, RuntimeError)):
                     settings.validate()
 
+    def test_scheduled_path_validates_risk_settings_before_other_work(self):
+        settings = Settings()
+        settings.mode = "paper"
+        settings.max_per_bet = float("nan")
+        with self.assertRaisesRegex(ValueError, "MAX_PER_BET"):
+            main.run_scheduled(settings, mock.Mock(), mock.Mock())
+
     def test_default_settings_pass_validation_in_paper_mode(self):
         settings = Settings()
         settings.mode = "paper"
