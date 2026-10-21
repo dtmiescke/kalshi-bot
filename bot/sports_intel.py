@@ -64,7 +64,6 @@ SPORT_TERMS = {
     "boxing": "boxing fight injury weigh-in result",
     "golf": "PGA LPGA golf player withdrawal leaderboard",
     "motorsports": "Formula 1 NASCAR driver team race update",
-    "esports": "esports roster change match result tournament",
     "cricket": "international cricket IPL BBL lineup injury team news score",
     "rugby": "rugby union league lineup injury team news score",
     "volleyball": "volleyball roster lineup injury tournament score",
