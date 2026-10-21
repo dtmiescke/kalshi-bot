@@ -96,7 +96,9 @@ class TestTrainingSafety(unittest.TestCase):
 
                 obj.trade = SimpleNamespace(place_limit_buy=buy, place_limit_sell=sell)
                 summary = {"bets": 0, "arbs": []}
-                with mock.patch("bot.engine.alerts.send"):
+                with mock.patch("bot.engine.alerts.send"), mock.patch(
+                    "bot.engine.guard.status", return_value=(True, "ok")
+                ):
                     if method == "try_arb":
                         result = obj.try_arb(
                             {"event_ticker": "EV", "series_ticker": "KXNBAGAME"},
