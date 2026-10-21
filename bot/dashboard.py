@@ -72,6 +72,7 @@ def build(store, settings, live_path="data/live_summary.json", briefing_path="da
     settled = [b for b in graded if b["result"] in ("yes", "no") and b["side"] in ("yes", "no")]
     wins = sum(1 for b in settled if b["result"] == b["side"])
     win_pct = 100.0 * wins / len(settled) if settled else None
+    win_pct_text = f"{win_pct:.1f}%" if win_pct is not None else "—"
     open_bets = store.q("SELECT * FROM bets WHERE status='open' ORDER BY ts DESC")
     recent = store.q("SELECT * FROM bets WHERE status='graded' ORDER BY graded_ts DESC LIMIT 15")
 
@@ -151,7 +152,7 @@ td div.mut{{white-space:normal}}.mut{{color:var(--mut);font-size:12px}}a{{color:
 <div><div class="k">Cash</div><div class="v">${acct['cash']:,.2f}</div></div>
 <div><div class="k">Realized P&amp;L</div><div class="v {'good' if acct['realized'] >= 0 else 'bad'}">${acct['realized']:+,.2f}</div></div>
 <div><div class="k">Open cost</div><div class="v">${acct['open_cost']:,.2f}</div></div>
-<div><div class="k">Settled · won · win %</div><div class="v">{len(settled)} · {wins} · {f"{win_pct:.1f}%" if win_pct is not None else "—"}</div></div></div></div>
+<div><div class="k">Settled · won · win %</div><div class="v">{len(settled)} · {wins} · {win_pct_text}</div></div></div></div>
 <div class="card"><h2>Open positions ({len(open_bets)})</h2><div class="scroll"><table>
 <tr><td class="k">Position</td><td class="k">Now</td><td class="k">Quote age</td></tr>
 {pos_rows or '<tr><td colspan=3 class="mut">none</td></tr>'}</table></div></div>
