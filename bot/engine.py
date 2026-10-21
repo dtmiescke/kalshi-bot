@@ -215,7 +215,7 @@ class Engine:
                         "mma_mixed_martial_arts": "mma", "golf_pga": "golf",
                         "motorsport_f1": "motorsports", "esports": "esports",
                     }
-                    category = category_for.get(sport)
+                    category = category_for.get(sport, sport if sport in sports_intel.SPORT_TERMS else None)
                     if category:
                         now_ts = int(time.time())
                         for item in sports_intel.recent(self.store, limit=250, category=category, kind="news"):
