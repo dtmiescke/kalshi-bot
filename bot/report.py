@@ -1,5 +1,6 @@
 """Performance report: is there a real edge yet?"""
 import os
+import time
 from collections import defaultdict
 
 from . import brain, guard
@@ -84,4 +85,34 @@ def build(store):
         lines.append("\n-- Calibration (said vs happened) --")
         for b, v in cal.items():
             lines.append(f"~{_pct(v['predicted'])}: n={v['n']:4d} actual {_pct(v['actual'])}")
+    # Short-horizon scorecard: canonical, settled decision forecasts only.
+    # Compare model Brier to the YES-price baseline; lower is better. This is
+    # forecast quality, not betting ROI, and candidate audits are not real bets.
+    audit_rows = store.q("""SELECT series, model_prob, market_price, outcome, settled_ts
+                             FROM decision_audit
+                             WHERE brier IS NOT NULL AND model_prob IS NOT NULL
+                               AND market_price IS NOT NULL AND outcome IN (0,1)
+                               AND settled_ts IS NOT NULL""")
+    now = int(time.time())
+    for label, horizon in (("today", 24 * 3600), ("7 days", 7 * 24 * 3600)):
+        grouped = defaultdict(list)
+        for row in audit_rows:
+            if now - horizon < int(row["settled_ts"]) <= now:
+                domain = brain.learning_domain_of(row["series"])
+                y = int(row["outcome"])
+                p_model = float(row["model_prob"])
+                p_market = float(row["market_price"])
+                grouped[domain].append(((p_model - y) ** 2, (p_market - y) ** 2))
+        lines.append(f"\\n-- Forecast scorecard: {label} (settled audit forecasts) --")
+        if not grouped:
+            lines.append("No eligible settled audit forecasts in this window.")
+        for domain, pairs in sorted(grouped.items()):
+            model_brier = sum(x[0] for x in pairs) / len(pairs)
+            market_brier = sum(x[1] for x in pairs) / len(pairs)
+            delta = market_brier - model_brier
+            verdict = "model better" if delta > 0 else "market better" if delta < 0 else "tied"
+            lines.append(f"{domain}: n={len(pairs)}, model Brier={model_brier:.4f}, "
+                         f"market-price Brier={market_brier:.4f}, {verdict} by {abs(delta):.4f}")
+        lines.append("Small samples are descriptive only; this scorecard is not a guarantee of profit.")
+
     return "\n".join(lines)
