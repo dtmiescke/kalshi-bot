@@ -266,9 +266,10 @@ def scan(client, store, settings=None, max_events=2000, max_age_s=7200):
                 if side not in ("yes", "no"):
                     missing = True
                     break
-                # Calibrate first, then shrink toward 50% when confidence or
-                # independent signal diversity is weak.
-                calibrated_yes = brain.calibrate(forecast["prob_yes"], store, "sports")
+                # _leg_forecast already calibrates this forecast using the
+                # ticker's domain. Do not calibrate a second time here: repeated
+                # calibration compounds bucket corrections and distorts probabilities.
+                calibrated_yes = forecast["prob_yes"]
                 p_selected = calibrated_yes if side == "yes" else 1 - calibrated_yes
                 conservative_p = conservative_leg_probability(
                     p_selected, forecast["confidence"], forecast["external_signal_count"])
