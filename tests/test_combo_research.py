@@ -1,5 +1,8 @@
+import os
+import tempfile
 import unittest
 
+from bot.storage import Store
 from bot.combo_research import _market_ask, combo_ranking_score, conservative_leg_probability, score_combo_probabilities
 
 
@@ -50,6 +53,34 @@ class TestComboResearch(unittest.TestCase):
         self.assertFalse(six_ordinary["exceptional_long_combo"])
         self.assertEqual(six_exceptional["length_preference_multiplier"], 1.0)
         self.assertTrue(six_exceptional["exceptional_long_combo"])
+
+    def test_combo_audit_upserts_one_market_and_grades_only_real_outcome(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = Store(os.path.join(d, "test.db"))
+            row = {"ticker": "COMBO-1", "ts": 100, "event_ticker": "EVENT-1",
+                   "leg_count": 3, "side": "yes", "market_price": 0.25,
+                   "predicted_yes": 0.40, "predicted_side_prob": 0.37,
+                   "market_yes_proxy": 0.30, "fee": 0.02,
+                   "expected_profit": 0.10, "eligible": True,
+                   "ranking_score": 0.10, "legs": [{"ticker": "LEG-1"}]}
+            store.record_combo_prediction(row)
+            self.assertEqual(store.q("SELECT COUNT(*) n FROM combo_prediction_audit")[0]["n"], 1)
+            self.assertEqual(store.q("SELECT COUNT(*) n FROM combo_prediction_audit WHERE outcome IS NOT NULL")[0]["n"], 0)
+            # Repeated scans update the same ticker rather than inflating sample size.
+            store.record_combo_prediction({**row, "ts": 200, "predicted_yes": 0.45})
+            self.assertEqual(store.q("SELECT COUNT(*) n FROM combo_prediction_audit")[0]["n"], 1)
+            self.assertEqual(store.q("SELECT predicted_yes FROM combo_prediction_audit")[0]["predicted_yes"], 0.45)
+            self.assertEqual(store.grade_combo_prediction("COMBO-1", 1, 300), 1)
+            self.assertEqual(store.grade_combo_prediction("COMBO-1", 0, 400), 0)
+            graded = store.q("SELECT * FROM combo_prediction_audit")[0]
+            self.assertEqual(graded["outcome"], 1)
+            self.assertAlmostEqual(graded["brier"], (0.45 - 1) ** 2)
+            self.assertAlmostEqual(graded["market_proxy_brier"], (0.30 - 1) ** 2)
+            self.assertAlmostEqual(graded["hypothetical_pnl"], 1 - 0.25 - 0.02)
+            # A settled prediction is immutable, even if a stale scan sees it again.
+            store.record_combo_prediction({**row, "ts": 500, "predicted_yes": 0.99})
+            self.assertEqual(store.q("SELECT predicted_yes FROM combo_prediction_audit")[0]["predicted_yes"], 0.45)
+            self.assertEqual(store.combo_prediction_summary()[0]["markets"], 1)
 
     def test_uses_real_asks_or_mirrors_opposite_bid(self):
         self.assertEqual(_market_ask({"yes_ask_dollars": "0.4200"}, "yes"), 0.42)
