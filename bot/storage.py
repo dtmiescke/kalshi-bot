@@ -352,21 +352,24 @@ class Store:
     def open_bets(self):
         return self.q("SELECT * FROM bets WHERE status='open'")
 
-    def staked_since(self, ts):
-        r = self.q("SELECT COALESCE(SUM(stake),0) s FROM bets WHERE ts>=?", (ts,))
+    def staked_since(self, ts, mode=None):
+        r = self.q("""SELECT COALESCE(SUM(stake),0) s FROM bets
+                      WHERE ts>=? AND (? IS NULL OR mode=?)""", (ts, mode, mode))
         return r[0]["s"]
 
-    def staked_on_event(self, event_ticker):
-        r = self.q("SELECT COALESCE(SUM(stake),0) s FROM bets WHERE event_ticker=?",
-                   (event_ticker,))
+    def staked_on_event(self, event_ticker, mode=None):
+        r = self.q("""SELECT COALESCE(SUM(stake),0) s FROM bets
+                      WHERE event_ticker=? AND (? IS NULL OR mode=?)""",
+                   (event_ticker, mode, mode))
         return r[0]["s"]
 
-    def account(self, bankroll):
-        """Virtual (paper) or tracked (live) account: cash can never go negative."""
+    def account(self, bankroll, mode=None):
+        """Return account cash/exposure, optionally isolated to one mode."""
         r = self.q("""SELECT
             COALESCE(SUM(CASE WHEN status='graded' THEN pnl END), 0) realized,
             COALESCE(SUM(CASE WHEN status='open' THEN stake + fee END), 0) open_cost,
-            COALESCE(SUM(CASE WHEN status='open' THEN 1 END), 0) open_n FROM bets""")[0]
+            COALESCE(SUM(CASE WHEN status='open' THEN 1 END), 0) open_n
+            FROM bets WHERE (? IS NULL OR mode=?)""", (mode, mode))[0]
         return {"cash": round(bankroll + r["realized"] - r["open_cost"], 2),
                 "realized": round(r["realized"], 2), "open_cost": round(r["open_cost"], 2),
                 "open_positions": int(r["open_n"]), "equity_at_cost": round(bankroll + r["realized"], 2)}
@@ -378,9 +381,10 @@ class Store:
                         AND (? IS NULL OR mode=?)""", (day_start, mode, mode))
         return r[0]["p"]
 
-    def has_open_event_bet(self, event_ticker):
-        return bool(self.q("SELECT 1 FROM bets WHERE event_ticker=? AND status='open'",
-                           (event_ticker,)))
+    def has_open_event_bet(self, event_ticker, mode=None):
+        return bool(self.q("""SELECT 1 FROM bets WHERE event_ticker=? AND status='open'
+                              AND (? IS NULL OR mode=?)""", (event_ticker, mode, mode)))
 
-    def has_open_bet(self, ticker):
-        return bool(self.q("SELECT 1 FROM bets WHERE ticker=? AND status='open'", (ticker,)))
+    def has_open_bet(self, ticker, mode=None):
+        return bool(self.q("""SELECT 1 FROM bets WHERE ticker=? AND status='open'
+                              AND (? IS NULL OR mode=?)""", (ticker, mode, mode)))
