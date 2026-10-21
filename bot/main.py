@@ -44,6 +44,8 @@ def run_scheduled(s, store, data):
       15-minute window is watched continuously, not glimpsed once.
       BURST_MINUTES=0 falls back to one quick snapshot.
     - grading, learning, AI briefing, and model retraining when due."""
+    if s.mode in ("demo", "live"):
+        s.validate()   # refuse real orders without confirmation + keys
     # Free-first public sports intelligence collection; data only, never order authority.
     if os.environ.get("SPORTS_INTEL_ENABLED", "yes").lower() in ("yes", "true", "1"):
         try:
