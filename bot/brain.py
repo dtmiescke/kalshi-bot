@@ -132,23 +132,26 @@ def learn(store, graded, domain=None):
 
 
 # --- calibration ---------------------------------------------------------------
-def calibration_table(store, buckets=10, domain=None):
-    """Calibrate YES probabilities against settled outcomes from one forecast per market.
+def calibration_table(store, buckets=10, domain=None, as_of_ts=None):
+    """Calibrate YES probabilities using settled, canonical forecasts available at a given time.
 
     Decision-audit rows are scored only at the canonical pre-event cutoff, so
     rejected opportunities contribute without counting repeated scans as new samples.
-    Older installations fall back to settled bets until audit history is available.
+    as_of_ts enables leak-free walk-forward evaluation; older installations fall
+    back to settled bets only when no scored audit rows exist for that domain/time.
     """
     rows = store.q("""SELECT model_prob, outcome, series FROM decision_audit
                       WHERE brier IS NOT NULL AND model_prob IS NOT NULL
-                      AND outcome IN (0,1)""")
+                      AND outcome IN (0,1) AND (? IS NULL OR settled_ts<=?)""",
+                   (as_of_ts, as_of_ts))
     if domain:
         rows = [r for r in rows if domain_of(r["series"]) == domain]
     audit_source = bool(rows)
     if not rows:
         rows = store.q("""SELECT model_prob, result, series FROM bets
                           WHERE status='graded' AND result IN ('yes','no')
-                          AND model_prob IS NOT NULL""")
+                          AND model_prob IS NOT NULL AND (? IS NULL OR graded_ts<=?)""",
+                       (as_of_ts, as_of_ts))
         if domain:
             rows = [r for r in rows if domain_of(r["series"]) == domain]
     table = defaultdict(lambda: [0, 0])
@@ -163,9 +166,9 @@ def calibration_table(store, buckets=10, domain=None):
             for b, (n, w) in sorted(table.items())}
 
 
-def calibrate(prob, store, domain=None):
-    """Shrink or stretch a probability using the bot's own track record."""
-    table = calibration_table(store, domain=domain)
+def calibrate(prob, store, domain=None, as_of_ts=None):
+    """Shrink or stretch a probability using only prior settled forecasts."""
+    table = calibration_table(store, domain=domain, as_of_ts=as_of_ts)
     n_total = sum(v["n"] for v in table.values())
     if n_total < CAL_MIN_SAMPLES:
         return prob
