@@ -111,12 +111,12 @@ class Store:
         """Grade recorded snapshots without rewriting what the bot knew at decision time."""
         settled_ts = int(settled_ts or time.time())
         with self.lock:
-            rows = self.db.execute("SELECT id, side_prob, market_price, side, decision FROM decision_audit WHERE ticker=? AND outcome IS NULL", (ticker,)).fetchall()
+            rows = self.db.execute("SELECT id, model_prob, market_price, side, decision FROM decision_audit WHERE ticker=? AND outcome IS NULL", (ticker,)).fetchall()
             for row in rows:
-                if row["side_prob"] is None:
+                if row["model_prob"] is None:
                     continue
                 y = int(outcome)
-                brier = (float(row["side_prob"]) - y) ** 2
+                brier = (float(row["model_prob"]) - y) ** 2
                 pnl = None
                 if row["decision"] == "candidate" and row["side"] in ("yes", "no") and row["market_price"] is not None:
                     p = float(row["market_price"])
