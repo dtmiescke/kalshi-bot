@@ -50,6 +50,12 @@ class TestSportsSelection(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "requires at least one"):
             settings.validate()
 
+    def test_combo_execution_toggle_fails_closed_until_execution_exists(self):
+        with patch.dict(os.environ, {"COMBOS_ENABLED": "yes"}):
+            settings = Settings()
+        with self.assertRaisesRegex(ValueError, "not implemented"):
+            settings.validate()
+
     def test_negative_combo_audit_lead_is_rejected(self):
         with patch.dict(os.environ, {"COMBO_AUDIT_LEAD_SECONDS": "-1"}):
             settings = Settings()
