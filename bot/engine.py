@@ -546,6 +546,7 @@ class Engine:
     def _ladder_row(m, snap):
         t = settlement.contract_terms(m)
         return {"ticker": m["ticker"], "strike": t["strike"], "close_ts": t["close_ts"],
+                "event_ticker": snap.get("event_ticker"), "series": snap.get("series"),
                 "rules_key": f"{t['benchmark']}|{t['avg_seconds']}|{snap['series'][:5]}",
                 "yes_bid": snap.get("yes_bid"), "yes_ask": snap.get("yes_ask")}
 
@@ -648,8 +649,26 @@ class Engine:
                 continue
             self.execute_ladder(a, now, summary)
 
+    def _arbitrage_budget(self, event_ticker):
+        """Combined two-leg budget respecting global caps and current account mode."""
+        acct = self.store.account(self.s.bankroll, mode=self.s.mode)
+        if acct["open_positions"] + 2 > self.s.max_open_positions:
+            return 0.0
+        left_day = self.s.max_per_day - self.store.staked_since(
+            risk.day_start_ts(), mode=self.s.mode
+        )
+        left_game = self.s.max_per_game - self.store.staked_on_event(
+            event_ticker, mode=self.s.mode
+        )
+        left_open = self.s.max_open_cost - acct["open_cost"] - 0.05
+        left_cash = acct["cash"] - 0.05
+        total_cap = min(2 * self.s.max_per_bet, left_day, left_game, left_open, left_cash)
+        if not math.isfinite(total_cap) or total_cap <= 0:
+            return 0.0
+        return max(0.0, total_cap / (1 + self.s.taker_fee_rate))
+
     def execute_ladder(self, a, now, summary):
-        """Re-check both books, then buy YES(low) + NO(high) in equal size."""
+        """Re-check both books and global risk caps, then buy YES(low) + NO(high)."""
         try:
             b_low, b_high = self.data.orderbook(a["low"]), self.data.orderbook(a["high"])
         except Exception:
@@ -659,8 +678,9 @@ class Engine:
         if not yes_low or not no_high:
             return
         (pl, ql), (ph, qh) = yes_low[0], no_high[0]
-        left_day = self.s.max_per_day - self.store.staked_since(risk.day_start_ts())
-        n = int(min(ql, qh, min(self.s.max_per_game, left_day) // (pl + ph)))
+        event_ticker = a.get("event_ticker") or a["low"]
+        budget = self._arbitrage_budget(event_ticker)
+        n = int(min(ql, qh, budget // (pl + ph))) if budget > 0 else 0
         fees = risk.taker_fee(n, pl, self.s.taker_fee_rate) + risk.taker_fee(n, ph, self.s.taker_fee_rate)
         if n < 1 or n * (1 - pl - ph) - fees <= 0:
             return
@@ -706,8 +726,8 @@ class Engine:
                           ticker, filled, n)
                 return
             self.store.add_bet({
-                "ts": now, "mode": self.s.mode, "ticker": ticker, "event_ticker": ticker,
-                "series": "ARB", "team": None, "side": side, "price": px, "contracts": filled,
+                "ts": now, "mode": self.s.mode, "ticker": ticker, "event_ticker": event_ticker,
+                "series": a.get("series") or "ARB", "team": None, "side": side, "price": px, "contracts": filled,
                 "stake": round(filled * px, 2), "fee": risk.taker_fee(filled, px, self.s.taker_fee_rate),
                 "model_prob": None, "edge": None, "confidence": 1.0,
                 "signals": {"arbitrage": {"pair": [a["low"], a["high"]],
@@ -717,15 +737,15 @@ class Engine:
 
     def try_arb(self, ev, markets, summary, now):
         """Buy YES on both teams when together they cost < $1 after fees."""
-        if self.store.has_open_event_bet(ev["event_ticker"]):
+        if self.store.has_open_event_bet(ev["event_ticker"], mode=self.s.mode):
             return False
         try:
             books = [self.data.orderbook(m["ticker"]) for m in markets]
         except Exception:
             return False
-        left_day = self.s.max_per_day - self.store.staked_since(risk.day_start_ts())
+        budget = self._arbitrage_budget(ev["event_ticker"])
         plan = guard.arb_plan(ev["series_ticker"], books[0], books[1],
-                              self.s.taker_fee_rate, min(self.s.max_per_game, left_day))
+                              self.s.taker_fee_rate, budget)
         if not plan:
             return False
         allowed, reason = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
