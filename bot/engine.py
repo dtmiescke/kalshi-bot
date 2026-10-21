@@ -265,16 +265,17 @@ class Engine:
                     stat_rows = []
                     team_terms = [str(x).lower() for x in (team, opp) if x and len(str(x)) > 2]
                     for stat_category in stat_categories.get(sport, []):
-                        for item in sports_intel.recent(self.store, limit=30, category=stat_category, kind="stats"):
-                            serialized = json.dumps(item, ensure_ascii=False).lower()
-                            if team_terms and not any(term in serialized for term in team_terms):
-                                continue
-                            stat_rows.append({
-                                "event": item.get("title"), "observed_ts": item.get("observed_ts"),
-                                "state": item.get("state"), "scoreboard": item.get("scoreboard", []),
-                                "team_stats": item.get("team_stats", []), "leaders": item.get("leaders", []),
-                                "public_odds": item.get("odds", []), "predictor": item.get("predictor"),
-                            })
+                        for kind in ("stats", "score"):
+                            for item in sports_intel.recent(self.store, limit=30, category=stat_category, kind=kind):
+                                serialized = json.dumps(item, ensure_ascii=False).lower()
+                                if team_terms and not any(term in serialized for term in team_terms):
+                                    continue
+                                stat_rows.append({
+                                    "event": item.get("title") or item.get("name"), "observed_ts": item.get("observed_ts"),
+                                    "state": item.get("state"), "scoreboard": item.get("scoreboard") or item.get("competitors", []),
+                                    "team_stats": item.get("team_stats", []), "leaders": item.get("leaders", []),
+                                    "public_odds": item.get("odds", []), "predictor": item.get("predictor"),
+                                })
                     if stat_rows:
                         ai_context["recent_scoreboard_stats"] = stat_rows[:3]
                 except Exception as e:
