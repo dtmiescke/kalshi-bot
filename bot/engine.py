@@ -313,6 +313,7 @@ class Engine:
                 self.store.set_kv("sports_catalog_health", {
                     "ts": now, "series_discovered": len(catalog),
                     "open_events_seen": len(all_events), "sports_events_matched": sum(map(len, events_by_series.values())),
+                    "coverage_warning": len(all_events) >= 4000 or len(catalog) >= 10000,
                     "mode": "dynamic_all"})
             except Exception as e:
                 log.warning("dynamic sports discovery failed; using configured series: %s", e)
