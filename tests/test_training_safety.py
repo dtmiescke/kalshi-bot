@@ -8,6 +8,12 @@ from bot.config import Settings
 
 
 class TestTrainingSafety(unittest.TestCase):
+    def test_promotion_holdout_excludes_windows_that_started_before_champion_training(self):
+        groups = ["old", "old", "crossing", "crossing", "fresh", "fresh"]
+        stamps = [10, 11, 19, 21, 22, 23]
+        mask = ml.fresh_test_mask(groups, stamps, champion_trained_at=20)
+        self.assertEqual(mask.tolist(), [False, False, False, False, True, True])
+
     def test_existing_champion_must_be_evaluated_before_promotion(self):
         self.assertFalse(ml.beats_champion(True, False, None, 0.2))
         self.assertFalse(ml.beats_champion(True, True, None, 0.2))
