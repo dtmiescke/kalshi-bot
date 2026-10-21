@@ -12,6 +12,7 @@ from bot.config import Settings
 from bot.live import settlement
 from bot.live.analytics import SymbolAnalytics
 from bot.live.book import OrderBook
+from bot.live.runner import LiveRunner
 from bot.storage import Store
 
 
@@ -65,6 +66,53 @@ class TestAudit(unittest.TestCase):
                    0.5, 1, 0.5, 0.01, "graded", "no", -10.0, now))
         self.assertFalse(guard.league_benched(self.st, "KXBTC15M", n=1, mode="live"))
         self.assertTrue(guard.league_benched(self.st, "KXBTC15M", n=1, mode="paper"))
+
+    def test_partial_maker_fill_is_recorded_only_after_remainder_cancelled(self):
+        class Trade:
+            def __init__(self, after_cancel):
+                self.states = [
+                    {"fill_count": 2, "status": "resting"},
+                    after_cancel,
+                ]
+                self.cancel_calls = 0
+
+            def order(self, order_id):
+                return self.states.pop(0) if self.states else self.states[-1]
+
+            def cancel(self, order_id):
+                self.cancel_calls += 1
+
+        for final_state, should_record in (
+            ({"fill_count": 2, "status": "canceled"}, True),
+            ({"fill_count": 2, "status": "resting"}, False),
+        ):
+            with self.subTest(final_state=final_state):
+                runner = LiveRunner.__new__(LiveRunner)
+                runner.s = type("SettingsStub", (), {"mode": "demo", "maker_wait_s": 30})()
+                trade = Trade(final_state)
+                recorded, skips, maker_logs = [], [], []
+                runner.engine = type("EngineStub", (), {"trade": trade,
+                    "place": lambda _self, *args, **kwargs: recorded.append((args, kwargs))})()
+                runner.store = type("StoreStub", (), {
+                    "log_maker": lambda _self, *args: maker_logs.append(args)})()
+                runner.summary = {"alerts": []}
+                runner.books = {}
+                runner.makers = {"T1": {
+                    "plan": {"contracts": 5, "side": "yes", "limit": 0.5},
+                    "placed": 100, "order_id": "ORDER-1", "snap": {"ticker": "T1"},
+                    "readings": [], "prob": 0.6, "conf": 0.8}}
+                runner._maker_edge_gone = lambda *args: False
+                runner._side_edge = lambda *args: 0.1
+                runner._skip = lambda why: skips.append(why)
+                runner.check_makers(101)
+                self.assertEqual(trade.cancel_calls, 1)
+                self.assertEqual(bool(recorded), should_record)
+                if should_record:
+                    self.assertEqual(recorded[0][0][1]["contracts"], 2)
+                    self.assertNotIn("T1", runner.makers)
+                else:
+                    self.assertIn("T1", runner.makers)
+                    self.assertTrue(any("unconfirmed" in why for why in skips))
 
     def test_daily_risk_day_start_matches_central_dashboard_day(self):
         # 04:30 UTC on Oct 21 is 23:30 CDT on Oct 20.
