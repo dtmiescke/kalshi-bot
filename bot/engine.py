@@ -722,30 +722,54 @@ class Engine:
         key = " ".join(w for w in reason.split() if not any(c.isdigit() for c in w))[:40]
         summary["skipped"][key] = summary["skipped"].get(key, 0) + 1
 
+    def _record_decision(self, snap, readings, decision, reason=None, prob=None, conf=None, side=None, market_price=None, edge=None, now=None):
+        """Append a decision snapshot; this does not place or simulate an order."""
+        if market_price is None:
+            bid, ask = snap.get("yes_bid"), snap.get("yes_ask")
+            last = snap.get("last_price")
+            market_price = ((float(bid) + float(ask)) / 2 if bid is not None and ask is not None
+                            else float(last) if last is not None else None)
+        if side is None and prob is not None:
+            side = "yes" if prob >= 0.5 else "no"
+        side_prob = (prob if side == "yes" else 1 - prob) if prob is not None and side in ("yes", "no") else None
+        self.store.add_decision_audit({
+            "ts": int(now or time.time()), "ticker": snap["ticker"],
+            "event_ticker": snap.get("event_ticker"), "series": snap.get("series"),
+            "decision": decision, "reason": reason, "side": side,
+            "market_price": market_price, "model_prob": prob, "side_prob": side_prob,
+            "edge": edge, "confidence": conf,
+            "signals": {r.name: {"prob": r.prob, "confidence": r.confidence, "detail": r.detail} for r in readings}})
+
     def evaluate(self, snap, readings, weights, summary, required="book_consensus",
                  min_edge=None, max_per_bet=None):
         if not any(r.name == required for r in readings):
+            self._record_decision(snap, readings, "rejected", "no outside signal")
             self._skip(summary, "no outside signal")
             return None
         bc = next((r for r in readings if r.name == "book_consensus"), None)
         if bc and bc.detail.get("age_min", 0) > self.odds_max_age * 1.5:
+            self._record_decision(snap, readings, "rejected", "sportsbook odds too old")
             self._skip(summary, "sportsbook odds too old")
             return None
         prob, conf = brain.blend(readings, weights)
         if prob is None:
+            self._record_decision(snap, readings, "rejected", "no calibrated probability", conf=conf)
             return None
         try:
             book = self.data.orderbook(snap["ticker"])
         except Exception as e:
+            self._record_decision(snap, readings, "rejected", "orderbook unavailable", prob, conf)
             log.warning("orderbook %s: %s", snap["ticker"], e)
             return None
         plan, why = risk.decide(self.s, self.store, snap, prob, conf, book,
                                 min_edge=min_edge, max_per_bet=max_per_bet)
         if not plan:
+            self._record_decision(snap, readings, "rejected", why, prob, conf)
             self._skip(summary, why)
             return None
+        self._record_decision(snap, readings, "candidate", "passed deterministic risk checks",
+                              prob, conf, side=plan["side"], market_price=plan["price"], edge=plan["edge"])
         return snap, plan, readings, prob, conf
-
     def place(self, snap, plan, readings, prob, conf, summary, now, executed=None):
         """Send (or simulate) the order and record the bet. `executed` = an order
         the live runner already filled as a resting maker order."""
