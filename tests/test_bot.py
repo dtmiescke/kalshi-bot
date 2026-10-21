@@ -176,6 +176,24 @@ class TestMath(unittest.TestCase):
 
 
 class TestEndToEnd(unittest.TestCase):
+    def test_report_daily_and_weekly_scorecards_compare_model_to_market(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = Settings()
+            s.db_path = os.path.join(d, "t.db")
+            store = Store(s.db_path)
+            now = int(time.time())
+            store.add_decision_audit({
+                "ts": now - 3600, "ticker": "T1", "event_ticker": "E1",
+                "series": "KXNBAGAME", "decision": "candidate", "reason": "test",
+                "side": "yes", "market_price": 0.60, "model_prob": 0.80,
+                "side_prob": 0.80, "edge": 0.20, "confidence": 0.8,
+            })
+            store.grade_decision_audit("T1", 1, settled_ts=now, cutoff_ts=now - 3600)
+            report = build(store)
+            self.assertIn("Forecast scorecard: today", report)
+            self.assertIn("Forecast scorecard: 7 days", report)
+            self.assertIn("nba: n=1, model Brier=0.0400, market-price Brier=0.1600, model better by 0.1200", report)
+
     def test_dashboard_settled_win_percentage_excludes_open_and_sold(self):
         with tempfile.TemporaryDirectory() as d:
             s = Settings()
