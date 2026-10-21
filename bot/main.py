@@ -192,6 +192,10 @@ def main(argv=None):
         m = ml.train(store, min_windows=int(os.environ.get("ML_MIN_WINDOWS", 300)),
                      fee_rate=s.taker_fee_rate)
         print(ml.text(m))
+        if m.get("status") == "not enough data":
+            # A green workflow must not imply training succeeded when no model
+            # evaluation was possible.
+            raise SystemExit(2)
         if m.get("promoted"):
             alerts.send("New model promoted", ml.text(m)[:1500], tags=["brain"])
         store.set_kv("last_train", time.time())
