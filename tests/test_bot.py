@@ -140,6 +140,9 @@ class TestEndToEnd(unittest.TestCase):
             self.assertIn("Overall · settled · won · win %", page)
             self.assertIn("Today · settled · won · win %", page)
             self.assertIn("2 · 1 · 50.0%", page)
+            self.assertIn("All completed bets (3)", page)
+            self.assertIn("SOLD", page)
+            self.assertIn("T1", page)
 
     def test_cycle_bets_grades_and_learns(self):
         with tempfile.TemporaryDirectory() as d:
