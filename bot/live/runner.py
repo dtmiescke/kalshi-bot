@@ -226,6 +226,11 @@ class LiveRunner:
             if verdict["decision"] != "approve":
                 self._skip(f"council {verdict['decision']}")
                 return
+            allowed, reason = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
+            if not allowed:
+                self.betting_ok, self.betting_why = False, reason
+                self._skip(f"execution guard: {reason}")
+                return
             fresh, _ = self.readings_for(ticker, time.time())
             if not fresh or (self.books[ticker].age() or 99) > 5:
                 self._skip("recheck: data stale")
@@ -290,6 +295,10 @@ class LiveRunner:
         return filled
 
     def check_makers(self, now):
+        if self.makers:
+            self.betting_ok, self.betting_why = guard.status(
+                self.store, self.s.bankroll, mode=self.s.mode
+            )
         for ticker, mk in list(self.makers.items()):
             plan, book = mk["plan"], self.books.get(ticker)
             real_order = self.s.mode in ("demo", "live")
@@ -311,7 +320,8 @@ class LiveRunner:
             edge_gone = self._maker_edge_gone(ticker, plan, now)
             expired = now - mk["placed"] >= self.s.maker_wait_s
             if real_order and not terminal and (
-                (filled > 0 and filled < plan["contracts"]) or (not filled and (edge_gone or expired))
+                (filled > 0 and filled < plan["contracts"])
+                or (not filled and (edge_gone or expired or not self.betting_ok))
             ):
                 # A partial fill does not mean the remainder stopped working.
                 # Cancel and verify the final cumulative fill before recording it.
@@ -332,8 +342,11 @@ class LiveRunner:
                     ticker, plan["side"].upper(), filled, plan["limit"]))
                 self.store.log_maker(ticker, 1, "filled", now - mk["placed"])
                 del self.makers[ticker]
-            elif terminal or edge_gone or expired:
-                if edge_gone:
+            elif terminal or edge_gone or expired or not self.betting_ok:
+                if not self.betting_ok:
+                    self._skip(f"maker cancelled: risk guard {self.betting_why}")
+                    outcome = "risk_guard"
+                elif edge_gone:
                     self._skip("maker cancelled: edge faded")
                     outcome = "edge_faded"
                 else:
