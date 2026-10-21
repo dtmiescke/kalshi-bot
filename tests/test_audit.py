@@ -67,6 +67,26 @@ class TestAudit(unittest.TestCase):
         self.assertIsNone(plan)
         self.assertIn("real fees", why)
 
+    def test_04b_final_stake_includes_fee_within_budget(self):
+        self.s.fixed_bet = 10.0
+        self.s.max_per_bet = 1.0
+        self.s.min_edge = 0.01
+        book = {"yes": [(0.49, 100)], "no": [(0.49, 100)]}
+        plan, why = risk.decide(self.s, self.st, {"ticker": "T", "event_ticker": "E",
+                                  "series": "KXNFLGAME"}, 0.8, 0.9, book)
+        self.assertIsNotNone(plan, why)
+        self.assertLessEqual(plan["stake"] + plan["fee"], 1.0 + 1e-9)
+
+    def test_04c_fixed_bet_respects_earned_size_ramp(self):
+        self.s.fixed_bet = 20.0
+        self.s.max_per_bet = 20.0
+        self.s.min_edge = 0.01
+        book = {"yes": [(0.49, 100)], "no": [(0.49, 100)]}
+        plan, why = risk.decide(self.s, self.st, {"ticker": "T", "event_ticker": "E",
+                                  "series": "KXNFLGAME"}, 0.8, 0.9, book)
+        self.assertIsNotNone(plan, why)
+        self.assertLessEqual(plan["stake"], 5.0 + 1e-9)
+
     def test_05_one_entry_per_crypto_window(self):
         bid = bet(self.st, ticker="KXBTC15M-W-00", event_ticker="KXBTC15M-W", series="KXBTC15M")
         self.st.close_bet(bid, 0.7, 1.0)             # sold early...
