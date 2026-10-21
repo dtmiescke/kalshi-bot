@@ -22,7 +22,7 @@ import requests
 
 log = logging.getLogger(__name__)
 USER_AGENT = "KalshiIntelligenceBot/1.0 (+public-data; contact repository owner)"
-TIMEOUT = (3.05, 7)
+TIMEOUT = (2.0, 4.0)
 MAX_BODY = 2_000_000
 
 # These endpoints are public-facing and may change or impose limits. Fail closed.
@@ -258,7 +258,7 @@ def collect(store, force=False, now=None):
 
     # Fetch detailed live/final box scores for a small bounded sample. Scoreboard
     # payloads stay lightweight; detailed stats are cached per event and time window.
-    max_summaries = max(0, min(10, int(os.environ.get("SPORTS_INTEL_MAX_BOX_SCORES", "5"))))
+    max_summaries = max(0, min(10, int(os.environ.get("SPORTS_INTEL_MAX_BOX_SCORES", "3"))))
     summary_candidates.sort(key=lambda item: 0 if item[3].get("state") == "in" else 1)
     for category, sport, league, event in summary_candidates[:max_summaries]:
         provider_id = event["provider_event_id"]
