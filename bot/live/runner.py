@@ -354,7 +354,7 @@ class LiveRunner:
     # --- early exits: sell when the bid is worth more than holding ----------------------
     def check_exits(self, now):
         weights = brain.get_weights(self.store, "crypto")
-        for b in self.store.open_bets():
+        for b in self.store.open_bets(mode=self.s.mode):
             t = b["ticker"]
             if t not in self.markets or t not in self.books or b["series"] == "ARB":
                 continue
