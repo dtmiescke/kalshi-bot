@@ -273,6 +273,9 @@ class Engine:
                 all_events = self.data.sports_events_all()
                 for ev in all_events:
                     series = ev.get("series_ticker")
+                    if not series:
+                        event_ticker = str(ev.get("event_ticker") or "")
+                        series = next((known for known in catalog if event_ticker.startswith(known + "-")), None)
                     if not series or series not in catalog:
                         continue
                     series_map[series] = _series_sport(series, catalog.get(series))
