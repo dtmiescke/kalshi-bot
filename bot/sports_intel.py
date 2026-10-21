@@ -262,7 +262,9 @@ def collect(store, force=False, now=None):
                 event["id"] = hashlib.sha256((key + ":" + event["provider_event_id"] + ":" + str(now // max(ttl, 600))).encode()).hexdigest()
                 event["confidence"] = 0.7 if event.get("state") == "in" else 0.55
                 normalized.append(event)
-                if event.get("state") in ("in", "post") and event.get("provider_event_id"):
+                # Upcoming events are included too: pre-game summaries can expose
+                # injuries, rosters, depth charts, and lineup announcements before the start.
+                if event.get("state") in ("pre", "in", "post") and event.get("provider_event_id"):
                     summary_candidates.append((category, sport, league, event))
             summary["new_items"] += _record_items(store, normalized)
             _source_status(store, key, {"ok": True, "ts": now, "count": len(events)})
@@ -277,7 +279,18 @@ def collect(store, force=False, now=None):
     # Fetch detailed live/final box scores for a small bounded sample. Scoreboard
     # payloads stay lightweight; detailed stats are cached per event and time window.
     max_summaries = max(0, min(10, int(os.environ.get("SPORTS_INTEL_MAX_BOX_SCORES", "3"))))
-    summary_candidates.sort(key=lambda item: 0 if item[3].get("state") == "in" else 1)
+    def summary_priority(item):
+        event = item[3]
+        state = event.get("state")
+        start_ts = _iso_to_ts(event.get("start_time"))
+        # Upcoming games nearest kickoff are most useful for starters/injuries;
+        # live games next, then recently completed games for post-game learning.
+        if state == "pre":
+            return (0, abs(start_ts - now) if start_ts else 10**12)
+        if state == "in":
+            return (1, 0)
+        return (2, 0)
+    summary_candidates.sort(key=summary_priority)
     for category, sport, league, event in summary_candidates[:max_summaries]:
         provider_id = event["provider_event_id"]
         key = f"summary:{category}:{provider_id}"
@@ -297,10 +310,20 @@ def collect(store, force=False, now=None):
                 "provider_event_id": provider_id, "state": event.get("state"),
                 "scoreboard": event.get("competitors", []),
                 "team_stats": box.get("teams", [])[:10],
-                "player_stats": box.get("players", [])[:20],
+                "player_stats": box.get("players", [])[:50],
                 "leaders": raw.get("leaders", [])[:20],
-                "scoring_plays": raw.get("scoringPlays", [])[:30],
+                # Provider fields vary by sport and event state. Preserve useful
+                # matchup evidence when present; absence is unknown, not "no injuries".
+                "rosters": raw.get("rosters", [])[:20] if isinstance(raw.get("rosters"), list) else raw.get("rosters"),
+                "lineups": raw.get("lineups", raw.get("roster", [])),
+                "injuries": raw.get("injuries", [])[:30] if isinstance(raw.get("injuries"), list) else raw.get("injuries"),
+                "depth_charts": raw.get("depthCharts", raw.get("depthcharts", [])),
+                "plays": raw.get("plays", [])[-50:],
+                "scoring_plays": raw.get("scoringPlays", [])[-30:],
                 "win_probability": raw.get("winprobability", [])[-20:],
+                "game_info": raw.get("gameInfo", {}),
+                "season_series": raw.get("seasonseries", raw.get("headToHead", [])),
+                "source_note": "ESPN public event summary; field availability varies by sport; verify lineup/injury freshness before use",
                 "verified": False,
             }
             summary["new_items"] += _record_items(store, [payload])
