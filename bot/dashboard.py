@@ -43,15 +43,26 @@ def short(ticker):
 
 
 def export_csv(store):
-    rows = store.q("""SELECT id, ts, mode, ticker, series, side, price, contracts, stake, fee,
-                      model_prob, edge, confidence, style, status, result, exit_price,
-                      pnl, clv, graded_ts FROM bets ORDER BY ts""")
+    """Export the full trade lifecycle, including both entry and exit timestamps."""
+    rows = store.q("""SELECT id, ts, exit_ts, mode, ticker, event_ticker, series, team,
+                      side, price, contracts, stake, fee, model_prob, edge, confidence,
+                      style, order_id, status, result, closing_price, exit_price,
+                      pnl, clv, graded_ts FROM bets ORDER BY ts, id""")
     buf = io.StringIO()
     w = csv.writer(buf)
-    cols = list(rows[0].keys()) if rows else ["id"]
-    w.writerow(cols + ["time_utc"])
+    cols = list(rows[0].keys()) if rows else [
+        "id", "ts", "exit_ts", "mode", "ticker", "event_ticker", "series", "team",
+        "side", "price", "contracts", "stake", "fee", "model_prob", "edge",
+        "confidence", "style", "order_id", "status", "result", "closing_price",
+        "exit_price", "pnl", "clv", "graded_ts"
+    ]
+    w.writerow(cols + ["entry_time_utc", "closed_time_utc"])
     for r in rows:
-        w.writerow([r[c] for c in cols] + [time.strftime("%Y-%m-%d %H:%M", time.gmtime(r["ts"] or 0))])
+        entry_ts = r["ts"]
+        exit_ts = r["exit_ts"] or r["graded_ts"]
+        entry_time = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(entry_ts)) if entry_ts else ""
+        closed_time = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(exit_ts)) if exit_ts else ""
+        w.writerow([r[c] for c in cols] + [entry_time, closed_time])
     return buf.getvalue()
 
 
