@@ -44,6 +44,18 @@ class TestSportsSelection(unittest.TestCase):
         series_map = {series: _series_sport(series) for series in selected}
         self.assertEqual(set(series_map), {"KXATPMATCH", "KXF1RACE", "KXESPORTS"})
 
+    def test_manual_mode_requires_at_least_one_series(self):
+        with patch.dict(os.environ, {"SPORTS_MODE": "manual", "SPORTS_SELECTED": ""}):
+            settings = Settings()
+        with self.assertRaisesRegex(ValueError, "requires at least one"):
+            settings.validate()
+
+    def test_negative_combo_audit_lead_is_rejected(self):
+        with patch.dict(os.environ, {"COMBO_AUDIT_LEAD_SECONDS": "-1"}):
+            settings = Settings()
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            settings.validate()
+
     def test_invalid_mode_fails_validation(self):
         with patch.dict(os.environ, {"SPORTS_MODE": "everything"}):
             settings = Settings()
