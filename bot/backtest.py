@@ -17,6 +17,21 @@ from .signals.base import Reading
 THRESHOLDS = (0.02, 0.03, 0.05, 0.08)
 
 
+def _weights_as_of(store, domain, cutoff_ts):
+    """Rebuild learned signal weights using only updates available at decision time."""
+    weights = dict(brain.DEFAULT_WEIGHTS)
+    rows = store.q("SELECT signal, weight FROM weight_history WHERE ts<=? ORDER BY ts",
+                   (int(cutoff_ts) * 1_000_000_000,))
+    latest = {}
+    for row in rows:
+        latest[row["signal"]] = row["weight"]
+    weights.update({name: value for name, value in latest.items() if "@" not in name})
+    suffix = "@" + domain
+    weights.update({name[:-len(suffix)]: value for name, value in latest.items()
+                    if name.endswith(suffix)})
+    return weights
+
+
 def load_cases(store):
     cases = []
     for g in store.q("SELECT ticker, outcome FROM graded_markets"):
@@ -33,8 +48,9 @@ def load_cases(store):
         if not km:
             continue
         d = json.loads(km["detail"] or "{}")
+        cutoff_ts = brain.decision_cutoff(g["ticker"], start)
         cases.append({"ticker": g["ticker"], "y": g["outcome"],
-                      "domain": brain.domain_of(g["ticker"]),
+                      "domain": brain.domain_of(g["ticker"]), "cutoff_ts": cutoff_ts,
                       "mid": d.get("mid", km["prob"]), "spread": d.get("spread", 0.02),
                       "readings": [Reading(r["signal"], r["prob"], r["confidence"]) for r in rows]})
     return cases
@@ -47,11 +63,14 @@ def run(store, fee_rate=0.07, thresholds=THRESHOLDS):
         cs = [c for c in cases if c["domain"] == dom]
         if not cs:
             continue
-        w = brain.get_weights(store, dom)
         model_brier = market_brier = 0.0
         scored = []
         for c in cs:
+            # Reconstruct the weights that existed before this market's decision;
+            # current learned weights would leak future settlements into the backtest.
+            w = _weights_as_of(store, dom, c["cutoff_ts"])
             p, conf = brain.blend(c["readings"], w)
+            p = brain.calibrate(p, store, domain=dom, as_of_ts=c["cutoff_ts"])
             model_brier += (p - c["y"]) ** 2
             market_brier += (c["mid"] - c["y"]) ** 2
             for side, pw, ask in (("yes", p, c["mid"] + c["spread"] / 2),

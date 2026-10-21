@@ -4,6 +4,7 @@ import os
 import tempfile
 import time
 import unittest
+from unittest import mock
 from datetime import datetime, timezone
 
 from bot import brain, guard, history, ml, risk
@@ -11,6 +12,7 @@ from bot.config import Settings
 from bot.live import settlement
 from bot.live.analytics import SymbolAnalytics
 from bot.live.book import OrderBook
+from bot.live.runner import LiveRunner
 from bot.storage import Store
 
 
@@ -34,6 +36,117 @@ class TestAudit(unittest.TestCase):
 
     def tearDown(self):
         self.d.cleanup()
+
+    def test_account_exposure_and_stakes_are_isolated_by_mode(self):
+        bet(self.st, mode="paper", ticker="PAPER-OPEN", event_ticker="PAPER-E")
+        bet(self.st, mode="live", ticker="LIVE-OPEN", event_ticker="LIVE-E")
+        live = self.st.account(100.0, mode="live")
+        self.assertEqual(live["open_positions"], 1)
+        self.assertAlmostEqual(live["open_cost"], 5.2)
+        self.assertAlmostEqual(live["cash"], 94.8)
+        self.assertEqual(self.st.staked_since(0, mode="live"), 5.0)
+        self.assertEqual(self.st.staked_on_event("PAPER-E", mode="live"), 0)
+        self.assertFalse(self.st.has_open_event_bet("PAPER-E", mode="live"))
+        self.assertTrue(self.st.has_open_event_bet("PAPER-E", mode="paper"))
+        self.assertEqual([row["ticker"] for row in self.st.open_bets(mode="live")], ["LIVE-OPEN"])
+
+    def test_earned_size_uses_only_selected_account_mode(self):
+        paper_id = bet(self.st, mode="paper", ticker="PAPER-LOSS")
+        live_id = bet(self.st, mode="live", ticker="LIVE-WIN")
+        self.st.x("UPDATE bets SET status='graded', pnl=-20.0 WHERE id=?", (paper_id,))
+        self.st.x("UPDATE bets SET status='graded', pnl=20.0 WHERE id=?", (live_id,))
+        market = {"series": "KXNBAGAME", "ticker": "T"}
+        self.assertEqual(risk.earned_size(self.st, market, full_at=1, mode="paper"), 0.25)
+        self.assertEqual(risk.earned_size(self.st, market, full_at=1, mode="live"), 1.0)
+
+    def test_daily_loss_breaker_separates_paper_and_live_pnl(self):
+        now = int(time.time())
+        start = risk.day_start_ts(now, "America/Chicago")
+        self.st.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,
+                     stake,fee,status,result,pnl,graded_ts)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (now, "paper", "PAPER-LOSS", "PAPER-E", "KXNBAGAME", "yes",
+                   0.5, 1, 0.5, 0.01, "graded", "no", -100.0, now))
+        with mock.patch.dict(os.environ, {"BOT_TIMEZONE": "America/Chicago"}):
+            allowed, reason = guard.status(self.st, 1000, daily_loss_limit=30, mode="live")
+        self.assertTrue(allowed, reason)
+        self.st.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,
+                     stake,fee,status,result,pnl,graded_ts)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (now, "live", "LIVE-LOSS", "LIVE-E", "KXNBAGAME", "yes",
+                   0.5, 1, 0.5, 0.01, "graded", "no", -35.0, now))
+        allowed, reason = guard.status(self.st, 1000, daily_loss_limit=30, mode="live")
+        self.assertFalse(allowed)
+        self.assertIn("daily loss limit", reason)
+
+    def test_league_loss_guard_separates_paper_and_live(self):
+        now = int(time.time())
+        self.st.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,
+                     stake,fee,status,result,pnl,graded_ts)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (now, "paper", "PAPER-CRYPTO", "PAPER-E", "KXBTC15M", "yes",
+                   0.5, 1, 0.5, 0.01, "graded", "no", -10.0, now))
+        self.assertFalse(guard.league_benched(self.st, "KXBTC15M", n=1, mode="live"))
+        self.assertTrue(guard.league_benched(self.st, "KXBTC15M", n=1, mode="paper"))
+
+    def test_partial_maker_fill_is_recorded_only_after_remainder_cancelled(self):
+        class Trade:
+            def __init__(self, after_cancel):
+                self.states = [
+                    {"fill_count": 2, "status": "resting"},
+                    after_cancel,
+                ]
+                self.cancel_calls = 0
+
+            def order(self, order_id):
+                return self.states.pop(0) if self.states else self.states[-1]
+
+            def cancel(self, order_id):
+                self.cancel_calls += 1
+
+        for final_state, should_record in (
+            ({"fill_count": 2, "status": "canceled"}, True),
+            ({"fill_count": 2, "status": "resting"}, False),
+        ):
+            with self.subTest(final_state=final_state):
+                runner = LiveRunner.__new__(LiveRunner)
+                runner.s = type("SettingsStub", (), {"mode": "demo", "maker_wait_s": 30})()
+                trade = Trade(final_state)
+                recorded, skips, maker_logs = [], [], []
+                runner.engine = type("EngineStub", (), {"trade": trade,
+                    "place": lambda _self, *args, **kwargs: recorded.append((args, kwargs))})()
+                runner.store = type("StoreStub", (), {
+                    "log_maker": lambda _self, *args: maker_logs.append(args)})()
+                runner.summary = {"alerts": []}
+                runner.books = {}
+                runner.makers = {"T1": {
+                    "plan": {"contracts": 5, "side": "yes", "limit": 0.5},
+                    "placed": 100, "order_id": "ORDER-1", "snap": {"ticker": "T1"},
+                    "readings": [], "prob": 0.6, "conf": 0.8}}
+                runner._maker_edge_gone = lambda *args: False
+                runner._side_edge = lambda *args: 0.1
+                runner._skip = lambda why: skips.append(why)
+                runner.check_makers(101)
+                self.assertEqual(trade.cancel_calls, 1)
+                self.assertEqual(bool(recorded), should_record)
+                if should_record:
+                    self.assertEqual(recorded[0][0][1]["contracts"], 2)
+                    self.assertNotIn("T1", runner.makers)
+                else:
+                    self.assertIn("T1", runner.makers)
+                    self.assertTrue(any("unconfirmed" in why for why in skips))
+
+    def test_daily_risk_day_start_matches_central_dashboard_day(self):
+        # 04:30 UTC on Oct 21 is 23:30 CDT on Oct 20.
+        now = datetime(2026, 10, 21, 4, 30, tzinfo=timezone.utc).timestamp()
+        start = risk.day_start_ts(now, "America/Chicago")
+        expected = datetime(2026, 10, 20, 5, 0, tzinfo=timezone.utc).timestamp()
+        self.assertEqual(start, int(expected))
+        # In winter, Central midnight is 06:00 UTC because of standard time.
+        winter_now = datetime(2026, 1, 15, 5, 30, tzinfo=timezone.utc).timestamp()
+        winter_start = risk.day_start_ts(winter_now, "America/Chicago")
+        winter_expected = datetime(2026, 1, 14, 6, 0, tzinfo=timezone.utc).timestamp()
+        self.assertEqual(winter_start, int(winter_expected))
 
     def test_01_history_has_no_lookahead(self):
         """Spot jumps in the minute AFTER the Kalshi candle must not be visible."""
@@ -60,12 +173,33 @@ class TestAudit(unittest.TestCase):
     def test_04_real_fee_edge_check(self):
         # $1 = 10 contracts at $0.10: per-100 fee estimate says 3.03% edge, but the
         # real order's fee rounds up from 6.3c to 7c and leaves only 2.96%
-        self.s.fixed_bet = 1.0
+        # The 25% earned-size floor means a $4 request produces this $1 test budget.
+        self.s.fixed_bet = 4.0
         book = {"yes": [(0.09, 50)], "no": [(0.90, 50)]}
         plan, why = risk.decide(self.s, self.st, {"ticker": "T", "event_ticker": "E"},
                                 0.1366, 0.9, book, min_edge=0.03)
         self.assertIsNone(plan)
         self.assertIn("real fees", why)
+
+    def test_04b_final_stake_includes_fee_within_budget(self):
+        self.s.fixed_bet = 10.0
+        self.s.max_per_bet = 1.0
+        self.s.min_edge = 0.01
+        book = {"yes": [(0.49, 100)], "no": [(0.50, 100)]}
+        plan, why = risk.decide(self.s, self.st, {"ticker": "T", "event_ticker": "E",
+                                  "series": "KXNFLGAME"}, 0.8, 0.9, book)
+        self.assertIsNotNone(plan, why)
+        self.assertLessEqual(plan["stake"] + plan["fee"], 1.0 + 1e-9)
+
+    def test_04c_fixed_bet_respects_earned_size_ramp(self):
+        self.s.fixed_bet = 20.0
+        self.s.max_per_bet = 20.0
+        self.s.min_edge = 0.01
+        book = {"yes": [(0.49, 100)], "no": [(0.49, 100)]}
+        plan, why = risk.decide(self.s, self.st, {"ticker": "T", "event_ticker": "E",
+                                  "series": "KXNFLGAME"}, 0.8, 0.9, book)
+        self.assertIsNotNone(plan, why)
+        self.assertLessEqual(plan["stake"], 5.0 + 1e-9)
 
     def test_05_one_entry_per_crypto_window(self):
         bid = bet(self.st, ticker="KXBTC15M-W-00", event_ticker="KXBTC15M-W", series="KXBTC15M")
@@ -167,3 +301,60 @@ class TestAccountLimits(unittest.TestCase):
         ok, why = guard.status(self.st, 1000, daily_loss_limit=30)
         self.assertFalse(ok)
         self.assertIn("daily loss", why)
+
+    def test_decision_audit_scores_only_latest_snapshot_before_cutoff(self):
+        for ts, prob, decision in ((100, 0.60, "candidate"),
+                                   (150, 0.70, "candidate"),
+                                   (190, 0.99, "candidate")):
+            self.st.add_decision_audit({
+                "ts": ts, "ticker": "KXNBA-CUTOFF", "event_ticker": "E2",
+                "series": "KXNBAGAME", "decision": decision, "reason": "audit",
+                "side": "yes", "market_price": 0.4, "model_prob": prob,
+                "side_prob": prob, "edge": prob - 0.4, "confidence": 0.8,
+            })
+        self.st.grade_decision_audit("KXNBA-CUTOFF", 1, 300, cutoff_ts=160)
+        rows = self.st.q("SELECT ts, outcome, brier, hypothetical_pnl FROM decision_audit WHERE ticker=? ORDER BY ts",
+                         ("KXNBA-CUTOFF",))
+        self.assertEqual([row["outcome"] for row in rows], [1, 1, 1])
+        self.assertIsNone(rows[0]["brier"])
+        self.assertAlmostEqual(rows[1]["brier"], (0.70 - 1) ** 2)
+        self.assertIsNone(rows[2]["brier"])
+        self.assertIsNone(rows[0]["hypothetical_pnl"])
+        self.assertAlmostEqual(rows[1]["hypothetical_pnl"], 0.6)
+        self.assertIsNone(rows[2]["hypothetical_pnl"])
+        summary = self.st.decision_audit_summary()[0]
+        self.assertEqual(summary["n"], 1)
+        self.assertEqual(summary["snapshots"], 3)
+
+    def test_decision_audit_never_creates_fake_bets(self):
+        self.st.add_decision_audit({
+            "ts": 100, "ticker": "KXNBA-TEST", "event_ticker": "E1",
+            "series": "KXNBAGAME", "decision": "rejected", "reason": "edge too small",
+            "side": "yes", "market_price": 0.55, "model_prob": 0.54,
+            "side_prob": 0.54, "edge": -0.01, "confidence": 0.7,
+            "signals": {"news": {"prob": 0.6}},
+        })
+        self.assertEqual(self.st.q("SELECT COUNT(*) AS n FROM bets")[0]["n"], 0)
+        self.assertEqual(self.st.q("SELECT COUNT(*) AS n FROM decision_audit")[0]["n"], 1)
+
+    def test_decision_audit_grades_only_after_settlement_and_labels_diagnostic_pnl(self):
+        self.st.add_decision_audit({
+            "ts": 100, "ticker": "KXNBA-TEST", "event_ticker": "E1",
+            "series": "KXNBAGAME", "decision": "candidate", "reason": "risk passed",
+            "side": "yes", "market_price": 0.4, "model_prob": 0.7,
+            "side_prob": 0.7, "edge": 0.3, "confidence": 0.8,
+        })
+        self.st.add_decision_audit({
+            "ts": 101, "ticker": "KXNBA-TEST", "event_ticker": "E1",
+            "series": "KXNBAGAME", "decision": "rejected", "reason": "manual filter",
+            "side": "yes", "market_price": 0.4, "model_prob": 0.6,
+            "side_prob": 0.6, "edge": 0.2, "confidence": 0.7,
+        })
+        self.assertEqual(self.st.q("SELECT COUNT(*) AS n FROM decision_audit WHERE outcome IS NOT NULL")[0]["n"], 0)
+        self.st.grade_decision_audit("KXNBA-TEST", 1, 200)
+        rows = self.st.q("SELECT decision, outcome, brier, hypothetical_pnl FROM decision_audit ORDER BY id")
+        self.assertEqual([r["outcome"] for r in rows], [1, 1])
+        self.assertAlmostEqual(rows[0]["brier"], 0.09)
+        self.assertAlmostEqual(rows[0]["hypothetical_pnl"], 0.6)
+        self.assertIsNone(rows[1]["hypothetical_pnl"])
+        self.assertEqual(self.st.q("SELECT COUNT(*) AS n FROM bets")[0]["n"], 0)

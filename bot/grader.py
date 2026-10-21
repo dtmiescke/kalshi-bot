@@ -72,6 +72,10 @@ def learn_from_markets(store, client, max_fetch=150):
         if result not in ("yes", "no"):
             continue
         y = 1 if result == "yes" else 0
+        try:
+            store.grade_decision_audit(t, y, now, brain.decision_cutoff(t, start))
+        except Exception as e:
+            log.warning("decision audit grading failed for %s: %s", t, e)
         ml.label(store, t, y)      # live decisions become training rows
         # the last reading of each signal before the game started
         rows = store.q("""SELECT signal, prob FROM signal_readings r
@@ -85,7 +89,7 @@ def learn_from_markets(store, client, max_fetch=150):
             continue
         g = {r["signal"]: r["prob"] for r in rows}
         g["_outcome"] = y
-        g["_domain"] = brain.domain_of(t)
+        g["_domain"] = brain.learning_domain_of(m.get("series_ticker") or t)
         graded.append(g)
         for r in rows:
             store.x("INSERT INTO signal_grades VALUES(?,?,?,?,?,?,?,?)",
@@ -94,11 +98,35 @@ def learn_from_markets(store, client, max_fetch=150):
         store.x("INSERT OR IGNORE INTO graded_markets VALUES(?,?,?,?)",
                 (t, now, y, m.get("event_ticker", "")))
     changes = {}
-    for dom in ("sports", "crypto"):
+    # Learn independently by identifiable league. Unknown leagues stay in the
+    # shared sports bucket; crypto remains isolated from all sports weights.
+    domains = sorted({g["_domain"] for g in graded})
+    for dom in domains:
         batch = [g for g in graded if g["_domain"] == dom]
         if batch:
             changes.update({f"{k}@{dom}": v for k, v in brain.learn(store, batch, dom).items()})
     return len(graded), changes
+
+
+def grade_decision_audits(store, client, max_fetch=150):
+    """Grade logged candidates and rejections from real Kalshi settlements only."""
+    tickers = store.q("SELECT DISTINCT ticker FROM decision_audit WHERE outcome IS NULL LIMIT ?", (max_fetch,))
+    graded = 0
+    for row in tickers:
+        ticker = row["ticker"]
+        try:
+            market = client.market(ticker)
+        except Exception as e:
+            log.debug("decision audit market lookup %s: %s", ticker, e)
+            continue
+        result = market.get("result")
+        if result not in ("yes", "no"):
+            continue
+        start = store.get_kv(f"start_{ticker}")
+        cutoff = brain.decision_cutoff(ticker, start) if start else 0
+        graded += store.grade_decision_audit(
+            ticker, 1 if result == "yes" else 0, cutoff_ts=cutoff)
+    return graded
 
 
 def monitor_model(store, window=300):
@@ -136,10 +164,28 @@ def monitor_model(store, window=300):
     return {"ok": False, "ml_brier": ml_b, "kalshi_brier": k_b, "n": len(pairs)}
 
 
+def grade_combo_predictions(store, client, max_fetch=150):
+    """Grade combo forecasts only after Kalshi reports actual settled YES/NO."""
+    rows = store.q("SELECT ticker FROM combo_prediction_audit WHERE outcome IS NULL LIMIT ?", (max_fetch,))
+    graded = 0
+    for row in rows:
+        try:
+            market = client.market(row["ticker"])
+        except Exception as exc:
+            log.debug("combo audit market lookup %s: %s", row["ticker"], exc)
+            continue
+        result = market.get("result")
+        if result in ("yes", "no"):
+            graded += store.grade_combo_prediction(row["ticker"], 1 if result == "yes" else 0)
+    return graded
+
+
 def grade(store, client):
     n_bets = settle_bets(store, client)
     n_mkts, changes = learn_from_markets(store, client)
+    n_decisions = grade_decision_audits(store, client)
+    n_combos = grade_combo_predictions(store, client)
     monitor_model(store)
-    log.info("graded %d bets, %d markets, weight changes: %s", n_bets, n_mkts,
+    log.info("graded %d bets, %d markets, %d decision snapshots, %d combo forecasts, weight changes: %s", n_bets, n_mkts, n_decisions, n_combos,
              json.dumps({k: [round(a, 3), round(b, 3)] for k, (a, b) in changes.items()}))
-    return {"bets": n_bets, "markets": n_mkts, "weight_changes": changes}
+    return {"bets": n_bets, "markets": n_mkts, "combo_forecasts": n_combos, "weight_changes": changes}

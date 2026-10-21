@@ -6,11 +6,13 @@ import os
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 
-from bot import brain, risk
+from bot import backtest, brain, risk
 from bot.config import Settings
-from bot.engine import Engine
+from bot import dashboard
+from bot.engine import Engine, _fresh_odds_history
 from bot.grader import grade
 from bot.odds import american_to_prob, consensus, devig_power
 from bot.report import build
@@ -96,6 +98,60 @@ class TestMath(unittest.TestCase):
         self.assertEqual(a["yes"][0][0], 0.55)
         self.assertEqual(a["no"][0][0], 0.46)
 
+    def test_calibration_uses_yes_probability_and_canonical_audits(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = Store(os.path.join(d, "calibration.sqlite"))
+            for i in range(10):
+                store.add_decision_audit({
+                    "ts": 100 + i, "ticker": f"T{i}", "event_ticker": f"E{i}",
+                    "series": "KXNBAGAME", "decision": "rejected", "reason": "test",
+                    "side": "no", "market_price": 0.25, "model_prob": 0.75,
+                    "side_prob": 0.25, "edge": 0.0, "confidence": 0.7,
+                })
+                store.grade_decision_audit(f"T{i}", 0, 1000, cutoff_ts=100 + i)
+            table = brain.calibration_table(store, domain="sports")
+            self.assertEqual(table[7]["n"], 10)
+            self.assertAlmostEqual(table[7]["predicted"], 0.75)
+            self.assertEqual(table[7]["actual"], 0.0)
+
+    def test_league_learning_waits_for_minimum_sample_and_averages_evidence(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = Store(os.path.join(d, "learning.sqlite"))
+            graded = [{"kalshi_market": 0.5, "book_consensus": 0.8, "_outcome": 1}
+                      for _ in range(brain.MIN_LEARN_SAMPLES - 1)]
+            self.assertEqual(brain.learn(store, graded, "nba"), {})
+            self.assertEqual(brain.get_weights(store, "nba")["book_consensus"],
+                             brain.DEFAULT_WEIGHTS["book_consensus"])
+            graded.append({"kalshi_market": 0.5, "book_consensus": 0.8, "_outcome": 1})
+            changes = brain.learn(store, graded, "nba")
+            self.assertIn("book_consensus", changes)
+            self.assertGreater(brain.get_weights(store, "nba")["book_consensus"],
+                               brain.DEFAULT_WEIGHTS["book_consensus"])
+
+    def test_learning_domains_are_league_specific_without_changing_calibration_domain(self):
+        cases = {
+            "KXNBAGAME-26OCT20BOSNYK": "nba",
+            "KXNFLGAME-26OCT20": "nfl",
+            "KXMLBGAME-26OCT20": "mlb",
+            "KXNHLGAME-26OCT20": "nhl",
+            "KXBTC15M-ABC": "crypto",
+            "KXUNKNOWNSPORT-ABC": "sports",
+        }
+        for ticker, expected in cases.items():
+            self.assertEqual(brain.learning_domain_of(ticker), expected, ticker)
+        self.assertEqual(brain.domain_of("KXNBAGAME-26OCT20"), "sports")
+        self.assertEqual(brain.domain_of("KXBTC15M-ABC"), "crypto")
+
+    def test_league_weights_override_shared_sports_weights_only_for_that_league(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = Store(os.path.join(d, "weights.sqlite"))
+            store.set_weight("book_consensus@sports", 1.1, "shared sports")
+            store.set_weight("book_consensus@nba", 2.2, "NBA-specific")
+            self.assertEqual(brain.get_weights(store, "nba")["book_consensus"], 2.2)
+            self.assertEqual(brain.get_weights(store, "nfl")["book_consensus"], 1.1)
+            self.assertEqual(brain.get_weights(store, "crypto")["book_consensus"],
+                             brain.DEFAULT_WEIGHTS["book_consensus"])
+
     def test_blend_moves_toward_strong_signal(self):
         rs = [Reading("kalshi_market", 0.55, 1.0), Reading("book_consensus", 0.62, 1.0)]
         p, _ = brain.blend(rs, brain.DEFAULT_WEIGHTS)
@@ -120,6 +176,129 @@ class TestMath(unittest.TestCase):
 
 
 class TestEndToEnd(unittest.TestCase):
+    def test_report_daily_and_weekly_scorecards_compare_model_to_market(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = Settings()
+            s.db_path = os.path.join(d, "t.db")
+            store = Store(s.db_path)
+            now = int(time.time())
+            store.add_decision_audit({
+                "ts": now - 3600, "ticker": "T1", "event_ticker": "E1",
+                "series": "KXNBAGAME", "decision": "candidate", "reason": "test",
+                "side": "yes", "market_price": 0.60, "model_prob": 0.80,
+                "side_prob": 0.80, "edge": 0.20, "confidence": 0.8,
+            })
+            store.grade_decision_audit("T1", 1, settled_ts=now, cutoff_ts=now - 3600)
+            report = build(store)
+            self.assertIn("Forecast scorecard: today", report)
+            self.assertIn("Forecast scorecard: 7 days", report)
+            self.assertIn("nba: n=1, model Brier=0.0400, market-price Brier=0.1600, model better by 0.1200", report)
+
+    def test_dashboard_settled_win_percentage_excludes_open_and_sold(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = Settings()
+            s.db_path = os.path.join(d, "t.db")
+            store = Store(s.db_path)
+            rows = [
+                (1, "paper", "T1", "E", "KXNBAGAME", "yes", 0.5, 1, 0.5, 0.01, "graded", "yes", 0.49),
+                (2, "paper", "T2", "E", "KXNBAGAME", "no", 0.5, 1, 0.5, 0.01, "graded", "yes", -0.51),
+                (3, "paper", "T3", "E", "KXNBAGAME", "yes", 0.5, 1, 0.5, 0.01, "graded", "sold", 0.10),
+                (4, "paper", "T4", "E", "KXNBAGAME", "yes", 0.5, 1, 0.5, 0.01, "open", None, None),
+            ]
+            for row in rows:
+                ts, mode, ticker, event, series, side, price, contracts, stake, fee, status, result, pnl = row
+                store.x("INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,stake,fee,status,result,pnl,graded_ts) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (ts, mode, ticker, event, series, side, price, contracts, stake, fee, status, result, pnl, int(time.time()) if status == "graded" else None))
+            store.x("UPDATE bets SET exit_ts=?, exit_price=? WHERE ticker='T3'",
+                    (int(time.time()) - 10, 0.60))
+            page = dashboard.build(store, s, live_path=os.path.join(d, "missing.json"), briefing_path=os.path.join(d, "missing.txt"))
+            self.assertIn("Overall · settled · won · win %", page)
+            self.assertIn("Today · settled · won · win %", page)
+            self.assertIn("2 · 1 · 50.0%", page)
+            self.assertIn("All completed bets (3)", page)
+            self.assertIn("SOLD EARLY", page)
+            self.assertIn("WON", page)
+            self.assertIn("LOST", page)
+            self.assertIn("exit $0.60", page)
+            self.assertIn("T1", page)
+            csv_text = dashboard.export_csv(store)
+            self.assertIn("entry_time_utc,closed_time_utc", csv_text)
+            self.assertIn("exit_ts", csv_text.splitlines()[0])
+            self.assertIn("exit_price", csv_text.splitlines()[0])
+
+    def test_dashboard_win_rate_is_scoped_to_selected_mode(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = Settings()
+            s.mode = "paper"
+            s.db_path = os.path.join(d, "t.db")
+            store = Store(s.db_path)
+            now = int(time.time())
+            for mode, ticker, result, side in (
+                ("paper", "PAPER-WIN", "yes", "yes"),
+                ("live", "LIVE-LOSS", "no", "yes"),
+            ):
+                store.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,
+                            stake,fee,status,result,pnl,graded_ts)
+                            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (now, mode, ticker, "E", "KXNBAGAME", side, 0.5, 1, 0.5,
+                         0.01, "graded", result, 0.49 if result == side else -0.51, now))
+            page = dashboard.build(store, s, live_path=os.path.join(d, "missing.json"),
+                                   briefing_path=os.path.join(d, "missing.txt"))
+            self.assertIn("Overall · settled · won · win %</div><div class=\"v\">1 · 1 · 100.0%", page)
+            self.assertIn("Today · settled · won · win %</div><div class=\"v\">1 · 1 · 100.0%", page)
+            self.assertNotIn("LIVE-LOSS", page)
+            paper_csv = dashboard.export_csv(store, mode="paper")
+            self.assertIn("PAPER-WIN", paper_csv)
+            self.assertNotIn("LIVE-LOSS", paper_csv)
+
+    def test_dashboard_daily_win_rate_uses_central_time(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = Settings()
+            s.db_path = os.path.join(d, "t.db")
+            store = Store(s.db_path)
+            # At 04:30 UTC it is still 23:30 the prior day in Central time.
+            now_ts = datetime(2026, 10, 21, 4, 30, tzinfo=timezone.utc).timestamp()
+            settled_ts = datetime(2026, 10, 20, 23, 30, tzinfo=timezone.utc).timestamp()
+            store.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,
+                        contracts,stake,fee,status,result,pnl,graded_ts)
+                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (settled_ts - 3600, "paper", "TZ1", "E", "KXNBAGAME", "yes",
+                     0.5, 1, 0.5, 0.01, "graded", "yes", 0.49, int(settled_ts)))
+            with patch.dict(os.environ, {"BOT_TIMEZONE": "America/Chicago"}):
+                with patch("bot.dashboard.time.time", return_value=now_ts):
+                    page = dashboard.build(store, s,
+                        live_path=os.path.join(d, "missing.json"),
+                        briefing_path=os.path.join(d, "missing.txt"))
+            self.assertIn("Today · settled · won · win %</div><div class=\"v\">1 · 1 · 100.0%", page)
+
+    def test_live_partial_fill_records_only_filled_contract_fees(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = Settings()
+            s.mode = "demo"
+            s.db_path = os.path.join(d, "bot.sqlite")
+            store = Store(s.db_path)
+            start = datetime.now(timezone.utc) + timedelta(hours=5)
+            engine = Engine(s, store, data_client=FakeKalshi(start),
+                            odds_client=FakeOdds(start), schedule_fetch=lambda sp: [])
+
+            class FilledTrade:
+                def place_limit_buy(self, ticker, side, contracts, limit):
+                    return {"order_id": "ORDER-1", "fill_count": 1,
+                            "taker_fill_count": 1, "maker_fill_count": 0,
+                            "taker_fill_cost": 50, "maker_fill_cost": 0}
+
+            engine.trade = FilledTrade()
+            plan = {"side": "yes", "limit": 0.50, "price": 0.50, "contracts": 10,
+                    "stake": 5.00, "fee": risk.taker_fee(10, 0.50, s.taker_fee_rate),
+                    "edge": 0.10}
+            engine.place({"ticker": "T1", "event_ticker": "E1", "series": "KXNBAGAME",
+                          "team": "Boston"}, plan, [], 0.60, 0.90,
+                         summary={"bets": 0, "skipped": {}, "alerts": []}, now=int(time.time()))
+            saved = store.q("SELECT * FROM bets")[0]
+            self.assertEqual(saved["contracts"], 1)
+            self.assertEqual(saved["stake"], 0.50)
+            self.assertEqual(saved["fee"], risk.taker_fee(1, 0.50, s.taker_fee_rate))
+
     def test_cycle_bets_grades_and_learns(self):
         with tempfile.TemporaryDirectory() as d:
             os.environ["BOT_DB"] = os.path.join(d, "bot.sqlite")
@@ -151,8 +330,9 @@ class TestEndToEnd(unittest.TestCase):
             self.assertGreaterEqual(out["markets"], 1)
             b = store.q("SELECT * FROM bets")[0]
             self.assertGreater(b["pnl"], 0)
-            # weights change, and old values stay in history (nothing deleted)
-            self.assertTrue(store.q("SELECT * FROM weight_history"))
+            # One settled game is not enough to adjust league weights: the
+            # learner requires MIN_LEARN_SAMPLES to reduce small-sample overfit.
+            self.assertEqual(store.q("SELECT * FROM weight_history"), [])
             self.assertIn("Signal weights", build(store))
             del os.environ["BOT_DB"]
 
@@ -163,13 +343,15 @@ class FakeCryptoKalshi(FakeKalshi):
     prices UP at 0.60 -> the model should see a big edge and buy YES."""
     def __init__(self):
         super().__init__(datetime.now(timezone.utc))
-        self.close = datetime.now(timezone.utc) + timedelta(minutes=6)
+        now = datetime.now(timezone.utc)
+        self.close = now + timedelta(minutes=6)
+        self.event_ticker = "KXBTC15M-" + now.strftime("%y%b%d%H%M").upper()
 
     def sports_events(self, series):
         if series != "KXBTC15M":
             return []
-        return [{"event_ticker": "KXBTC15M-26OCT191830", "series_ticker": series,
-                 "markets": [{"ticker": "KXBTC15M-26OCT191830-30", "status": "active",
+        return [{"event_ticker": self.event_ticker, "series_ticker": series,
+                 "markets": [{"ticker": self.event_ticker + "-30", "status": "active",
                               "floor_strike": 100000.0, "yes_bid": 59, "yes_ask": 60,
                               "close_time": iso(self.close)}]}]
 
@@ -179,7 +361,7 @@ class FakeCryptoKalshi(FakeKalshi):
 
 def fake_candles(pair):
     now = int(time.time())
-    out, price = [], 99800.0
+    out, price = [], 100000.0
     for i in range(120):                    # gentle climb, small noise
         price += 2.5 + (3 if i % 2 else -3)
         out.append({"ts": now - (120 - i) * 60, "open": price - 1, "high": price + 2,
@@ -197,6 +379,16 @@ class TestCrypto(unittest.TestCase):
         self.assertAlmostEqual(finish_above(100, 100, 0.001, 10), 0.5)
         self.assertGreater(finish_above(101, 100, 0.001, 5), 0.9)
         self.assertEqual(finish_above(99, 100, 0.001, 0), 0.0)
+
+    def test_stale_and_future_sportsbook_rows_are_ignored(self):
+        rows = [
+            {"ts": 940, "fair_prob": 0.7},
+            {"ts": 995, "fair_prob": 0.6},
+            {"ts": 1005, "fair_prob": 0.9},
+            {"ts": 800, "fair_prob": 0.99},
+        ]
+        self.assertEqual(_fresh_odds_history(rows, now=1000, max_age_seconds=100),
+                         rows[:2])
 
     def test_bets_lagging_kalshi_price(self):
         with tempfile.TemporaryDirectory() as d:
@@ -354,6 +546,32 @@ class TestAdvanced(unittest.TestCase):
 
 
 class TestBacktestAndDomains(unittest.TestCase):
+    def test_calibration_table_excludes_outcomes_settled_after_as_of_time(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = Store(os.path.join(d, "calibration-time.sqlite"))
+            for i, settled_ts in enumerate((1000, 2000)):
+                ticker = f"ASOF-{i}"
+                store.add_decision_audit({
+                    "ts": 100 + i, "ticker": ticker, "event_ticker": f"E{i}",
+                    "series": "KXNBAGAME", "decision": "rejected", "reason": "test",
+                    "side": "yes", "market_price": 0.5, "model_prob": 0.7,
+                    "side_prob": 0.7, "edge": 0.2, "confidence": 0.8,
+                })
+                store.grade_decision_audit(ticker, 1, settled_ts=settled_ts, cutoff_ts=100 + i)
+            table = brain.calibration_table(store, domain="sports", as_of_ts=1500)
+            self.assertEqual(table[7]["n"], 1)
+            self.assertEqual(table[7]["actual"], 1.0)
+
+    def test_backtest_weights_are_reconstructed_as_of_decision_time(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = Store(os.path.join(d, "weights.sqlite"))
+            store.x("INSERT INTO weight_history VALUES(?,?,?,?)",
+                    (100 * 1_000_000_000, "book_consensus", 2.0, "past"))
+            store.x("INSERT INTO weight_history VALUES(?,?,?,?)",
+                    (200 * 1_000_000_000, "book_consensus", 9.0, "future"))
+            weights = backtest._weights_as_of(store, "sports", 150)
+            self.assertEqual(weights["book_consensus"], 2.0)
+
     def test_backtest_and_separate_learning(self):
         from bot import backtest
         with tempfile.TemporaryDirectory() as d:

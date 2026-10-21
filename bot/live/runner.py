@@ -185,7 +185,7 @@ class LiveRunner:
             mins_left = (terms["close_ts"] - now) / 60
             if not (self.s.crypto_min_minutes <= mins_left <= self.s.crypto_max_minutes):
                 continue
-            if not self.betting_ok or guard.league_benched(self.store, info["series"]):
+            if not self.betting_ok or guard.league_benched(self.store, info["series"], mode=self.s.mode):
                 continue
             plan = self.plan_for(ticker, readings, weights)
             if plan:
@@ -197,6 +197,8 @@ class LiveRunner:
             return None
         prob, conf = brain.blend(readings, weights)
         info = self.markets[ticker]
+        if prob is not None:
+            prob = brain.calibrate(prob, self.store, domain=brain.domain_of(info["series"]))
         snap = {"ticker": ticker, "event_ticker": info["event"], "series": info["series"],
                 "team": "UP"}
         if maker is None:
@@ -258,55 +260,85 @@ class LiveRunner:
         log.info("MAKER %s %s x%d resting @ $%.2f", ticker, plan["side"], plan["contracts"],
                  plan["limit"])
 
+    @staticmethod
+    def _maker_order_state(order, requested):
+        try:
+            filled = int(float(order.get("fill_count_fp") or order.get("fill_count") or 0))
+        except (TypeError, ValueError):
+            filled = 0
+        status = str(order.get("status") or "").lower()
+        terminal = status in {"canceled", "cancelled", "executed", "filled", "expired", "rejected"} \
+            or filled >= requested
+        return max(0, min(int(requested), filled)), status, terminal
+
+    def _cancel_and_reconcile_maker(self, order_id, requested):
+        """Cancel any remainder and verify final cumulative fills before ledgering."""
+        try:
+            self.engine.trade.cancel(order_id)
+        except Exception as exc:
+            log.warning("maker cancel %s: %s", order_id, exc)
+        try:
+            order = self.engine.trade.order(order_id)
+        except Exception as exc:
+            log.warning("maker reconcile %s: %s", order_id, exc)
+            return None
+        filled, status, terminal = self._maker_order_state(order, requested)
+        if not terminal:
+            log.warning("maker order %s still %s after cancel; keep tracking", order_id, status or "unknown")
+            return None
+        return filled
+
     def check_makers(self, now):
         for ticker, mk in list(self.makers.items()):
             plan, book = mk["plan"], self.books.get(ticker)
-            filled = 0
-            if self.s.mode in ("demo", "live"):
+            real_order = self.s.mode in ("demo", "live")
+            filled, status, terminal = 0, "", False
+            if real_order:
                 try:
-                    o = self.engine.trade.order(mk["order_id"])
-                    filled = int(float(o.get("fill_count_fp") or o.get("fill_count") or 0))
-                except Exception:
-                    filled = 0
+                    order = self.engine.trade.order(mk["order_id"])
+                    filled, status, terminal = self._maker_order_state(order, plan["contracts"])
+                except Exception as exc:
+                    log.warning("maker status %s: %s", ticker, exc)
+                    self._skip("maker status unavailable")
+                    continue
             elif book is not None:
-                # paper: count as filled only if sellers came THROUGH our price.
-                # Merely touching it isn't enough: a resting order sits behind
-                # others in the queue, so assuming a fill on a touch overstates profit.
+                # Paper fills require price penetration, not merely a touch.
                 asks = risk.asks_from_book(book.as_rest_book())[plan["side"]]
                 if asks and asks[0][0] < plan["limit"]:
-                    filled = plan["contracts"]
-            if not filled and self._maker_edge_gone(ticker, plan, now):
-                # ADVERSE SELECTION GUARD: if the edge has faded while we wait, the
-                # only people who will fill us are the ones who know it's now a bad
-                # price. Cancel instead of being picked off.
-                if self.s.mode in ("demo", "live"):
-                    try:
-                        self.engine.trade.cancel(mk["order_id"])
-                    except Exception:
-                        pass
-                self._skip("maker cancelled: edge faded")
-                self.store.log_maker(ticker, 0, "edge_faded", now - mk["placed"])
-                del self.makers[ticker]
-                continue
+                    filled, terminal = plan["contracts"], True
+
+            edge_gone = self._maker_edge_gone(ticker, plan, now)
+            expired = now - mk["placed"] >= self.s.maker_wait_s
+            if real_order and not terminal and (
+                (filled > 0 and filled < plan["contracts"]) or (not filled and (edge_gone or expired))
+            ):
+                # A partial fill does not mean the remainder stopped working.
+                # Cancel and verify the final cumulative fill before recording it.
+                reconciled = self._cancel_and_reconcile_maker(mk["order_id"], plan["contracts"])
+                if reconciled is None:
+                    self._skip("maker cancel unconfirmed; order remains tracked")
+                    continue
+                filled, terminal = reconciled, True
+
             if filled:
                 fill_edge = self._side_edge(ticker, plan["side"], plan["limit"], now)
                 if fill_edge is not None:
-                    plan["fill_edge"] = round(fill_edge, 4)   # tracks adverse selection
+                    plan["fill_edge"] = round(fill_edge, 4)
                 self.engine.place(mk["snap"], dict(plan, contracts=filled), mk["readings"],
                                   mk["prob"], mk["conf"], summary=self.summary, now=int(now),
                                   executed={"order_id": mk["order_id"], "contracts": filled})
-                self.summary["alerts"].append(f"{ticker} maker fill {plan['side'].upper()} "
-                                              f"x{filled} @ ${plan['limit']:.2f}")
+                self.summary["alerts"].append("{} maker fill {} x{} @ ${:.2f}".format(
+                    ticker, plan["side"].upper(), filled, plan["limit"]))
                 self.store.log_maker(ticker, 1, "filled", now - mk["placed"])
                 del self.makers[ticker]
-            elif now - mk["placed"] >= self.s.maker_wait_s:
-                if self.s.mode in ("demo", "live"):
-                    try:
-                        self.engine.trade.cancel(mk["order_id"])
-                    except Exception:
-                        pass
-                self._skip("maker not filled")
-                self.store.log_maker(ticker, 0, "expired", now - mk["placed"])
+            elif terminal or edge_gone or expired:
+                if edge_gone:
+                    self._skip("maker cancelled: edge faded")
+                    outcome = "edge_faded"
+                else:
+                    self._skip("maker not filled")
+                    outcome = "expired" if expired else "cancelled"
+                self.store.log_maker(ticker, 0, outcome, now - mk["placed"])
                 del self.makers[ticker]
 
     def _side_edge(self, ticker, side, price, now):
@@ -324,7 +356,7 @@ class LiveRunner:
     # --- early exits: sell when the bid is worth more than holding ----------------------
     def check_exits(self, now):
         weights = brain.get_weights(self.store, "crypto")
-        for b in self.store.open_bets():
+        for b in self.store.open_bets(mode=self.s.mode):
             t = b["ticker"]
             if t not in self.markets or t not in self.books or b["series"] == "ARB":
                 continue
@@ -461,7 +493,7 @@ class LiveRunner:
                     await asyncio.to_thread(self.poll_books, False, True)
                 last_poll = now
             if now - last_guard >= 60:
-                self.betting_ok, self.betting_why = guard.status(self.store, self.s.bankroll)
+                self.betting_ok, self.betting_why = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
                 asyncio.create_task(asyncio.to_thread(self.refresh_context))
                 last_guard = now
             for ticker, readings, ctx, plan in list(self.tick(now)):

@@ -34,13 +34,49 @@ DEFAULT_WEIGHTS = {
 MIN_W, MAX_W = 0.05, 5.0
 ETA = 0.05            # learning rate: small = slow, steady learning
 CAL_MIN_SAMPLES = 60  # don't trust calibration until this many graded markets
+MIN_LEARN_SAMPLES = 20  # per signal and domain; prevents single-result overfitting
 
 
 def domain_of(ticker_or_series):
-    """Sports and 15-minute crypto behave differently, so each learns its own
-    weights (e.g. how much to trust the Kalshi price on BTC vs on NBA games)."""
+    """Broad calibration domain: sports vs short-window crypto."""
     t = (ticker_or_series or "").upper()
     return "crypto" if t.startswith(("KXBTC", "KXETH", "KXSOL")) or "15M" in t else "sports"
+
+
+def learning_domain_of(ticker_or_series):
+    """Return a conservative league-level learning bucket when identifiable.
+
+    Keep calibration and risk compatibility on the broad sports/crypto domains,
+    but let each league learn its own signal weights. Unknown series stay in the
+    shared sports bucket until there is enough evidence to classify them.
+    """
+    t = str(ticker_or_series or "").upper().replace("-", "_")
+    if domain_of(t) == "crypto":
+        return "crypto"
+    # Match specific league tokens, not generic sport words, to avoid accidental
+    # cross-sport contamination. Prefix variants are common across Kalshi series.
+    groups = (
+        ("nfl", ("KXNFL", "NFLGAME", "AMERICANFOOTBALL_NFL")),
+        ("college_football", ("NCAAF", "COLLEGE_FOOTBALL", "KXCFB")),
+        ("nba", ("KXNBA", "NBAGAME", "BASKETBALL_NBA")),
+        ("wnba", ("KXWNBA", "WNBAGAME", "BASKETBALL_WNBA")),
+        ("college_basketball", ("NCAAB", "COLLEGE_BASKETBALL", "BASKETBALL_NCAAB")),
+        ("mlb", ("KXMLB", "MLBGAME", "BASEBALL_MLB")),
+        ("nhl", ("KXNHL", "NHLGAME", "ICEHOCKEY_NHL")),
+        ("tennis", ("TENNIS", "ATP", "WTA")),
+        ("mma", ("MMA", "UFC")),
+        ("boxing", ("BOXING",)),
+        ("golf", ("GOLF", "PGA", "LPGA")),
+        ("motorsports", ("F1", "NASCAR", "MOTORSPORT", "RACING")),
+        ("soccer", ("SOCCER", "EPL", "MLS", "UEFA", "LALIGA", "SERIEA", "BUNDESLIGA")),
+        ("cricket", ("CRICKET", "IPL")),
+        ("rugby", ("RUGBY",)),
+        ("esports", ("ESPORT", "LEAGUEOFLEGENDS", "DOTA", "COUNTERSTRIKE", "CS2")),
+    )
+    for domain, tokens in groups:
+        if any(token in t for token in tokens):
+            return domain
+    return "sports"
 
 
 def decision_cutoff(ticker, start):
@@ -55,14 +91,19 @@ def decision_cutoff(ticker, start):
 
 
 def get_weights(store, domain=None):
-    """Defaults, overridden by learned weights. With a domain, that domain's
-    own learned weights (stored as 'signal@domain') take priority."""
+    """Merge defaults, shared domain weights, then the most specific league weights.
+
+    A league inherits broad sports learning until it has its own evidence, then
+    its own learned values override the shared baseline signal by signal.
+    """
     w = dict(DEFAULT_WEIGHTS)
     learned = store.current_weights()
     w.update({k: v for k, v in learned.items() if "@" not in k})
     if domain:
-        suffix = "@" + domain
-        w.update({k[:-len(suffix)]: v for k, v in learned.items() if k.endswith(suffix)})
+        broad = "crypto" if domain == "crypto" else "sports"
+        for bucket in (broad, domain):
+            suffix = "@" + bucket
+            w.update({k[:-len(suffix)]: v for k, v in learned.items() if k.endswith(suffix)})
     return w
 
 
@@ -121,40 +162,61 @@ def learn(store, graded, domain=None):
             totals[name] += log_loss(p, y) - base   # negative = beat the market
             counts[name] += 1
     changes = {}
-    for name, rel in totals.items():
+    for name, rel_total in totals.items():
+        n = counts[name]
+        # League-specific samples are sparse at first. Do not let a handful of
+        # lucky/unlucky outcomes swing weights; normalize loss by sample count so
+        # the learning rate reflects average evidence, not how many rows arrived.
+        if n < MIN_LEARN_SAMPLES:
+            continue
+        rel = rel_total / n
         old = weights.get(name, 0.3)
         new = clamp(old * math.exp(-ETA * rel), MIN_W, MAX_W)
         if abs(new - old) > 1e-6:
             store.set_weight(f"{name}@{domain}" if domain else name, new,
-                             f"{counts[name]} markets, rel_logloss={rel:+.4f}")
+                             f"{n} markets, mean_rel_logloss={rel:+.4f}")
             changes[name] = (old, new)
     return changes
 
 
 # --- calibration ---------------------------------------------------------------
-def calibration_table(store, buckets=10, domain=None):
-    """Bucket graded model probabilities and compare with actual win rates.
-    Sports and crypto are calibrated SEPARATELY: mixing them would let one
-    domain's over-confidence wrongly correct the other."""
-    rows = store.q("""SELECT model_prob, side, result, series FROM bets
-                      WHERE status='graded' AND result IN ('yes','no')
-                      AND model_prob IS NOT NULL""")
+def calibration_table(store, buckets=10, domain=None, as_of_ts=None):
+    """Calibrate YES probabilities using settled, canonical forecasts available at a given time.
+
+    Decision-audit rows are scored only at the canonical pre-event cutoff, so
+    rejected opportunities contribute without counting repeated scans as new samples.
+    as_of_ts enables leak-free walk-forward evaluation; older installations fall
+    back to settled bets only when no scored audit rows exist for that domain/time.
+    """
+    rows = store.q("""SELECT model_prob, outcome, series FROM decision_audit
+                      WHERE brier IS NOT NULL AND model_prob IS NOT NULL
+                      AND outcome IN (0,1) AND (? IS NULL OR settled_ts<=?)""",
+                   (as_of_ts, as_of_ts))
     if domain:
         rows = [r for r in rows if domain_of(r["series"]) == domain]
+    audit_source = bool(rows)
+    if not rows:
+        rows = store.q("""SELECT model_prob, result, series FROM bets
+                          WHERE status='graded' AND result IN ('yes','no')
+                          AND model_prob IS NOT NULL AND (? IS NULL OR graded_ts<=?)""",
+                       (as_of_ts, as_of_ts))
+        if domain:
+            rows = [r for r in rows if domain_of(r["series"]) == domain]
     table = defaultdict(lambda: [0, 0])
     for r in rows:
-        p = r["model_prob"] if r["side"] == "yes" else 1 - r["model_prob"]
-        won = 1 if r["result"] == r["side"] else 0
+        p = float(r["model_prob"])
+        outcome = (int(r["outcome"]) if audit_source
+                   else 1 if r["result"] == "yes" else 0)
         b = min(int(p * buckets), buckets - 1)
         table[b][0] += 1
-        table[b][1] += won
+        table[b][1] += outcome
     return {b: {"n": n, "predicted": (b + 0.5) / buckets, "actual": w / n}
             for b, (n, w) in sorted(table.items())}
 
 
-def calibrate(prob, store, domain=None):
-    """Shrink or stretch a probability using the bot's own track record."""
-    table = calibration_table(store, domain=domain)
+def calibrate(prob, store, domain=None, as_of_ts=None):
+    """Shrink or stretch a probability using only prior settled forecasts."""
+    table = calibration_table(store, domain=domain, as_of_ts=as_of_ts)
     n_total = sum(v["n"] for v in table.values())
     if n_total < CAL_MIN_SAMPLES:
         return prob

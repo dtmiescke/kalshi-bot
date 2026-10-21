@@ -44,6 +44,31 @@ def run_scheduled(s, store, data):
       15-minute window is watched continuously, not glimpsed once.
       BURST_MINUTES=0 falls back to one quick snapshot.
     - grading, learning, AI briefing, and model retraining when due."""
+    # Free-first public sports intelligence collection; data only, never order authority.
+    if os.environ.get("SPORTS_INTEL_ENABLED", "yes").lower() in ("yes", "true", "1"):
+        try:
+            from . import sports_intel
+            intel_result = sports_intel.collect(store)
+            print("sports intelligence:", json.dumps(intel_result, default=str))
+            if os.environ.get("SPORTS_INTEL_EVENT_SEARCH", "yes").lower() in ("yes", "true", "1"):
+                try:
+                    catalog = data.sports_series()
+                    open_events = data.sports_events_all()
+                    selected = s.selected_series()
+                    eligible = [ev for ev in open_events
+                                if ev.get("series_ticker") in catalog
+                                and (selected is None or ev.get("series_ticker") in selected)]
+                    targeted = sports_intel.collect_event_news(
+                        store, eligible,
+                        max_events=int(os.environ.get("SPORTS_INTEL_EVENT_BUDGET", "6")))
+                    store.set_kv("sports_intel_event_news_health", {
+                        "ts": int(time.time()), "series_discovered": len(catalog),
+                        "open_events_seen": len(open_events), **targeted})
+                    print("event news:", json.dumps(targeted, default=str))
+                except Exception as e:
+                    logging.warning("event-targeted sports news scan failed: %s", e)
+        except Exception as e:
+            logging.warning("sports intelligence collection failed: %s", e)
     hours = float(os.environ.get("SPORTS_EVERY_HOURS", 5.5))
     burst = float(os.environ.get("BURST_MINUTES", 8))
     do_sports = time.time() - store.get_kv("last_sports_scan", 0) >= hours * 3600 - 300
@@ -68,6 +93,22 @@ def run_scheduled(s, store, data):
     if keep and burst > 0:
         from .live.runner import run as run_live
         print("live burst:", json.dumps(run_live(s, store, burst, sports=False), default=str))
+    # Combo discovery is read-only and cheap enough to run on every scheduled
+    # cycle, independent of the less-frequent full sports scan. The Kalshi client
+    # briefly caches paginated event responses, so a full-scan cycle reuses them.
+    if getattr(s, "combo_research_enabled", True):
+        try:
+            from . import combo_research
+            combo_result = combo_research.scan(data, store, settings=s)
+            print("combo research:", json.dumps({
+                "ok": combo_result.get("ok"),
+                "scanned_markets": combo_result.get("scanned_markets"),
+                "ranked_count": combo_result.get("ranked_count"),
+                "skipped": combo_result.get("skipped", {}),
+                "execution_enabled": False,
+            }, default=str))
+        except Exception as e:
+            logging.warning("combo research scan failed: %s", e)
     grade(store, data)
     # retrain the model when due (weekly by default) — cheap, takes seconds
     if time.time() - store.get_kv("last_train", 0) >= float(os.environ.get("TRAIN_EVERY_HOURS", 24)) * 3600:
@@ -134,6 +175,12 @@ def main(argv=None):
         if s.mode in ("demo", "live"):
             t = KalshiClient(s.base_url(), s.kalshi_key_id, s.kalshi_private_key)
             print("signed request OK, balance:", t.balance())
+        return
+    if cmd == "sports-intel":
+        from . import sports_intel
+        result = sports_intel.collect(store, force="--force" in argv)
+        print(json.dumps(result, indent=2, default=str))
+        print("latest evidence:", json.dumps(sports_intel.recent(store, limit=10), indent=2, default=str))
         return
     if cmd == "scheduled":
         run_scheduled(s, store, data)

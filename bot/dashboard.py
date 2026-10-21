@@ -11,6 +11,8 @@ import io
 import json
 import os
 import time
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from . import brain, guard
 
@@ -40,23 +42,35 @@ def short(ticker):
     return f"{name} {parts[-1]}" if len(parts) >= 3 else name
 
 
-def export_csv(store):
-    rows = store.q("""SELECT id, ts, mode, ticker, series, side, price, contracts, stake, fee,
-                      model_prob, edge, confidence, style, status, result, exit_price,
-                      pnl, clv, graded_ts FROM bets ORDER BY ts""")
+def export_csv(store, mode=None):
+    """Export the full trade lifecycle, optionally scoped to one account mode."""
+    rows = store.q("""SELECT id, ts, exit_ts, mode, ticker, event_ticker, series, team,
+                      side, price, contracts, stake, fee, model_prob, edge, confidence,
+                      style, order_id, status, result, closing_price, exit_price,
+                      pnl, clv, graded_ts FROM bets
+                      WHERE (? IS NULL OR mode=?) ORDER BY ts, id""", (mode, mode))
     buf = io.StringIO()
     w = csv.writer(buf)
-    cols = list(rows[0].keys()) if rows else ["id"]
-    w.writerow(cols + ["time_utc"])
+    cols = list(rows[0].keys()) if rows else [
+        "id", "ts", "exit_ts", "mode", "ticker", "event_ticker", "series", "team",
+        "side", "price", "contracts", "stake", "fee", "model_prob", "edge",
+        "confidence", "style", "order_id", "status", "result", "closing_price",
+        "exit_price", "pnl", "clv", "graded_ts"
+    ]
+    w.writerow(cols + ["entry_time_utc", "closed_time_utc"])
     for r in rows:
-        w.writerow([r[c] for c in cols] + [time.strftime("%Y-%m-%d %H:%M", time.gmtime(r["ts"] or 0))])
+        entry_ts = r["ts"]
+        exit_ts = r["exit_ts"] or r["graded_ts"]
+        entry_time = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(entry_ts)) if entry_ts else ""
+        closed_time = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(exit_ts)) if exit_ts else ""
+        w.writerow([r[c] for c in cols] + [entry_time, closed_time])
     return buf.getvalue()
 
 
 def build(store, settings, live_path="data/live_summary.json", briefing_path="data/BRIEFING.txt"):
     now = time.time()
-    acct = store.account(settings.bankroll)
-    ok, why = guard.status(store, settings.bankroll)
+    acct = store.account(settings.bankroll, mode=settings.mode)
+    ok, why = guard.status(store, settings.bankroll, mode=settings.mode)
     health = store.get_kv("kalshi_health") or {}
     live = {}
     if os.path.exists(live_path):
@@ -65,10 +79,30 @@ def build(store, settings, live_path="data/live_summary.json", briefing_path="da
                 live = json.load(f)
         except (OSError, ValueError):
             pass
-    graded = store.q("SELECT pnl, clv, result, side FROM bets WHERE status='graded'")
-    wins = sum(1 for b in graded if (b["pnl"] or 0) > 0)
-    open_bets = store.q("SELECT * FROM bets WHERE status='open' ORDER BY ts DESC")
-    recent = store.q("SELECT * FROM bets WHERE status='graded' ORDER BY graded_ts DESC LIMIT 15")
+    graded = store.q("SELECT pnl, clv, result, side, graded_ts FROM bets WHERE status='graded' AND mode=?",
+                      (settings.mode,))
+    # Win percentage is settled pick accuracy, not profitability: compare the
+    # chosen side with Kalshi's actual YES/NO settlement. Sold-early positions
+    # have no settlement outcome and are excluded. Open bets are never counted.
+    settled = [b for b in graded if b["result"] in ("yes", "no") and b["side"] in ("yes", "no")]
+    wins = sum(1 for b in settled if b["result"] == b["side"])
+    win_pct = 100.0 * wins / len(settled) if settled else None
+    win_pct_text = f"{win_pct:.1f}%" if win_pct is not None else "—"
+    # Daily stats use the configured BOT_TIMEZONE (America/Chicago fallback) and settlement
+    # time, not bet-placement time. Historical overall stats remain unchanged.
+    try:
+        report_tz = ZoneInfo(os.environ.get("BOT_TIMEZONE", "America/Chicago"))
+    except Exception:
+        report_tz = timezone.utc
+    today = datetime.fromtimestamp(now, timezone.utc).astimezone(report_tz).date()
+    today_settled = [b for b in settled if b["graded_ts"] and
+                     datetime.fromtimestamp(b["graded_ts"], timezone.utc).astimezone(report_tz).date() == today]
+    today_wins = sum(1 for b in today_settled if b["result"] == b["side"])
+    today_win_pct = 100.0 * today_wins / len(today_settled) if today_settled else None
+    today_win_pct_text = f"{today_win_pct:.1f}%" if today_win_pct is not None else "—"
+    open_bets = store.q("SELECT * FROM bets WHERE status='open' AND mode=? ORDER BY ts DESC", (settings.mode,))
+    completed_bets = store.q("SELECT * FROM bets WHERE status IN ('graded','sold') AND mode=? ORDER BY COALESCE(exit_ts, graded_ts, ts) DESC", (settings.mode,))
+    recent = store.q("SELECT * FROM bets WHERE status='graded' AND mode=? ORDER BY graded_ts DESC LIMIT 15", (settings.mode,))
 
     def last_quote(ticker):
         r = store.q("""SELECT ts, yes_bid, yes_ask FROM market_snapshots WHERE ticker=?
@@ -87,6 +121,37 @@ def build(store, settings, live_path="data/live_summary.json", briefing_path="da
         f"<tr><td class='{'good' if (b['pnl'] or 0) > 0 else 'bad'}'><b>${(b['pnl'] or 0):+.2f}</b></td>"
         f"<td>{E(short(b['ticker']))}<div class='mut'>{E(b['side'].upper())} · {E(str(b['result']))}</div></td></tr>"
         for b in recent)
+
+    completed_rows = ""
+    for b in completed_bets:
+        result = str(b["result"] or "").lower()
+        side = str(b["side"] or "").lower()
+        if result == "sold":
+            result_label = "SOLD EARLY"
+            result_detail = "position closed before settlement"
+        elif result in ("yes", "no") and side in ("yes", "no"):
+            result_label = "WON" if result == side else "LOST"
+            result_detail = f"settled {result.upper()}"
+        else:
+            result_label = str(b["status"] or "UNKNOWN").upper()
+            result_detail = result.upper() or "outcome unavailable"
+        pnl = float(b["pnl"] or 0)
+        closed_ts = b.get("exit_ts") or b.get("graded_ts") or b["ts"]
+        closed_at = time.strftime("%Y-%m-%d %H:%M", time.gmtime(closed_ts or 0))
+        entry_price = float(b["price"] or 0)
+        exit_price = b.get("exit_price")
+        price_detail = "entry $" + f"{entry_price:.2f}"
+        if exit_price is not None:
+            price_detail += " · exit $" + f"{float(exit_price):.2f}"
+        pnl_text = "$" + f"{pnl:+.2f}"
+        completed_rows += (
+            f"<tr><td>{E(closed_at)} UTC</td>"
+            f"<td>{E(short(b['ticker']))}<div class='mut'>{E(str(b['mode']).upper())}</div></td>"
+            f"<td>{E(side.upper())} · {int(b['contracts'] or 0)}<div class='mut'>{price_detail}</div></td>"
+            f"<td><b class='{'good' if result_label == 'WON' else 'bad' if result_label == 'LOST' else ''}'>{E(result_label)}</b>"
+            f"<div class='mut'>{E(result_detail)}</div></td>"
+            f"<td class='{'good' if pnl > 0 else 'bad' if pnl < 0 else ''}'><b>{pnl_text}</b></td></tr>"
+        )
 
     coins = ""
     for s, c in (live.get("coins") or {}).items():
@@ -134,6 +199,7 @@ h1{{font-size:20px;margin:16px 0 4px}}h2{{font-size:13px;letter-spacing:.06em;te
 .grid{{display:grid;grid-template-columns:1fr 1fr;gap:10px}}.k{{color:var(--mut);font-size:12px}}.v{{font-size:20px;font-weight:600}}
 .good{{color:var(--good)}}.bad{{color:var(--bad)}}.warn{{color:var(--warn)}}
 .scroll{{overflow-x:auto}}table{{border-collapse:collapse;width:100%;font-size:13px}}td{{padding:6px 4px;border-top:1px solid var(--line);white-space:nowrap}}
+details{{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}}summary{{cursor:pointer;font-weight:600;padding:4px 0}}summary:focus-visible{{outline:2px solid var(--mut);outline-offset:3}}
 pre{{white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.5;margin:0}}
 td div.mut{{white-space:normal}}.mut{{color:var(--mut);font-size:12px}}a{{color:inherit}}
 </style></head><body>
@@ -146,7 +212,8 @@ td div.mut{{white-space:normal}}.mut{{color:var(--mut);font-size:12px}}a{{color:
 <div><div class="k">Cash</div><div class="v">${acct['cash']:,.2f}</div></div>
 <div><div class="k">Realized P&amp;L</div><div class="v {'good' if acct['realized'] >= 0 else 'bad'}">${acct['realized']:+,.2f}</div></div>
 <div><div class="k">Open cost</div><div class="v">${acct['open_cost']:,.2f}</div></div>
-<div><div class="k">Graded · won</div><div class="v">{len(graded)} · {wins}</div></div></div></div>
+<div><div class="k">Overall · settled · won · win %</div><div class="v">{len(settled)} · {wins} · {win_pct_text}</div></div>
+<div><div class="k">Today · settled · won · win %</div><div class="v">{len(today_settled)} · {today_wins} · {today_win_pct_text}</div></div></div></div>
 <div class="card"><h2>Open positions ({len(open_bets)})</h2><div class="scroll"><table>
 <tr><td class="k">Position</td><td class="k">Now</td><td class="k">Quote age</td></tr>
 {pos_rows or '<tr><td colspan=3 class="mut">none</td></tr>'}</table></div></div>
@@ -154,6 +221,11 @@ td div.mut{{white-space:normal}}.mut{{color:var(--mut);font-size:12px}}a{{color:
 <tr><td class="k">Coin</td><td class="k">Price</td><td class="k">Regime</td><td class="k">Data</td><td class="k">Errors</td></tr>
 {coins or '<tr><td colspan=5 class="mut">no live burst yet</td></tr>'}</table></div></div>
 <div class="card"><h2>Recent results</h2><div class="scroll"><table>{rec_rows or '<tr><td class="mut">none yet</td></tr>'}</table></div>
+<details><summary>All completed bets ({len(completed_bets)})</summary>
+<div class="scroll"><table>
+<tr><td class="k">Closed (UTC)</td><td class="k">Market</td><td class="k">Position / prices</td><td class="k">Result</td><td class="k">Realized P&amp;L</td></tr>
+{completed_rows or '<tr><td colspan=5 class="mut">No completed bets yet.</td></tr>'}
+</table></div></details>
 <div class="mut"><a href="bets.csv">Download all trades (CSV)</a></div></div>
 <div class="card"><h2>Model</h2><div>{E(model)}</div><div class="mut">Top crypto weights: {E(top_w)}</div></div>
 <div class="card"><h2>AI briefing</h2><pre>{E(brief) or 'No briefing yet.'}</pre></div>
@@ -165,5 +237,5 @@ def write(store, settings, out_dir="data/site"):
     with open(os.path.join(out_dir, "index.html"), "w") as f:
         f.write(build(store, settings))
     with open(os.path.join(out_dir, "bets.csv"), "w") as f:
-        f.write(export_csv(store))
+        f.write(export_csv(store, mode=settings.mode))
     return out_dir

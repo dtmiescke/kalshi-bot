@@ -42,12 +42,13 @@ def arb_plan(series, book_a, book_b, fee_rate, max_dollars, min_profit_per=0.01)
             "stake": round(contracts * (pa + pb), 2)}
 
 
-def drawdown_tripped(store, bankroll):
+def drawdown_tripped(store, bankroll, mode=None):
     pct = float(os.environ.get("MAX_DRAWDOWN", 10))
     limit = (pct / 100 if pct > 1 else pct) * bankroll
     since = int(time.time()) - 7 * 86400
-    r = store.q("SELECT COALESCE(SUM(pnl),0) p FROM bets WHERE status='graded' AND graded_ts>=?",
-                (since,))
+    r = store.q("""SELECT COALESCE(SUM(pnl),0) p FROM bets
+                   WHERE status='graded' AND graded_ts>=? AND (? IS NULL OR mode=?)""",
+                (since, mode, mode))
     return r[0]["p"] < -limit
 
 
@@ -60,18 +61,20 @@ def _since():
     return int(time.time()) - RECOVERY_DAYS * 86400
 
 
-def clv_tripped(store, n=50, floor=-0.01):
+def clv_tripped(store, n=50, floor=-0.01, mode=None):
     rows = store.q("""SELECT clv FROM bets WHERE status='graded' AND clv IS NOT NULL
                       AND series NOT LIKE '%15M' AND graded_ts >= ?
-                      ORDER BY graded_ts DESC LIMIT ?""", (_since(), n))
+                      AND (? IS NULL OR mode=?) ORDER BY graded_ts DESC LIMIT ?""",
+                   (_since(), mode, mode, n))
     if len(rows) < n:
         return False
     return sum(r["clv"] for r in rows) / n < floor
 
 
-def league_benched(store, series, n=40):
+def league_benched(store, series, n=40, mode=None):
     rows = store.q("""SELECT clv, pnl FROM bets WHERE status='graded' AND series=?
-                      AND graded_ts >= ? ORDER BY graded_ts DESC LIMIT ?""", (series, _since(), n))
+                      AND graded_ts >= ? AND (? IS NULL OR mode=?)
+                      ORDER BY graded_ts DESC LIMIT ?""", (series, _since(), mode, mode, n))
     if len(rows) < n:
         return False
     if series.endswith("15M"):
@@ -81,17 +84,18 @@ def league_benched(store, series, n=40):
     return bool(clvs) and sum(clvs) / len(clvs) < 0
 
 
-def status(store, bankroll, daily_loss_limit=None):
+def status(store, bankroll, daily_loss_limit=None, mode=None):
     """(betting_allowed, reason)."""
     from .risk import day_start_ts
     limit = daily_loss_limit if daily_loss_limit is not None else \
         float(os.environ.get("DAILY_LOSS_LIMIT", 30))
-    lost = store.realized_today(day_start_ts())
+    mode = mode or os.environ.get("BOT_MODE", "paper")
+    lost = store.realized_today(day_start_ts(), mode=mode)
     if lost <= -limit:
-        return False, f"daily loss limit hit (${-lost:.2f} lost today; resets at 00:00 UTC)"
-    if drawdown_tripped(store, bankroll):
+        return False, f"daily loss limit hit (${-lost:.2f} lost today; resets at midnight in {os.environ.get('BOT_TIMEZONE', 'America/Chicago')})"
+    if drawdown_tripped(store, bankroll, mode=mode):
         return False, "drawdown limit hit (7-day losses)"
-    if clv_tripped(store):
+    if clv_tripped(store, mode=mode):
         return False, "last 50 bets lost to the closing line"
     return True, "ok"
 

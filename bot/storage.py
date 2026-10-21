@@ -65,6 +65,29 @@ CREATE TABLE IF NOT EXISTS maker_attempts (
 );
 
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+
+-- Decision audit is not a trade ledger: rejected candidates never become fake bets.
+CREATE TABLE IF NOT EXISTS decision_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, ticker TEXT NOT NULL,
+    event_ticker TEXT, series TEXT, decision TEXT NOT NULL, reason TEXT,
+    side TEXT, market_price REAL, model_prob REAL, side_prob REAL, edge REAL,
+    confidence REAL, signals_json TEXT, outcome INTEGER, brier REAL,
+    hypothetical_pnl REAL, settled_ts INTEGER
+);
+CREATE INDEX IF NOT EXISTS ix_decision_audit_ticker_ts ON decision_audit(ticker, ts);
+CREATE INDEX IF NOT EXISTS ix_decision_audit_grade ON decision_audit(outcome, decision);
+
+-- One row per combo ticker: latest pre-settlement research snapshot wins.
+-- This prevents repeated scans of the same contract inflating sample size.
+CREATE TABLE IF NOT EXISTS combo_prediction_audit (
+    ticker TEXT PRIMARY KEY, ts INTEGER NOT NULL, event_ticker TEXT,
+    leg_count INTEGER NOT NULL, side TEXT, market_price REAL,
+    predicted_yes REAL, predicted_side_prob REAL, market_yes_proxy REAL,
+    fee REAL, expected_profit REAL, eligible INTEGER, ranking_score REAL,
+    legs_json TEXT, outcome INTEGER, brier REAL, market_proxy_brier REAL,
+    hypothetical_pnl REAL, settled_ts INTEGER
+);
+CREATE INDEX IF NOT EXISTS ix_combo_audit_grade ON combo_prediction_audit(outcome, leg_count);
 """
 
 
@@ -83,6 +106,117 @@ class Store:
             if col not in cols:   # upgrade older databases in place
                 self.db.execute(f"ALTER TABLE bets ADD COLUMN {col} {typ}")
         self.db.commit()
+
+    def add_decision_audit(self, row):
+        """Record one decision snapshot; this table never creates a bet/order."""
+        self.x("""INSERT INTO decision_audit
+            (ts,ticker,event_ticker,series,decision,reason,side,market_price,
+             model_prob,side_prob,edge,confidence,signals_json)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+            int(row.get("ts", time.time())), row["ticker"], row.get("event_ticker"),
+            row.get("series"), row["decision"], row.get("reason"), row.get("side"),
+            row.get("market_price"), row.get("model_prob"), row.get("side_prob"),
+            row.get("edge"), row.get("confidence"),
+            json.dumps(row.get("signals", {}), ensure_ascii=False, default=str)))
+
+    def grade_decision_audit(self, ticker, outcome, settled_ts=None, cutoff_ts=None):
+        """Settle every audit row but score only the canonical pre-event snapshot.
+
+        With cutoff_ts supplied, only the latest forecast at/before that cutoff
+        receives Brier/P&L metrics. Later scans are retained as settled audit
+        history but left unscored so one market cannot inflate the sample.
+        """
+        settled_ts = int(settled_ts or time.time())
+        with self.lock:
+            rows = self.db.execute(
+                "SELECT id, ts, model_prob, market_price, side, decision FROM decision_audit "
+                "WHERE ticker=? AND outcome IS NULL ORDER BY ts, id", (ticker,)).fetchall()
+            if cutoff_ts is None:
+                scored_ids = {row["id"] for row in rows if row["model_prob"] is not None}
+            else:
+                eligible = [row for row in rows
+                            if row["model_prob"] is not None and row["ts"] <= int(cutoff_ts)]
+                scored_ids = {max(eligible, key=lambda row: (row["ts"], row["id"]))["id"]} if eligible else set()
+            y = int(outcome)
+            for row in rows:
+                brier = pnl = None
+                if row["id"] in scored_ids:
+                    brier = (float(row["model_prob"]) - y) ** 2
+                    if (row["decision"] == "candidate" and row["side"] in ("yes", "no")
+                            and row["market_price"] is not None):
+                        p = float(row["market_price"])
+                        won = (row["side"] == "yes" and y == 1) or (row["side"] == "no" and y == 0)
+                        pnl = (1 - p) if won else -p
+                self.db.execute(
+                    "UPDATE decision_audit SET outcome=?, brier=?, hypothetical_pnl=?, settled_ts=? WHERE id=?",
+                    (y, brier, pnl, settled_ts, row["id"]))
+            self.db.commit()
+            return len(rows)
+
+    def record_combo_prediction(self, row):
+        """Upsert the latest open-market forecast; never overwrite a settled row."""
+        self.x("""INSERT INTO combo_prediction_audit
+            (ticker,ts,event_ticker,leg_count,side,market_price,predicted_yes,
+             predicted_side_prob,market_yes_proxy,fee,expected_profit,eligible,
+             ranking_score,legs_json)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(ticker) DO UPDATE SET
+              ts=excluded.ts,event_ticker=excluded.event_ticker,
+              leg_count=excluded.leg_count,side=excluded.side,
+              market_price=excluded.market_price,predicted_yes=excluded.predicted_yes,
+              predicted_side_prob=excluded.predicted_side_prob,
+              market_yes_proxy=excluded.market_yes_proxy,fee=excluded.fee,
+              expected_profit=excluded.expected_profit,eligible=excluded.eligible,
+              ranking_score=excluded.ranking_score,legs_json=excluded.legs_json
+            WHERE combo_prediction_audit.outcome IS NULL""", (
+            row["ticker"], int(row.get("ts", time.time())), row.get("event_ticker"),
+            int(row["leg_count"]), row.get("side"), row.get("market_price"),
+            row.get("predicted_yes"), row.get("predicted_side_prob"),
+            row.get("market_yes_proxy"), row.get("fee"), row.get("expected_profit"),
+            int(bool(row.get("eligible"))), row.get("ranking_score"),
+            json.dumps(row.get("legs", []), ensure_ascii=False, default=str)))
+
+    def grade_combo_prediction(self, ticker, outcome, settled_ts=None):
+        """Grade only against a real YES/NO settlement returned by Kalshi."""
+        if outcome not in (0, 1):
+            return 0
+        settled_ts = int(settled_ts or time.time())
+        with self.lock:
+            row = self.db.execute(
+                "SELECT * FROM combo_prediction_audit WHERE ticker=? AND outcome IS NULL",
+                (ticker,)).fetchone()
+            if row is None:
+                return 0
+            p = row["predicted_yes"]
+            brier = (float(p) - int(outcome)) ** 2 if p is not None else None
+            proxy = row["market_yes_proxy"]
+            proxy_brier = (float(proxy) - int(outcome)) ** 2 if proxy is not None else None
+            pnl = None
+            if row["side"] in ("yes", "no") and row["market_price"] is not None:
+                price, fee = float(row["market_price"]), float(row["fee"] or 0.0)
+                won = (row["side"] == "yes" and outcome == 1) or (row["side"] == "no" and outcome == 0)
+                pnl = (1.0 - price if won else -price) - fee
+            self.db.execute("""UPDATE combo_prediction_audit
+                SET outcome=?,brier=?,market_proxy_brier=?,hypothetical_pnl=?,settled_ts=?
+                WHERE ticker=? AND outcome IS NULL""",
+                (int(outcome), brier, proxy_brier, pnl, settled_ts, ticker))
+            self.db.commit()
+            return 1
+
+    def combo_prediction_summary(self):
+        """One observation per settled combo ticker; P&L is hypothetical, not realized."""
+        return self.q("""SELECT leg_count, COUNT(*) AS markets,
+            AVG(brier) AS model_brier, AVG(market_proxy_brier) AS market_proxy_brier,
+            SUM(hypothetical_pnl) AS hypothetical_net_pnl
+            FROM combo_prediction_audit WHERE outcome IS NOT NULL
+            GROUP BY leg_count ORDER BY leg_count""")
+
+    def decision_audit_summary(self):
+        # n counts scored, canonical forecasts; snapshots preserves audit-volume context.
+        return self.q("""SELECT decision, COUNT(brier) AS n, COUNT(*) AS snapshots,
+                         AVG(brier) AS brier, AVG(hypothetical_pnl) AS diagnostic_pnl
+                         FROM decision_audit WHERE outcome IS NOT NULL
+                         GROUP BY decision ORDER BY decision""")
 
     # --- generic -----------------------------------------------------------
     def q(self, sql, args=()):
@@ -215,36 +349,43 @@ class Store:
                   pnl=?, graded_ts=? WHERE id=?""",
                (exit_price, int(time.time()), round(pnl, 2), int(time.time()), bet_id))
 
-    def open_bets(self):
-        return self.q("SELECT * FROM bets WHERE status='open'")
+    def open_bets(self, mode=None):
+        return self.q("""SELECT * FROM bets WHERE status='open'
+                          AND (? IS NULL OR mode=?) ORDER BY ts""", (mode, mode))
 
-    def staked_since(self, ts):
-        r = self.q("SELECT COALESCE(SUM(stake),0) s FROM bets WHERE ts>=?", (ts,))
+    def staked_since(self, ts, mode=None):
+        r = self.q("""SELECT COALESCE(SUM(stake),0) s FROM bets
+                      WHERE ts>=? AND (? IS NULL OR mode=?)""", (ts, mode, mode))
         return r[0]["s"]
 
-    def staked_on_event(self, event_ticker):
-        r = self.q("SELECT COALESCE(SUM(stake),0) s FROM bets WHERE event_ticker=?",
-                   (event_ticker,))
+    def staked_on_event(self, event_ticker, mode=None):
+        r = self.q("""SELECT COALESCE(SUM(stake),0) s FROM bets
+                      WHERE event_ticker=? AND (? IS NULL OR mode=?)""",
+                   (event_ticker, mode, mode))
         return r[0]["s"]
 
-    def account(self, bankroll):
-        """Virtual (paper) or tracked (live) account: cash can never go negative."""
+    def account(self, bankroll, mode=None):
+        """Return account cash/exposure, optionally isolated to one mode."""
         r = self.q("""SELECT
             COALESCE(SUM(CASE WHEN status='graded' THEN pnl END), 0) realized,
             COALESCE(SUM(CASE WHEN status='open' THEN stake + fee END), 0) open_cost,
-            COALESCE(SUM(CASE WHEN status='open' THEN 1 END), 0) open_n FROM bets""")[0]
+            COALESCE(SUM(CASE WHEN status='open' THEN 1 END), 0) open_n
+            FROM bets WHERE (? IS NULL OR mode=?)""", (mode, mode))[0]
         return {"cash": round(bankroll + r["realized"] - r["open_cost"], 2),
                 "realized": round(r["realized"], 2), "open_cost": round(r["open_cost"], 2),
                 "open_positions": int(r["open_n"]), "equity_at_cost": round(bankroll + r["realized"], 2)}
 
-    def realized_today(self, day_start):
-        r = self.q("SELECT COALESCE(SUM(pnl),0) p FROM bets WHERE status='graded' AND graded_ts>=?",
-                   (day_start,))
+    def realized_today(self, day_start, mode=None):
+        """Settled/closed P&L for the selected account mode, never paper+live mixed."""
+        r = self.q("""SELECT COALESCE(SUM(pnl),0) p FROM bets
+                      WHERE status='graded' AND graded_ts>=?
+                        AND (? IS NULL OR mode=?)""", (day_start, mode, mode))
         return r[0]["p"]
 
-    def has_open_event_bet(self, event_ticker):
-        return bool(self.q("SELECT 1 FROM bets WHERE event_ticker=? AND status='open'",
-                           (event_ticker,)))
+    def has_open_event_bet(self, event_ticker, mode=None):
+        return bool(self.q("""SELECT 1 FROM bets WHERE event_ticker=? AND status='open'
+                              AND (? IS NULL OR mode=?)""", (event_ticker, mode, mode)))
 
-    def has_open_bet(self, ticker):
-        return bool(self.q("SELECT 1 FROM bets WHERE ticker=? AND status='open'", (ticker,)))
+    def has_open_bet(self, ticker, mode=None):
+        return bool(self.q("""SELECT 1 FROM bets WHERE ticker=? AND status='open'
+                              AND (? IS NULL OR mode=?)""", (ticker, mode, mode)))

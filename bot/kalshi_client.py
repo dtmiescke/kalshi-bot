@@ -176,6 +176,50 @@ class KalshiClient:
             "series_ticker": series_ticker, "status": status,
             "with_nested_markets": "true", "limit": 200})
 
+    def sports_series(self):
+        """Discover Kalshi series classified under the Sports category.
+
+        Catalog metadata is cached briefly; callers must still validate open
+        events/markets and must not infer that every series is trade-ready.
+        """
+        rows = self._paged("/series", "series", {
+            "category": "Sports", "include_volume": "true", "limit": 1000,
+        }, max_pages=10)
+        out = {}
+        for row in rows:
+            ticker = row.get("ticker")
+            if not ticker:
+                continue
+            # The server-side category filter is the source of truth. Do not
+            # reject valid series just because a response omits category metadata.
+            out[ticker] = row
+        return out
+
+    def sports_events_all(self, status="open"):
+        """Fetch a bounded, paginated set of open events across the catalog.
+
+        This avoids making one API call per sports series. The result is bounded
+        intentionally; callers should report truncation/coverage uncertainty.
+        """
+        return self._paged("/events", "events", {
+            "status": status, "with_nested_markets": "true", "limit": 200,
+        }, max_pages=20)
+
+    def multivariate_events(self, status="open"):
+        """Read-only discovery for Kalshi's multivariate/combo event catalog."""
+        out, cursor = [], None
+        for _ in range(10):
+            params = {"status": status, "limit": 200, "with_nested_markets": "true"}
+            if cursor:
+                params["cursor"] = cursor
+            data = self._req("GET", "/events/multivariate", params=params)
+            rows = data.get("events") or data.get("multivariate_events") or []
+            out.extend(rows)
+            cursor = data.get("cursor")
+            if not cursor:
+                break
+        return out
+
     def market(self, ticker):
         return self._req("GET", f"/markets/{ticker}").get("market", {})
 

@@ -1,5 +1,6 @@
 """One research-and-trade cycle. Safe to run every 5-15 minutes."""
 import json
+import os
 import logging
 import time
 import uuid
@@ -21,6 +22,60 @@ from .signals import market_signals as ms
 from .signals import schedule as sched
 
 log = logging.getLogger("bot")
+
+
+def _series_sport(series, metadata=None):
+    """Map a discovered Kalshi series to a known odds key or a research category."""
+    if series in SPORTS:
+        return SPORTS[series]
+    meta = metadata or {}
+    text = " ".join([str(series), str(meta.get("title", "")), str(meta.get("category", "")),
+                     " ".join(str(v) for v in (meta.get("tags") or []))]).lower()
+    # Apply exclusions before broad category keywords so excluded sports cannot
+    # fall through as "other" and evade the intended exclusion.
+    rules = (
+        (("mma", "ufc", "mixed martial arts", "ultimate fighting"), "mma"),
+        (("boxing", "boxer"), "boxing"),
+        (("tennis", "atp", "wta"), "tennis"),
+        (("motorsport", "formula 1", "formula-one", "f1", "nascar", "indycar", "racing"), "motorsports"),
+        (("golf", "pga", "lpga", "liv golf"), "golf"),
+        (("esports", "e-sports", "league of legends", "counter-strike", "dota", "valorant"), "esports"),
+        (("nfl", "college football", "football"), "football"),
+        (("basketball", "wnba", "nba", "ncaab"), "basketball"),
+        (("baseball", "mlb"), "baseball"),
+        (("hockey", "nhl"), "hockey"),
+        (("soccer", "premier league", "champions league", "mls"), "soccer"),
+        (("cricket",), "cricket"),
+        (("rugby",), "rugby"),
+        (("volleyball",), "volleyball"),
+        (("chess",), "chess"),
+        (("badminton",), "badminton"),
+        (("cycling", "tour de france"), "cycling"),
+        (("athletics", "track and field", "track_field"), "track_field"),
+        (("swimming",), "swimming"),
+        (("olympics", "olympic"), "olympics"),
+    )
+    for words, category in rules:
+        if any(word in text for word in words):
+            return category
+    return "other"
+
+
+# Every discovered Kalshi sport is eligible for research. Categories without
+# external odds coverage still need sufficient independent evidence to qualify.
+EXCLUDED_SPORT_CATEGORIES = set()
+
+
+def _sports_excluded(series, metadata=None):
+    """Compatibility helper: no sport category is blanket-excluded."""
+    return _series_sport(series, metadata) in EXCLUDED_SPORT_CATEGORIES
+
+
+def _fresh_odds_history(rows, now, max_age_seconds):
+    """Drop stale/future sportsbook rows before they can manufacture apparent edge."""
+    cutoff = int(now) - max(0, int(max_age_seconds))
+    return [row for row in rows
+            if cutoff <= int(row.get("ts", 0)) <= int(now)]
 
 
 def iso_to_ts(s):
@@ -72,8 +127,9 @@ class Engine:
                     "away": ev.get("away_team"), "team": team, "fair_prob": p,
                     "n_books": n, "raw": {"spread": spread}})
             slim.append({k: ev.get(k) for k in ("id", "home_team", "away_team", "commence_time")})
-        if events:
-            self.store.set_kv(f"odds_events_{sport}", slim)
+        # Empty/error-free responses must clear the cached event list too; keeping
+        # yesterday's events after a failed refresh can create stale matches.
+        self.store.set_kv(f"odds_events_{sport}", slim)
         self.store.set_kv(f"odds_last_{sport}", time.time())
         log.info("odds %s: %d events, credits left %s", sport, len(events), self.odds.last_remaining)
 
@@ -117,6 +173,7 @@ class Engine:
         mid = r.detail["mid"]
 
         hist = self.store.odds_history(ev_match["id"], book_team) if ev_match else []
+        hist = _fresh_odds_history(hist, now, self.odds_max_age * 60)
         if hist:
             last = hist[-1]
             bc = ms.book_consensus(last["fair_prob"], last["n_books"],
@@ -168,12 +225,101 @@ class Engine:
         start = iso_to_ts(ev_match.get("commence_time")) if ev_match else None
         if not (self.llm and team and start and 0 < start - now < 24 * 3600):
             return None
-        if intel.news_due(self.store, mkt["ticker"]):
+
+        category_for = {
+            "americanfootball_nfl": "football", "americanfootball_ncaaf": "football",
+            "basketball_nba": "basketball", "basketball_wnba": "basketball",
+            "basketball_ncaab": "basketball", "baseball_mlb": "baseball",
+            "icehockey_nhl": "hockey", "soccer_mls": "soccer",
+            "soccer_epl": "soccer", "soccer_uefa": "soccer",
+            "tennis_atp": "tennis", "tennis_wta": "tennis",
+            "mma_mixed_martial_arts": "mma", "golf_pga": "golf",
+            "motorsport_f1": "motorsports", "esports": "esports",
+        }
+        try:
+            from . import sports_intel
+            category = category_for.get(sport, sport if sport in sports_intel.SPORT_TERMS else None)
+        except Exception:
+            sports_intel = None
+            category = category_for.get(sport)
+
+        if intel.news_due(self.store, mkt["ticker"],
+                          minutes=max(5, int(os.environ.get("SPORTS_AI_NEWS_REFRESH_MINUTES", "30")))):
             if sport not in self._headlines:
                 self._headlines[sport] = intel.fetch_headlines(sport)
-            heads = intel.relevant(self._headlines[sport], [team, opp or ""])
+                if sports_intel:
+                    try:
+                        now_ts = int(time.time())
+                        categories = [category] if category else []
+                        categories.append("event_news")
+                        for news_category in set(categories):
+                            for item in sports_intel.recent(self.store, limit=250, category=news_category, kind="news"):
+                                published = item.get("published_ts")
+                                if published and now_ts - published > 48 * 3600:
+                                    continue
+                                item_event = item.get("event_ticker")
+                                self._headlines[sport].append({
+                                    "headline": f"[{item.get('publisher') or item.get('source') or 'unknown source'}] {item.get('title', '')}",
+                                    "description": item.get("summary", ""),
+                                    "published": published or item.get("observed_ts"),
+                                    "source": item.get("source", ""),
+                                    "url": item.get("url", ""),
+                                    "event_ticker": item_event,
+                                })
+                    except Exception as e:
+                        log.debug("cached web intelligence unavailable for %s: %s", sport, e)
+
+            event_headlines = [h for h in self._headlines[sport]
+                               if not h.get("event_ticker") or h.get("event_ticker") == mkt.get("event_ticker")]
+            heads = intel.relevant(event_headlines, [team, opp or ""])
+            ai_context = dict(context or {})
+            if sports_intel:
+                stat_categories = {
+                    "americanfootball_nfl": ["nfl"], "americanfootball_ncaaf": ["college_football"],
+                    "basketball_nba": ["nba"], "basketball_wnba": ["wnba"],
+                    "baseball_mlb": ["mlb"], "icehockey_nhl": ["nhl"],
+                    "soccer_epl": ["soccer_epl"], "soccer_mls": ["soccer_mls"],
+                    "soccer_uefa": ["soccer_uefa"], "tennis_atp": ["tennis_atp"],
+                    "tennis_wta": ["tennis_wta"], "golf_pga": ["golf_pga"],
+                    "mma_mixed_martial_arts": ["mma_ufc"],
+                }
+                try:
+                    stat_rows = []
+                    team_terms = [str(x).lower() for x in (team, opp) if x and len(str(x)) > 2]
+                    for stat_category in stat_categories.get(sport, []):
+                        for kind in ("stats", "score"):
+                            for item in sports_intel.recent(self.store, limit=100, category=stat_category, kind=kind):
+                                # Do not let a stale box score or an unrelated event
+                                # masquerade as current matchup evidence. Public feeds
+                                # can retain old games and entity names can overlap.
+                                observed = int(item.get("observed_ts") or 0)
+                                age_seconds = max(0, int(time.time()) - observed) if observed else None
+                                if age_seconds is None or age_seconds > 72 * 3600:
+                                    continue
+                                serialized = json.dumps(item, ensure_ascii=False).lower()
+                                if team_terms and not all(term in serialized for term in team_terms):
+                                    continue
+                                stat_rows.append({
+                                    "event": item.get("title") or item.get("name"), "observed_ts": observed,
+                                    "evidence_age_seconds": age_seconds,
+                                    "source": item.get("source"), "verified": item.get("verified", False),
+                                    "state": item.get("state"), "scoreboard": item.get("scoreboard") or item.get("competitors", []),
+                                    "team_stats": item.get("team_stats", []), "player_stats": item.get("player_stats", []),
+                                    "leaders": item.get("leaders", []), "injuries": item.get("injuries"),
+                                    "lineups": item.get("lineups"), "rosters": item.get("rosters"),
+                                    "depth_charts": item.get("depth_charts"),
+                                    "season_series": item.get("season_series"),
+                                    "game_info": item.get("game_info"),
+                                    "football_matchup_profile": item.get("football_matchup_profile"),
+                                    "public_odds": item.get("odds", []), "predictor": item.get("predictor"),
+                                })
+                    if stat_rows:
+                        ai_context["recent_scoreboard_stats"] = stat_rows[:3]
+                except Exception as e:
+                    log.debug("cached scoreboard stats unavailable for %s: %s", sport, e)
+
             book = hist[-1]["fair_prob"] if hist else None
-            r = intel.ai_news(self.llm, team, opp, mid, book, heads, context)
+            r = intel.ai_news(self.llm, team, opp, mid, book, heads, ai_context)
             self.store.set_kv(f"news_last_{mkt['ticker']}", time.time())
             self.store.set_kv(key, r.__dict__ if r else None)
         cached = self.store.get_kv(key)
@@ -187,9 +333,12 @@ class Engine:
         now = int(time.time())
         summary = {"mode": "watch" if watch else "full", "markets": 0,
                    "matched": 0, "bets": 0, "skipped": {}, "alerts": []}
-        held = {b["event_ticker"] for b in self.store.open_bets()}
+        held = {b["event_ticker"] for b in self.store.open_bets(mode=self.s.mode)}
+        if sports and getattr(self.s, "combo_research_enabled", True):
+            from . import combo_research
+            summary["combos"] = combo_research.scan(self.data, self.store, settings=self.s)
         weights = brain.get_weights(self.store, "sports")
-        self.betting_ok, why = guard.status(self.store, self.s.bankroll)
+        self.betting_ok, why = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
         summary["betting"] = why
         if not self.betting_ok:
             log.warning("betting paused (%s): researching and learning only", why)
@@ -199,22 +348,86 @@ class Engine:
         else:
             self.store.set_kv("pause_alerted", None)
 
-        for series, sport in (SPORTS.items() if sports else ()):
+        series_map = dict(SPORTS)
+        events_by_series = {}
+        selected = self.s.selected_series() if hasattr(self.s, "selected_series") else None
+        if sports and getattr(self.s, "sports_mode", "all") == "all":
+            try:
+                catalog = self.data.sports_series()
+                all_events = self.data.sports_events_all()
+                for ev in all_events:
+                    series = ev.get("series_ticker")
+                    if not series:
+                        event_ticker = str(ev.get("event_ticker") or "")
+                        series = next((known for known in catalog if event_ticker.startswith(known + "-")), None)
+                    if not series or series not in catalog:
+                        continue
+                    series_map[series] = _series_sport(series, catalog.get(series))
+                    events_by_series.setdefault(series, []).append(ev)
+                self.store.set_kv("sports_catalog_health", {
+                    "ts": now, "series_discovered": len(catalog),
+                    "open_events_seen": len(all_events), "sports_events_matched": sum(map(len, events_by_series.values())),
+                    "coverage_warning": len(all_events) >= 4000 or len(catalog) >= 10000,
+                    "mode": "dynamic_all"})
+            except Exception as e:
+                log.warning("dynamic sports discovery failed; using configured series: %s", e)
+                events_by_series = {}
+        elif sports and getattr(self.s, "sports_mode", "all") == "manual":
+            selected = selected or set()
+            series_map = {series: SPORTS.get(series, _series_sport(series))
+                          for series in selected}
+            self.store.set_kv("sports_catalog_health", {
+                "ts": now, "series_selected": sorted(selected), "mode": "manual"})
+        else:
+            series_map = {}
+
+        if sports and not events_by_series and series_map:
+            for selected_series in series_map:
+                try:
+                    events_by_series[selected_series] = self.data.sports_events(selected_series)
+                except Exception as e:
+                    log.warning("events %s: %s", selected_series, e)
+                    events_by_series[selected_series] = []
+        if sports and events_by_series and os.environ.get("SPORTS_INTEL_EVENT_SEARCH", "no").lower() in ("yes", "true", "1"):
+            try:
+                from . import sports_intel
+                candidates = [ev for grouped in events_by_series.values() for ev in grouped]
+                # Upcoming event news is the most actionable. Unknown start times sort last.
+                def event_start(ev):
+                    value = iso_to_ts(ev.get("start_time") or ev.get("commence_time") or ev.get("date"))
+                    return value if value and value >= now else now + 10 * 86400
+                candidates.sort(key=event_start)
+                event_news = sports_intel.collect_event_news(
+                    self.store, candidates, max_events=int(os.environ.get("SPORTS_INTEL_EVENT_BUDGET", 12)), now=now)
+                self.store.set_kv("sports_intel_event_news_health", {"ts": now, **event_news})
+            except Exception as e:
+                log.warning("event-specific news collection failed: %s", e)
+
+        for series, sport in (series_map.items() if sports else ()):
             if watch and not watch.wants_series(series) and not any(
                     h.startswith(series) for h in held):
                 continue
             try:
-                events = self.data.sports_events(series)
+                if series in events_by_series:
+                    events = events_by_series[series]
+                else:
+                    # Fallback for the original configured leagues when dynamic
+                    # catalog endpoints are unavailable; manual selections are explicit.
+                    events = self.data.sports_events(series)
             except Exception as e:
                 log.warning("events %s: %s", series, e)
                 continue
             if not events:
                 continue
-            try:
-                self.refresh_odds(sport)
-            except Exception as e:
-                log.warning("odds %s: %s", sport, e)
-            odds_events = self.store.get_kv(f"odds_events_{sport}", [])
+            supported_odds = sport in set(SPORTS.values())
+            if supported_odds:
+                try:
+                    self.refresh_odds(sport)
+                except Exception as e:
+                    log.warning("odds %s: %s", sport, e)
+                odds_events = self.store.get_kv(f"odds_events_{sport}", [])
+            else:
+                odds_events = []
 
             for ev in events:
                 ev.setdefault("series_ticker", series)
@@ -235,7 +448,7 @@ class Engine:
                 if self.betting_ok and ev_match and len(markets) == 2:
                     if self.try_arb(ev, markets, summary, now):
                         continue
-                benched = guard.league_benched(self.store, series)
+                benched = guard.league_benched(self.store, series, mode=self.s.mode)
                 candidates = []   # pick the single best bet per game
                 for m in markets:
                     summary["markets"] += 1
@@ -257,7 +470,9 @@ class Engine:
                     if not self.betting_ok or benched:
                         self._skip(summary, "league benched" if benched else "betting paused")
                         continue
-                    c = self.evaluate(snap, readings, weights, summary)
+                    # Apply league-specific learned weights when the series is identifiable.
+                    league_weights = brain.get_weights(self.store, brain.learning_domain_of(series))
+                    c = self.evaluate(snap, readings, league_weights, summary)
                     if c:
                         candidates.append(c)
                 if candidates:
@@ -313,7 +528,7 @@ class Engine:
                     if not spot_fresh:
                         self._skip(summary, "spot price not fresh")
                         continue
-                    if not self.betting_ok or guard.league_benched(self.store, series):
+                    if not self.betting_ok or guard.league_benched(self.store, series, mode=self.s.mode):
                         self._skip(summary, "betting paused")
                         continue
                     if not (self.s.crypto_min_minutes <= left <= self.s.crypto_max_minutes):
@@ -388,7 +603,7 @@ class Engine:
                     self.store.set_kv(f"start_{m['ticker']}", int(t["close_ts"]))
                     self.store.set_kv(f"settle_after_{m['ticker']}", int(t["close_ts"]) + 600)
                     if not (lo_min <= left <= hi_min) or not self.betting_ok or \
-                            guard.league_benched(self.store, series):
+                            guard.league_benched(self.store, series, mode=self.s.mode):
                         continue
                     if pair not in cache:
                         cache[pair] = (self.price_feed(pair), *self.spot_feed(pair))
@@ -544,30 +759,58 @@ class Engine:
         key = " ".join(w for w in reason.split() if not any(c.isdigit() for c in w))[:40]
         summary["skipped"][key] = summary["skipped"].get(key, 0) + 1
 
+    def _record_decision(self, snap, readings, decision, reason=None, prob=None, conf=None, side=None, market_price=None, edge=None, now=None):
+        """Append a decision snapshot; this does not place or simulate an order."""
+        if market_price is None:
+            bid, ask = snap.get("yes_bid"), snap.get("yes_ask")
+            last = snap.get("last_price")
+            market_price = ((float(bid) + float(ask)) / 2 if bid is not None and ask is not None
+                            else float(last) if last is not None else None)
+        if side is None and prob is not None:
+            side = "yes" if prob >= 0.5 else "no"
+        side_prob = (prob if side == "yes" else 1 - prob) if prob is not None and side in ("yes", "no") else None
+        self.store.add_decision_audit({
+            "ts": int(now or time.time()), "ticker": snap["ticker"],
+            "event_ticker": snap.get("event_ticker"), "series": snap.get("series"),
+            "decision": decision, "reason": reason, "side": side,
+            "market_price": market_price, "model_prob": prob, "side_prob": side_prob,
+            "edge": edge, "confidence": conf,
+            "signals": {r.name: {"prob": r.prob, "confidence": r.confidence, "detail": r.detail} for r in readings}})
+
     def evaluate(self, snap, readings, weights, summary, required="book_consensus",
                  min_edge=None, max_per_bet=None):
         if not any(r.name == required for r in readings):
+            self._record_decision(snap, readings, "rejected", "no outside signal")
             self._skip(summary, "no outside signal")
             return None
         bc = next((r for r in readings if r.name == "book_consensus"), None)
         if bc and bc.detail.get("age_min", 0) > self.odds_max_age * 1.5:
+            self._record_decision(snap, readings, "rejected", "sportsbook odds too old")
             self._skip(summary, "sportsbook odds too old")
             return None
         prob, conf = brain.blend(readings, weights)
+        if prob is not None:
+            # Calibrate using settled canonical audits across candidates and
+            # rejections, not just the subset the bot happened to bet.
+            prob = brain.calibrate(prob, self.store, domain=brain.domain_of(snap.get("series", "")))
         if prob is None:
+            self._record_decision(snap, readings, "rejected", "no calibrated probability", conf=conf)
             return None
         try:
             book = self.data.orderbook(snap["ticker"])
         except Exception as e:
+            self._record_decision(snap, readings, "rejected", "orderbook unavailable", prob, conf)
             log.warning("orderbook %s: %s", snap["ticker"], e)
             return None
         plan, why = risk.decide(self.s, self.store, snap, prob, conf, book,
                                 min_edge=min_edge, max_per_bet=max_per_bet)
         if not plan:
+            self._record_decision(snap, readings, "rejected", why, prob, conf)
             self._skip(summary, why)
             return None
+        self._record_decision(snap, readings, "candidate", "passed deterministic risk checks",
+                              prob, conf, side=plan["side"], market_price=plan["price"], edge=plan["edge"])
         return snap, plan, readings, prob, conf
-
     def place(self, snap, plan, readings, prob, conf, summary, now, executed=None):
         """Send (or simulate) the order and record the bet. `executed` = an order
         the live runner already filled as a resting maker order."""
@@ -575,6 +818,10 @@ class Engine:
         if executed:
             order_id = executed.get("order_id", order_id)
             plan["contracts"] = executed.get("contracts", plan["contracts"])
+            # Resting maker fills use the maker fee schedule, and only the
+            # contracts actually filled belong in the ledger.
+            plan["fee"] = risk.taker_fee(0, plan["price"], self.s.taker_fee_rate) + \
+                risk.taker_fee(plan["contracts"], plan["price"], self.s.maker_fee_rate)
         elif self.s.mode in ("demo", "live"):
             try:
                 order = self.trade.place_limit_buy(snap["ticker"], plan["side"],
@@ -590,6 +837,15 @@ class Engine:
                     plan["price"] = round(cost / filled / (100 if cost / filled > 1 else 1), 4)
                 plan["contracts"] = filled
                 plan["stake"] = round(filled * plan["price"], 2)
+                maker_filled = int(num(order, "maker_fill_count") or 0)
+                taker_filled = int(num(order, "taker_fill_count") or max(0, filled - maker_filled))
+                # Recompute fees on actual fill counts and the observed average
+                # price. If the exchange omits fill-type counts, conservatively
+                # treat the unclassified fills as taker fills.
+                plan["fee"] = (
+                    risk.taker_fee(taker_filled, plan["price"], self.s.taker_fee_rate)
+                    + risk.taker_fee(maker_filled, plan["price"], self.s.maker_fee_rate)
+                )
             except Exception as e:
                 log.error("order failed %s: %s", snap["ticker"], e)
                 return
