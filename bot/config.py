@@ -190,6 +190,10 @@ class Settings:
             raise ValueError("SPORTS_MODE=manual requires at least one SPORTS_SELECTED series ticker")
         if self.combo_audit_lead_seconds < 0:
             raise ValueError("COMBO_AUDIT_LEAD_SECONDS must be non-negative")
+        if self.combos_enabled:
+            raise ValueError(
+                "Combo order execution is not implemented; keep COMBOS_ENABLED=no. "
+                "Read-only combo research remains available.")
         if not 3 <= self.combo_min_legs <= 8:
             raise ValueError("COMBO_MIN_LEGS must be between 3 and 8")
         if not self.combo_min_legs <= self.combo_max_legs <= 8:
