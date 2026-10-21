@@ -48,6 +48,15 @@ jobs:
           OMNIROUTE_MODELS: ${{ vars.OMNIROUTE_MODELS }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           SPORTS_EVERY_HOURS: ${{ vars.SPORTS_EVERY_HOURS || '5.5' }}
+          SPORTS_MODE: ${{ vars.SPORTS_MODE || 'all' }}
+          SPORTS_SELECTED: ${{ vars.SPORTS_SELECTED || '' }}
+          SPORTS_INTEL_ENABLED: ${{ vars.SPORTS_INTEL_ENABLED || 'yes' }}
+          SPORTS_INTEL_EVENT_SEARCH: ${{ vars.SPORTS_INTEL_EVENT_SEARCH || 'yes' }}
+          SPORTS_INTEL_EVENT_BUDGET: ${{ vars.SPORTS_INTEL_EVENT_BUDGET || '12' }}
+          SPORTS_INTEL_TTL_SECONDS: ${{ vars.SPORTS_INTEL_TTL_SECONDS || '600' }}
+          COMBOS_ENABLED: ${{ vars.COMBOS_ENABLED || 'no' }}
+          COMBO_MAX_LEGS: ${{ vars.COMBO_MAX_LEGS || '3' }}
+          COMBO_MIN_EDGE: ${{ vars.COMBO_MIN_EDGE || '6' }}
           BURST_MINUTES: ${{ vars.BURST_MINUTES || '8' }}
           BRIEFING_EVERY_MINUTES: ${{ vars.BRIEFING_EVERY_MINUTES || '12' }}
           LLM_DAILY_LIMIT: ${{ vars.LLM_DAILY_LIMIT || '45' }}
