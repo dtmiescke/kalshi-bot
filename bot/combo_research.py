@@ -86,6 +86,18 @@ def score_combo_probabilities(leg_probabilities, yes_ask, no_ask,
     }
 
 
+def conservative_yes_probability(scored):
+    """Return the uncertainty-adjusted YES probability used for combo grading."""
+    try:
+        product = float(scored["independence_product"])
+        haircut = float(scored["uncertainty_haircut"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not 0.0 <= product <= 1.0 or not 0.0 <= haircut <= 1.0:
+        return None
+    return round(max(0.0, min(1.0, product - haircut)), 6)
+
+
 def conservative_leg_probability(probability, confidence, signal_count=1):
     """Shrink a raw leg forecast toward 50% unless confidence and signal diversity support it.
 
@@ -303,14 +315,8 @@ def scan(client, store, settings=None, max_events=2000, max_age_s=7200):
             ya = _price(market.get("yes_ask_dollars") or market.get("yes_ask"))
             if yb is not None and ya is not None and yb <= ya:
                 yes_mid = round((yb + ya) / 2, 4)
-            predicted_yes = None
-            if (scored.get("independence_product") is not None
-                    and scored.get("uncertainty_haircut") is not None):
-                # Grade the same conservative probability used for decision-making,
-                # not the optimistic raw independence product.
-                predicted_yes = max(0.0, min(
-                    1.0, float(scored["independence_product"])
-                    - float(scored["uncertainty_haircut"])))
+            # Grade the conservative probability, not the raw independence product.
+            predicted_yes = conservative_yes_probability(scored)
             audit_close_time = market.get("close_time") or event.get("close_time")
             audit_lead_seconds = int(getattr(settings, "combo_audit_lead_seconds", 300))
             audit_cutoff = combo_audit_cutoff_ts(audit_close_time, audit_lead_seconds)
