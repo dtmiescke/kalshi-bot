@@ -543,6 +543,12 @@ class LiveRunner:
         self.summary["skipped"][why] = self.summary["skipped"].get(why, 0) + 1
 
     # --- async orchestration ---------------------------------------------------------
+    async def _poll_crypto_flow(self, ticker, now):
+        try:
+            await asyncio.to_thread(self.engine.pull_flow, ticker, now)
+        except Exception as exc:
+            log.warning("crypto trade-flow poll %s: %s", ticker, exc)
+
     async def main(self, minutes, sports=True):
         stop = asyncio.Event()
         if self.seed:
@@ -601,16 +607,15 @@ class LiveRunner:
                 self.betting_ok, self.betting_why = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
                 asyncio.create_task(asyncio.to_thread(self.refresh_context))
                 last_guard = now
-            # Pull the public Kalshi trade tape at a conservative per-market
-            # cadence. This complements Kraken/Coinbase aggressor flow and avoids
-            # hammering REST on every one-second inference tick.
-            for ticker in list(self.markets):
-                if now - self.last_flow_poll.get(ticker, 0) >= 15:
-                    try:
-                        await asyncio.to_thread(self.engine.pull_flow, ticker, int(now))
-                    except Exception as exc:
-                        log.warning("crypto trade-flow poll %s: %s", ticker, exc)
-                    self.last_flow_poll[ticker] = now
+            # Poll only one due market per main-loop pass, oldest first. A
+            # burst over every ticker would serialize REST latency into the
+            # inference loop and risk provider rate limits as the universe grows.
+            due_flow = [t for t in self.markets
+                        if now - self.last_flow_poll.get(t, 0) >= 15]
+            if due_flow:
+                ticker = min(due_flow, key=lambda t: self.last_flow_poll.get(t, 0))
+                self.last_flow_poll[ticker] = now
+                asyncio.create_task(self._poll_crypto_flow(ticker, int(now)))
             for ticker, readings, ctx, plan in list(self.tick(now)):
                 asyncio.create_task(self._review(ticker, readings, ctx, plan))
             if now - last_dump >= 10:
