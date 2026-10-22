@@ -129,6 +129,18 @@ class TestModel(unittest.TestCase):
 
 
 class TestExecution(unittest.TestCase):
+    def test_uncertain_order_outcome_persists_reconciliation_pause(self):
+        from bot.engine import Engine
+        with tempfile.TemporaryDirectory() as d:
+            store = Store(os.path.join(d, "t.db"))
+            engine = Engine(Settings(), store, data_client=object(), odds_client=object(),
+                            price_feed=lambda *a, **k: [], spot_feed=lambda *a, **k: None,
+                            schedule_fetch=lambda *a, **k: [])
+            engine._pause_for_reconciliation("test exchange timeout")
+            self.assertIn("test exchange timeout",
+                          store.get_kv("execution_reconciliation_required"))
+            self.assertFalse(engine.betting_ok)
+
     def setUp(self):
         self.d = tempfile.TemporaryDirectory()
         self.st = Store(os.path.join(self.d.name, "t.db"))
