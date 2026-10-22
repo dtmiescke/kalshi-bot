@@ -104,6 +104,12 @@ def status(store, bankroll, daily_loss_limit=None, mode=None):
     if not math.isfinite(limit) or limit < 0:
         return False, "invalid daily loss limit configuration; betting paused"
     mode = mode or os.environ.get("BOT_MODE", "paper")
+    # Durable circuit breaker: an interrupted order submission or maker
+    # reconciliation survives process restarts. Clear only after manually
+    # reconciling the exchange's orders and positions against the local ledger.
+    incident = store.get_kv("execution_reconciliation_required")
+    if incident:
+        return False, str(incident)
     lost = store.realized_today(day_start_ts(), mode=mode)
     if lost <= -limit:
         return False, f"daily loss limit hit (${-lost:.2f} lost today; resets at midnight in {os.environ.get('BOT_TIMEZONE', 'America/Chicago')})"
