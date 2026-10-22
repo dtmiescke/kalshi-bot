@@ -235,6 +235,31 @@ class TestRunnerExecution(unittest.TestCase):
         self.assertEqual(self.r._maker_order_state({"status": "resting", "fill_count_fp": "bad"}, 7),
                          (0, "resting", False))
 
+    def test_ambiguous_maker_submission_sets_durable_pause(self):
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        from bot import guard
+        ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
+        fake_trade = SimpleNamespace(place_resting_buy=lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError("response lost")))
+        with patch.object(self.s, "mode", "live"), patch.object(self.r.engine, "trade", fake_trade):
+            self.r.start_maker(ticker, {"ticker": ticker}, plan[1], readings, 0.6, 0.8)
+        incident = self.store.get_kv("execution_reconciliation_required")
+        self.assertIn("outcome unknown", incident)
+        allowed, reason = guard.status(self.store, self.s.bankroll, mode="live")
+        self.assertFalse(allowed)
+        self.assertIn("reconcile exchange orders", reason)
+        self.assertEqual(self.store.get_kv("maker_recovery")["state"], "submitting")
+
+    def test_prior_run_maker_intent_pauses_live_runner_on_restart(self):
+        from bot.live.runner import LiveRunner
+        self.store.set_kv("maker_recovery", {"state": "active", "ticker": "KXBTC15M-E-00",
+                                             "order_id": "unknown", "contracts": 3})
+        self.s.mode = "live"
+        restarted = LiveRunner(self.s, self.store, rest=self.r.rest, llm=None,
+                               dvol_fetch=lambda c: 45.0, seed=False, with_context=False)
+        self.assertIn("prior run", self.store.get_kv("execution_reconciliation_required"))
+        self.assertFalse(restarted.betting_ok)  # no new order can be placed before reconciliation
+
     def test_live_maker_without_order_id_fails_closed(self):
         from unittest.mock import patch
         ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
