@@ -12,6 +12,7 @@ import json
 
 from . import brain
 from .risk import taker_fee
+from .metrics import binary_contract_roi
 from .signals.base import Reading
 
 THRESHOLDS = (0.02, 0.03, 0.05, 0.08)
@@ -92,11 +93,14 @@ def run(store, fee_rate=0.07, thresholds=THRESHOLDS):
             if not bets:
                 res["thresholds"][t] = {"bets": 0}
                 continue
-            staked = sum(b["ask"] for b in bets)
-            pnl = sum((1 - b["ask"] if b["won"] else -b["ask"]) - b["fee"] for b in bets)
+            # Use the shared accounting definition used by ML and history replay.
+            pnl, _, roi = binary_contract_roi(
+                [{"won": b["won"], "cost": b["ask"], "fee": b["fee"]} for b in bets]
+            )
             res["thresholds"][t] = {
                 "bets": len(bets), "win_rate": round(sum(b["won"] for b in bets) / len(bets), 3),
-                "roi": round(pnl / staked, 4), "pnl_per_contract": round(pnl / len(bets), 4)}
+                "roi": round(roi, 4) if roi is not None else None,
+                "pnl_per_contract": round(pnl / len(bets), 4)}
         out["by_domain"][dom] = res
     return out
 
