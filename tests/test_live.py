@@ -274,6 +274,11 @@ class TestHistory(unittest.TestCase):
         res = history.evaluate({"KXBTC15M-H": rows}, 0.07)
         self.assertEqual(res["thresholds"][0.05]["bets"], 1)
         self.assertEqual(res["thresholds"][0.05]["win_rate"], 1.0)
+        cost = 0.57 + history.ml.SLIPPAGE
+        fee = history.taker_fee(100, cost, 0.07) / 100
+        self.assertAlmostEqual(
+            res["thresholds"][0.05]["roi"], (1 - cost - fee) / (cost + fee), places=4
+        )
         with tempfile.TemporaryDirectory() as d:
             store = Store(os.path.join(d, "t.db"))
             history.seed_learning(store, {"KXBTC15M-H": rows})
