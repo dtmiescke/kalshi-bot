@@ -414,7 +414,7 @@ def predict(feats, coin):
                     _CACHE["m"] = None
                 else:
                     _CACHE["m"] = (bundle, meta)
-        except (OSError, EOFError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+        except Exception as exc:
             log.error("Champion model artifact invalid; refusing prediction: %s", exc)
             _CACHE["m"] = None
     if not _CACHE["m"] or "kalshi_logit" not in feats:
