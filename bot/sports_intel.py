@@ -97,12 +97,31 @@ def _clean(value, limit=4000):
     return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
 
 def _request(url):
-    response = requests.get(url, headers={"User-Agent": USER_AGENT, "Accept": "application/rss+xml, application/json, */*"},
-                            timeout=TIMEOUT)
-    response.raise_for_status()
-    if len(response.content) > MAX_BODY:
-        raise ValueError("response exceeded size limit")
-    return response
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "application/rss+xml, application/json, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    candidates = [url]
+    # ESPN sometimes blocks the site.api host from hosted CI runners. Try its
+    # web API host as a fallback, but keep the same path/query and fail closed
+    # if neither endpoint returns a valid response.
+    if url.startswith("https://site.api.espn.com/"):
+        headers["Referer"] = "https://www.espn.com/"
+        candidates.append(url.replace("https://site.api.espn.com/",
+                                      "https://site.web.api.espn.com/", 1))
+    last_error = None
+    for candidate in candidates:
+        try:
+            response = requests.get(candidate, headers=headers, timeout=TIMEOUT)
+            response.raise_for_status()
+            if len(response.content) > MAX_BODY:
+                raise ValueError("response exceeded size limit")
+            return response
+        except (requests.RequestException, ValueError) as exc:
+            last_error = exc
+            log.debug("sports source request failed for %s: %s", candidate, exc)
+    raise last_error
 
 def _parse_rss(payload, source, category, observed_at):
     root = ET.fromstring(payload)
