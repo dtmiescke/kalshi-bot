@@ -114,6 +114,21 @@ class Engine:
         self.betting_ok = True
         self._headlines = {}
 
+    def _pause_for_reconciliation(self, reason):
+        """Persist a hard stop when an order outcome may be unknown to the client."""
+        message = f"order outcome requires exchange reconciliation: {reason}"
+        try:
+            self.store.set_kv("execution_reconciliation_required", message)
+        except Exception:
+            log.exception("CRITICAL: failed to persist execution reconciliation pause")
+        self.betting_ok = False
+        log.error(message)
+        try:
+            alerts.send("URGENT: order reconciliation required", message,
+                        priority="urgent", tags=["warning"])
+        except Exception:
+            log.exception("could not send order reconciliation alert")
+
     # --- data collection -------------------------------------------------------
     def refresh_odds(self, sport):
         """Pull books when the credit budget allows, store vig-free consensus."""
@@ -691,6 +706,9 @@ class Engine:
                 failure = f"unwind only filled {unwound}/{filled}"
         except Exception as exc:
             failure = str(exc)
+            self._pause_for_reconciliation(
+                f"sell/unwind submission or confirmation uncertain for {ticker}: {exc}"
+            )
         residual = max(0, filled - unwound)
         if residual:
             # Do not leave a partial fill invisible to account exposure/risk checks.
@@ -758,6 +776,9 @@ class Engine:
                     if filled < n:
                         raise RuntimeError(f"leg only filled {filled}/{n} contracts")
                 except Exception as e:
+                    self._pause_for_reconciliation(
+                        f"ladder order outcome uncertain for {ticker}: {e}"
+                    )
                     log.error("LADDER LEG FAILED %s: %s", ticker, e)
                     for t, sd, px, original_order_id, qty in placed:
                         self._unwind_leg(
@@ -827,6 +848,9 @@ class Engine:
                     if filled < plan["contracts"]:
                         raise RuntimeError(f"leg only filled {filled}/{plan['contracts']} contracts")
                 except Exception as e:
+                    self._pause_for_reconciliation(
+                        f"sports arbitrage order outcome uncertain for {m['ticker']}: {e}"
+                    )
                     log.error("ARB LEG FAILED %s: %s", m["ticker"], e)
                     self.unwind(order_ids, plan["contracts"],
                                 event_ticker=ev["event_ticker"], series=ev["series_ticker"])
@@ -1002,6 +1026,9 @@ class Engine:
                     + risk.taker_fee(maker_filled, plan["price"], self.s.maker_fee_rate)
                 )
             except Exception as e:
+                self._pause_for_reconciliation(
+                    f"single-order submission or fill confirmation uncertain for {snap['ticker']}: {e}"
+                )
                 log.error("order failed %s: %s", snap["ticker"], e)
                 return
 
