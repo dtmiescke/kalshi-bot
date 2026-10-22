@@ -60,6 +60,16 @@ class TestVol(unittest.TestCase):
 
 
 class TestModel(unittest.TestCase):
+    def test_shared_roi_accounting_includes_fees(self):
+        from bot.metrics import binary_contract_roi
+        pnl, capital, roi = binary_contract_roi([
+            {"won": True, "cost": 0.505, "fee": 0.02},
+            {"won": False, "cost": 0.40, "fee": 0.02},
+        ])
+        self.assertAlmostEqual(pnl, (1 - 0.505 - 0.02) + (-0.40 - 0.02))
+        self.assertAlmostEqual(capital, 0.505 + 0.02 + 0.40 + 0.02)
+        self.assertAlmostEqual(roi, pnl / capital)
+
     def test_simulated_single_contract_fee_rounds_up_to_cent(self):
         # Live risk.taker_fee rounds each order's fee up to a cent. The
         # simulator must not use fractional cents that inflate backtest ROI.
