@@ -286,11 +286,30 @@ class LiveRunner:
 
     @staticmethod
     def _maker_order_state(order, requested):
-        try:
-            filled = int(float(order.get("fill_count_fp") or order.get("fill_count") or 0))
-        except (TypeError, ValueError):
-            filled = 0
         status = str(order.get("status") or "").lower()
+        raw_filled = order.get("fill_count_fp")
+        if raw_filled in (None, ""):
+            raw_filled = order.get("fill_count")
+        if raw_filled in (None, ""):
+            # Some terminal statuses imply a full execution, but a missing fill
+            # count on other statuses is ambiguous and must not release exposure.
+            if status in {"executed", "filled"}:
+                filled = int(requested)
+            elif status in {"canceled", "cancelled", "expired", "rejected"}:
+                filled = 0
+            else:
+                filled = 0
+                status = status or "unknown"
+                return filled, status, False
+        else:
+            try:
+                numeric = float(raw_filled)
+                if not math.isfinite(numeric) or numeric < 0:
+                    raise ValueError("invalid fill count")
+                filled = int(numeric)
+            except (TypeError, ValueError, OverflowError):
+                # Malformed exchange fill data is not a zero-fill confirmation.
+                return 0, status or "unknown_fill_count", False
         terminal = status in {"canceled", "cancelled", "executed", "filled", "expired", "rejected"} \
             or filled >= requested
         return max(0, min(int(requested), filled)), status, terminal
