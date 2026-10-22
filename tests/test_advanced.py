@@ -250,7 +250,8 @@ class TestChampionArtifactSafety(unittest.TestCase):
             old_meta = {"feature_version": features.FEATURE_VERSION, "trained": 1}
             old_bundle = {"model": "old", "iso": "old-calibrator", "cols": ["kalshi_logit"],
                           "meta": old_meta}
-            ml._promote_champion(old_bundle, old_meta, joblib)
+            with patch.object(ml, "MODEL_DIR", d):
+                ml._promote_champion(old_bundle, old_meta, joblib)
             new_meta = {"feature_version": features.FEATURE_VERSION, "trained": 2}
             new_bundle = {"model": "new", "iso": "new-calibrator", "cols": ["kalshi_logit"],
                           "meta": new_meta}
