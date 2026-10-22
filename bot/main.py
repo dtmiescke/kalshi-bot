@@ -37,6 +37,23 @@ from .llm import LLM
 FULL_SCAN_MINUTES = 60
 
 
+def training_due(store, now, every_hours=24.0, retry_hours=6.0):
+    """Avoid false 24-hour success cooldowns when training lacks enough data.
+
+    Older versions updated last_train even when ml.train returned
+    "not enough data". A missing status is treated as a one-time migration
+    so the scheduler can retry and establish an authoritative status.
+    """
+    last_attempt = float(store.get_kv("last_train_attempt", 0) or 0)
+    if now - last_attempt < max(0.25, float(retry_hours)) * 3600:
+        return False
+    status = store.get_kv("last_train_status")
+    if status in (None, "", "not enough data", "error", "running"):
+        return True
+    last_success = float(store.get_kv("last_train", 0) or 0)
+    return now - last_success >= max(0.25, float(every_hours)) * 3600
+
+
 def run_scheduled(s, store, data):
     """What GitHub runs every 12 minutes.
     - sports: every SPORTS_EVERY_HOURS (default 5.5)
@@ -114,12 +131,24 @@ def run_scheduled(s, store, data):
         except Exception as e:
             logging.warning("combo research scan failed: %s", e)
     grade(store, data)
-    # retrain the model when due (weekly by default) — cheap, takes seconds
-    if time.time() - store.get_kv("last_train", 0) >= float(os.environ.get("TRAIN_EVERY_HOURS", 24)) * 3600:
+    # A failed-to-train attempt is not a successful training cycle. Record the
+    # attempt and status separately so insufficient data is retried on a short
+    # backoff instead of silently suppressing training for a full day.
+    train_now = time.time()
+    if training_due(
+        store, train_now,
+        every_hours=float(os.environ.get("TRAIN_EVERY_HOURS", 24)),
+        retry_hours=float(os.environ.get("TRAIN_RETRY_HOURS", 6)),
+    ):
         from . import ml
+        store.set_kv("last_train_attempt", train_now)
+        store.set_kv("last_train_status", "running")
         m = ml.train(store, min_windows=int(os.environ.get("ML_MIN_WINDOWS", 300)),
                      fee_rate=s.taker_fee_rate)
-        store.set_kv("last_train", time.time())
+        status = m.get("status") or "trained"
+        store.set_kv("last_train_status", status)
+        if status != "not enough data":
+            store.set_kv("last_train", train_now)
         print(ml.text(m))
         if m.get("promoted"):
             alerts.send("New model promoted", ml.text(m)[:1500], tags=["brain"])

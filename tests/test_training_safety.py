@@ -8,6 +8,35 @@ from bot.config import Settings
 
 
 class TestTrainingSafety(unittest.TestCase):
+    def test_insufficient_training_data_retries_after_short_backoff(self):
+        state = {"last_train": 9_900.0, "last_train_attempt": 10_000.0,
+                 "last_train_status": "not enough data"}
+        store = mock.Mock()
+        store.get_kv.side_effect = lambda key, default=0: state.get(key, default)
+
+        self.assertFalse(main.training_due(store, 10_000.0 + 5 * 3600,
+                                           every_hours=24, retry_hours=6))
+        self.assertTrue(main.training_due(store, 10_000.0 + 6 * 3600,
+                                          every_hours=24, retry_hours=6))
+
+    def test_successful_training_keeps_daily_cadence(self):
+        state = {"last_train": 10_000.0, "last_train_attempt": 10_000.0,
+                 "last_train_status": "trained"}
+        store = mock.Mock()
+        store.get_kv.side_effect = lambda key, default=0: state.get(key, default)
+
+        self.assertFalse(main.training_due(store, 10_000.0 + 12 * 3600,
+                                           every_hours=24, retry_hours=6))
+        self.assertTrue(main.training_due(store, 10_000.0 + 24 * 3600,
+                                          every_hours=24, retry_hours=6))
+
+    def test_missing_training_status_triggers_one_migration_attempt(self):
+        state = {"last_train": 10_000.0, "last_train_attempt": 0}
+        store = mock.Mock()
+        store.get_kv.side_effect = lambda key, default=0: state.get(key, default)
+        self.assertTrue(main.training_due(store, 100_000.0,
+                                          every_hours=24, retry_hours=6))
+
     def test_promotion_holdout_excludes_windows_that_started_before_champion_training(self):
         groups = ["old", "old", "crossing", "crossing", "fresh", "fresh"]
         stamps = [10, 11, 19, 21, 22, 23]

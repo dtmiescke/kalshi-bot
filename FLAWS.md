@@ -77,6 +77,8 @@ Combo research remains explicitly opt-in through the existing `COMBO_RESEARCH_EN
 
 | 35 | **Dashboard/storage format mismatch.** The persistence workflow migrated the memory branch to `bot.sqlite.gz`, but the phone dashboard searched only for `bot.sqlite`. | The bot saved memory successfully while the existing dashboard reported no database and lost access to its research scorecards. | Dashboard data loading now prefers `bot.sqlite.gz`, decompresses it in-browser with the native gzip stream, retains compatibility with legacy `bot.sqlite`, and fails gracefully for unsupported browsers/oversized snapshots. No visual layout changes. `index.html` |
 
+| 36 | **Insufficient training data looked like successful training.** The scheduler updated `last_train` even when the model returned `not enough data`. | Training could be silently postponed for another 24 hours despite the dataset still being below the required 300 windows; the workflow remained green without a new model. | Track attempt time and outcome separately, retry insufficient-data cases on a configurable 6-hour backoff, and keep the normal 24-hour cadence after a real training run. A missing legacy status triggers one migration attempt. `main.py` · `tests/test_training_safety.py` |
+
 ## What code can't remove
 - **Competition.** Professional bots trade these markets; a real edge may not exist. The promotion gates and the live monitor are how you find out without paying for it.
 - **Kalshi rules and fees change.** Check the fee rate (`TAKER_FEE_RATE`, `MAKER_FEE_RATE`), the averaging window (`SETTLE_AVG_SECONDS`), and the series tickers.
