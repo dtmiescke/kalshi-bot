@@ -220,8 +220,6 @@ class TestMarketData(unittest.TestCase):
             self.assertAlmostEqual(c["coinbase_premium"], 0.005)
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class TestChampionArtifactSafety(unittest.TestCase):
@@ -274,3 +272,6 @@ class TestChampionArtifactSafety(unittest.TestCase):
                 self.assertEqual(ml.load_meta(), old_meta)
                 self.assertTrue(any(name.endswith(".joblib") and name.startswith("crypto_model_")
                                     for name in os.listdir(d)))
+
+if __name__ == "__main__":
+    unittest.main()
