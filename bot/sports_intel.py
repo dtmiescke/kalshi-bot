@@ -355,6 +355,77 @@ def ensure_schema(store):
     store.x("CREATE INDEX IF NOT EXISTS ix_sports_intel_recent ON sports_intel_items(kind, observed_ts)")
     store.x("CREATE INDEX IF NOT EXISTS ix_sports_intel_category ON sports_intel_items(category, observed_ts)")
 
+def _summary_priority(item, now):
+    event = item[3]
+    state = event.get("state")
+    start_ts = _iso_to_ts(event.get("start_time"))
+    # Upcoming games nearest kickoff are most useful for starters/injuries;
+    # live games next, then recently completed games for post-game learning.
+    if state == "pre":
+        return (0, abs(start_ts - now) if start_ts else 10**12)
+    if state == "in":
+        return (1, 0)
+    return (2, 0)
+
+
+def _select_summary_candidates(store, candidates, limit, now):
+    """Fair-share scarce box-score requests across selected and other leagues."""
+    limit = max(0, min(10, int(limit)))
+    if limit == 0 or not candidates:
+        return []
+    grouped = {}
+    for item in candidates:
+        grouped.setdefault(item[0], []).append(item)
+    for rows in grouped.values():
+        rows.sort(key=lambda item: _summary_priority(item, now))
+
+    # When manual mode selects known leagues, guarantee first-pass coverage for
+    # each selected league that has an event. Other leagues still rotate through
+    # the remaining budget rather than permanently monopolizing the first slots.
+    selected_to_category = {
+        "KXNFLGAME": "nfl",
+        "KXNCAAFGAME": "college_football",
+        "KXNBAGAME": "nba",
+        "KXMLBGAME": "mlb",
+        "KXNHLGAME": "nhl",
+    }
+    selected_series = {
+        value.strip().upper() for value in os.environ.get("SPORTS_SELECTED", "").split(",")
+        if value.strip()
+    }
+    preferred = []
+    if os.environ.get("SPORTS_MODE", "all").strip().lower() == "manual":
+        preferred = [selected_to_category[s] for s in selected_to_category
+                     if s in selected_series and selected_to_category[s] in grouped]
+    try:
+        cursor = max(0, int(store.get_kv("sports_intel_summary_cursor", 0) or 0))
+    except (TypeError, ValueError):
+        cursor = 0
+    if len(preferred) > limit:
+        offset = cursor % len(preferred)
+        preferred = preferred[offset:] + preferred[:offset]
+    other = sorted(category for category in grouped if category not in preferred)
+    if other:
+        offset = cursor % len(other)
+        other = other[offset:] + other[:offset]
+
+    selected = []
+    first_pass = preferred + other
+    later_pass = other + preferred
+    while len(selected) < limit:
+        before = len(selected)
+        order = first_pass if before == 0 else later_pass
+        for category in order:
+            if grouped.get(category) and len(selected) < limit:
+                selected.append(grouped[category].pop(0))
+        if len(selected) == before:
+            break
+    # Advance at least one category per collection, and proportionally more when
+    # there are spare slots, so the non-selected sports get fair long-run coverage.
+    store.set_kv("sports_intel_summary_cursor", cursor + max(1, limit - min(limit, len(preferred))))
+    return selected
+
+
 def collect(store, force=False, now=None):
     """Collect recent free public sports news and scoreboards into the existing SQLite DB."""
     ensure_schema(store)
@@ -362,7 +433,9 @@ def collect(store, force=False, now=None):
     ttl = max(120, int(os.environ.get("SPORTS_INTEL_TTL_SECONDS", "600")))
     timeout_note = []
     summary = {"ok": True, "news_seen": 0, "scores_seen": 0, "new_items": 0, "sources_ok": 0,
-               "sources_failed": 0, "ts": now, "errors": []}
+               "sources_failed": 0, "summaries_seen": 0, "team_stats_profiles": 0,
+               "player_stats_profiles": 0, "injury_profiles": 0, "lineup_profiles": 0,
+               "football_profiles": 0, "ts": now, "errors": []}
     # Google News RSS gives broad web discovery without an API key. Queries are cached
     # independently and kept deliberately modest for free-tier friendliness.
     for category, terms in SPORT_TERMS.items():
@@ -422,22 +495,12 @@ def collect(store, force=False, now=None):
             log.warning("sports intelligence source %s failed: %s", key, exc)
         store.set_kv("sports_intel_fetch:" + key, now)
 
-    # Fetch detailed live/final box scores for a small bounded sample. Scoreboard
-    # payloads stay lightweight; detailed stats are cached per event and time window.
-    max_summaries = max(0, min(10, int(os.environ.get("SPORTS_INTEL_MAX_BOX_SCORES", "3"))))
-    def summary_priority(item):
-        event = item[3]
-        state = event.get("state")
-        start_ts = _iso_to_ts(event.get("start_time"))
-        # Upcoming games nearest kickoff are most useful for starters/injuries;
-        # live games next, then recently completed games for post-game learning.
-        if state == "pre":
-            return (0, abs(start_ts - now) if start_ts else 10**12)
-        if state == "in":
-            return (1, 0)
-        return (2, 0)
-    summary_candidates.sort(key=summary_priority)
-    for category, sport, league, event in summary_candidates[:max_summaries]:
+    # Fetch a bounded sample of detailed event summaries. Manual league
+    # selections get first-pass coverage; the remaining slots rotate across all
+    # other categories so one busy league cannot monopolize player-data requests.
+    max_summaries = max(0, min(10, int(os.environ.get("SPORTS_INTEL_MAX_BOX_SCORES", "6"))))
+    selected_summaries = _select_summary_candidates(store, summary_candidates, max_summaries, now)
+    for category, sport, league, event in selected_summaries:
         provider_id = event["provider_event_id"]
         key = f"summary:{category}:{provider_id}"
         source_ttl = ttl if category in high_frequency_scoreboards else max(ttl, 3600)
@@ -474,6 +537,12 @@ def collect(store, force=False, now=None):
             }
             if category in ("nfl", "college_football"):
                 payload["football_matchup_profile"] = _football_matchup_profile(event, box, raw, now, category)
+                summary["football_profiles"] += 1
+            summary["summaries_seen"] += 1
+            summary["team_stats_profiles"] += int(bool(payload["team_stats"]))
+            summary["player_stats_profiles"] += int(bool(payload["player_stats"]))
+            summary["injury_profiles"] += int(bool(payload["injuries"]))
+            summary["lineup_profiles"] += int(bool(payload["lineups"] or payload["rosters"] or payload["depth_charts"]))
             summary["new_items"] += _record_items(store, [payload])
             _source_status(store, key, {"ok": True, "ts": now, "count": 1})
             summary["sources_ok"] += 1
