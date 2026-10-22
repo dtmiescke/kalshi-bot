@@ -1,0 +1,45 @@
+name: clear-hard-stop
+
+# The bot sets a HARD STOP when it can't tell if a real (demo/live) order went
+# through. Run this ONLY after checking your Kalshi account: positions and open
+# orders must match the bot's trades list.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type YES after checking your Kalshi positions match the bot"
+        required: true
+
+concurrency:
+  group: kalshi-bot
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  clear:
+    if: ${{ inputs.confirm == 'YES' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Load memory
+        run: bash .github/load.sh
+      - name: Clear hard stop
+        run: python -m bot.main clear-pause
+      - name: Save memory
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BOT_MODE: ${{ vars.BOT_MODE || 'paper' }}
+          LIVE_TRADING_CONFIRMED: ${{ vars.LIVE_TRADING_CONFIRMED || 'no' }}
+          BANKROLL: ${{ vars.BANKROLL || '1000' }}
+          DAILY_LOSS_LIMIT: ${{ vars.DAILY_LOSS_LIMIT || '30' }}
+          BOT_TIMEZONE: ${{ vars.BOT_TIMEZONE || 'America/Chicago' }}
+        run: bash .github/save.sh
