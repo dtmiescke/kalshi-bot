@@ -260,6 +260,15 @@ def train(store, min_windows=300, fee_rate=0.07):
 
     champ = load_meta()
     champ_path = os.path.join(MODEL_DIR, "crypto_model.joblib")
+    if os.path.exists(champ_path):
+        try:
+            champion_bundle = joblib.load(champ_path)
+            if isinstance(champion_bundle.get("meta"), dict):
+                # New model bundles carry authoritative matching metadata.
+                champ = champion_bundle["meta"]
+        except Exception as exc:
+            # Keep the champion marked present; later evaluation must fail closed.
+            log.error("Existing champion artifact cannot be read: %s", exc)
     champion_present = bool(champ) or os.path.exists(champ_path)
     test_groups, test_ts = groups[te], ts[te]
     if champion_present:
