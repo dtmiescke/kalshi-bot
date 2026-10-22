@@ -209,6 +209,101 @@ class TestRunnerExecution(unittest.TestCase):
         del os.environ["BOT_DB"]
         self.d.cleanup()
 
+    def test_live_crypto_intel_includes_kalshi_aggressor_flow(self):
+        ticker = "KXBTC15M-E-00"
+        trades = []
+        for i in range(4):
+            trades.append({"trade_id": f"yes-{i}", "ticker": ticker,
+                           "ts": int(self.now - 30 + i), "count": 100,
+                           "yes_price": 0.60 + i * 0.01, "taker_side": "yes"})
+        trades.append({"trade_id": "no-1", "ticker": ticker, "ts": int(self.now - 20),
+                       "count": 5, "yes_price": 0.59, "taker_side": "no"})
+        self.store.add_flow_trades(trades)
+        reading = self.r.kalshi_flow_reading(ticker, 0.60, self.now)
+        self.assertIsNotNone(reading)
+        self.assertEqual(reading.name, "trade_flow")
+        self.assertGreater(reading.prob, 0.60)
+        self.assertGreater(reading.detail["imbalance"], 0)
+
+    def test_maker_terminal_execution_without_fill_count_assumes_full_fill(self):
+        self.assertEqual(self.r._maker_order_state({"status": "executed"}, 7), (7, "executed", True))
+
+    def test_maker_missing_fill_count_on_open_order_is_not_terminal(self):
+        self.assertEqual(self.r._maker_order_state({"status": "resting"}, 7), (0, "resting", False))
+
+    def test_maker_malformed_fill_count_is_not_zero_fill_confirmation(self):
+        self.assertEqual(self.r._maker_order_state({"status": "resting", "fill_count_fp": "bad"}, 7),
+                         (0, "resting", False))
+
+    def test_ambiguous_maker_submission_sets_durable_pause(self):
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        from bot import guard
+        ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
+        fake_trade = SimpleNamespace(place_resting_buy=lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError("response lost")))
+        with patch.object(self.s, "mode", "live"), patch.object(self.r.engine, "trade", fake_trade):
+            self.r.start_maker(ticker, {"ticker": ticker}, plan[1], readings, 0.6, 0.8)
+        incident = self.store.get_kv("execution_reconciliation_required")
+        self.assertIn("outcome unknown", incident)
+        allowed, reason = guard.status(self.store, self.s.bankroll, mode="live")
+        self.assertFalse(allowed)
+        self.assertIn("reconcile exchange orders", reason)
+        self.assertEqual(self.store.get_kv("maker_recovery")["state"], "submitting")
+
+    def test_prior_run_maker_intent_pauses_live_runner_on_restart(self):
+        from bot.live.runner import LiveRunner
+        self.store.set_kv("maker_recovery", {"state": "active", "ticker": "KXBTC15M-E-00",
+                                             "order_id": "unknown", "contracts": 3})
+        self.s.mode = "live"
+        restarted = LiveRunner(self.s, self.store, rest=self.r.rest, llm=None,
+                               dvol_fetch=lambda c: 45.0, seed=False, with_context=False)
+        self.assertIn("prior run", self.store.get_kv("execution_reconciliation_required"))
+        self.assertFalse(restarted.betting_ok)  # no new order can be placed before reconciliation
+
+    def test_second_live_maker_is_blocked_while_recovery_slot_is_occupied(self):
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
+        calls = []
+        fake_trade = SimpleNamespace(place_resting_buy=lambda *args, **kwargs: calls.append(args) or {"order_id": "NEW"})
+        self.r.makers["EXISTING-ORDER"] = {"order_id": "OLD"}
+        with patch.object(self.s, "mode", "live"), patch.object(self.r.engine, "trade", fake_trade):
+            self.r.start_maker(ticker, {"ticker": ticker}, plan[1], readings, 0.6, 0.8)
+        self.assertEqual(calls, [])
+        self.assertNotIn(ticker, self.r.makers)
+        self.assertTrue(any("another resting order" in s for s in self.r.summary["skipped"]))
+
+    def test_live_maker_without_order_id_fails_closed(self):
+        from unittest.mock import patch
+        ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
+        from types import SimpleNamespace
+        fake_trade = SimpleNamespace(place_resting_buy=lambda *args, **kwargs: {})
+        with patch.object(self.s, "mode", "live"), patch.object(self.r.engine, "trade", fake_trade):
+            self.r.start_maker(ticker, {"ticker": ticker}, plan[1], readings, 0.6, 0.8)
+        self.assertNotIn(ticker, self.r.makers)
+        self.assertFalse(self.r.betting_ok)
+        self.assertIn("maker order ID missing", self.r.betting_why)
+
+    def test_pending_maker_reserves_budget_against_new_candidate(self):
+        ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
+        other = "KXETH15M-TEST"
+        self.r.makers[other] = {"order_id": "pending", "placed": self.now,
+                                "plan": {"contracts": 10, "limit": 0.5}}
+        self.r.finish(ticker, readings, ctx, plan, {"decision": "approve", "by": "numbers"})
+        self.assertEqual(self.store.open_bets(), [])
+        self.assertEqual(self.r.summary["bets"], 0)
+        self.assertIn("recheck: pending maker reserves risk budget", self.r.summary["skipped"])
+
+    def test_stale_kalshi_book_blocks_post_council_execution(self):
+        ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
+        # Simulate a feed gap after the initial shortlist/council review.
+        self.r.books[ticker].needs_resync = True
+        self.r.books[ticker].last_update = 0.0
+        self.r.finish(ticker, readings, ctx, plan, {"decision": "approve", "by": "numbers"})
+        self.assertEqual(self.store.open_bets(), [])
+        self.assertEqual(self.r.summary["bets"], 0)
+        self.assertIn("recheck: data stale", self.r.summary["skipped"])
+
     def test_maker_rests_then_fills(self):
         ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
         self.assertEqual(plan[1]["style"], "maker")
@@ -264,6 +359,11 @@ class TestHistory(unittest.TestCase):
         res = history.evaluate({"KXBTC15M-H": rows}, 0.07)
         self.assertEqual(res["thresholds"][0.05]["bets"], 1)
         self.assertEqual(res["thresholds"][0.05]["win_rate"], 1.0)
+        cost = 0.57 + history.ml.SLIPPAGE
+        fee = history.taker_fee(100, cost, 0.07) / 100
+        self.assertAlmostEqual(
+            res["thresholds"][0.05]["roi"], (1 - cost - fee) / (cost + fee), places=4
+        )
         with tempfile.TemporaryDirectory() as d:
             store = Store(os.path.join(d, "t.db"))
             history.seed_learning(store, {"KXBTC15M-H": rows})

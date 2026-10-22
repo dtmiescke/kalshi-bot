@@ -56,9 +56,23 @@ def consensus(event):
         outcomes = mkt.get("outcomes", [])
         if len(outcomes) < 2:
             continue
-        raw = [american_to_prob(o["price"]) if abs(float(o["price"])) >= 100
-               else decimal_to_prob(o["price"]) for o in outcomes]
-        fair = devig_power(raw)
+        # Third-party odds feeds can contain nulls, malformed prices, or
+        # transient partial markets. Ignore an invalid book rather than letting
+        # one bad outcome crash the entire sports scan or contaminate consensus.
+        try:
+            prices = [float(o["price"]) for o in outcomes]
+            if any(not math.isfinite(p) or p == 0 for p in prices):
+                continue
+            raw = [american_to_prob(p) if abs(p) >= 100
+                   else decimal_to_prob(p) for p in prices]
+            if any(not math.isfinite(p) or p <= 0 or p >= 1 for p in raw):
+                continue
+            fair = devig_power(raw)
+            if len(fair) != len(outcomes) or any(
+                    not math.isfinite(p) or p <= 0 or p >= 1 for p in fair):
+                continue
+        except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
+            continue
         w = BOOK_WEIGHTS.get(book.get("key"), 1.0)
         for o, p in zip(outcomes, fair):
             per_team.setdefault(o["name"], []).append((p, w))

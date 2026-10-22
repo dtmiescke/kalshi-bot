@@ -1,7 +1,9 @@
 """One research-and-trade cycle. Safe to run every 5-15 minutes."""
 import json
+import math
 import os
 import logging
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -22,6 +24,10 @@ from .signals import market_signals as ms
 from .signals import schedule as sched
 
 log = logging.getLogger("bot")
+
+
+# Serialize final risk recheck, order placement, and ledger update across async reviewers.
+_EXECUTION_LOCK = threading.RLock()
 
 
 def _series_sport(series, metadata=None):
@@ -107,6 +113,21 @@ class Engine:
         self.public = ms.load_public_betting()
         self.betting_ok = True
         self._headlines = {}
+
+    def _pause_for_reconciliation(self, reason):
+        """Persist a hard stop when an order outcome may be unknown to the client."""
+        message = f"order outcome requires exchange reconciliation: {reason}"
+        try:
+            self.store.set_kv("execution_reconciliation_required", message)
+        except Exception:
+            log.exception("CRITICAL: failed to persist execution reconciliation pause")
+        self.betting_ok = False
+        log.error(message)
+        try:
+            alerts.send("URGENT: order reconciliation required", message,
+                        priority="urgent", tags=["warning"])
+        except Exception:
+            log.exception("could not send order reconciliation alert")
 
     # --- data collection -------------------------------------------------------
     def refresh_odds(self, sport):
@@ -546,6 +567,7 @@ class Engine:
     def _ladder_row(m, snap):
         t = settlement.contract_terms(m)
         return {"ticker": m["ticker"], "strike": t["strike"], "close_ts": t["close_ts"],
+                "event_ticker": snap.get("event_ticker"), "series": snap.get("series"),
                 "rules_key": f"{t['benchmark']}|{t['avg_seconds']}|{snap['series'][:5]}",
                 "yes_bid": snap.get("yes_bid"), "yes_ask": snap.get("yes_ask")}
 
@@ -648,8 +670,79 @@ class Engine:
                 continue
             self.execute_ladder(a, now, summary)
 
+    def _arbitrage_budget(self, event_ticker):
+        """Combined two-leg budget respecting global caps and current account mode."""
+        acct = self.store.account(self.s.bankroll, mode=self.s.mode)
+        if acct["open_positions"] + 2 > self.s.max_open_positions:
+            return 0.0
+        left_day = self.s.max_per_day - self.store.staked_since(
+            risk.day_start_ts(), mode=self.s.mode
+        )
+        left_game = self.s.max_per_game - self.store.staked_on_event(
+            event_ticker, mode=self.s.mode
+        )
+        left_open = self.s.max_open_cost - acct["open_cost"] - 0.05
+        left_cash = acct["cash"] - 0.05
+        total_cap = min(2 * self.s.max_per_bet, left_day, left_game, left_open, left_cash)
+        if not math.isfinite(total_cap) or total_cap <= 0:
+            return 0.0
+        return max(0.0, total_cap / (1 + self.s.taker_fee_rate))
+
+    def _unwind_leg(self, ticker, side, price, order_id, filled,
+                    event_ticker, series, team=None):
+        """Unwind a partially built arbitrage and ledger any residual exposure."""
+        if filled <= 0:
+            return 0
+        unwound = 0
+        failure = None
+        try:
+            book = self.data.orderbook(ticker)
+            bid = risk.bid_for(book, side)
+            if not bid:
+                raise RuntimeError("no bid available to unwind")
+            close = self.trade.place_limit_sell(ticker, side, filled, bid)
+            unwound = int(num(close, "fill_count") or num(close, "taker_fill_count") or 0)
+            if unwound < filled:
+                failure = f"unwind only filled {unwound}/{filled}"
+        except Exception as exc:
+            failure = str(exc)
+            self._pause_for_reconciliation(
+                f"sell/unwind submission or confirmation uncertain for {ticker}: {exc}"
+            )
+        residual = max(0, filled - unwound)
+        if residual:
+            # Do not leave a partial fill invisible to account exposure/risk checks.
+            try:
+                self.store.add_bet({
+                    "ts": int(time.time()), "mode": self.s.mode, "ticker": ticker,
+                    "event_ticker": event_ticker or ticker, "series": series or "ARB",
+                    "team": team, "side": side, "price": price, "contracts": residual,
+                    "stake": round(residual * price, 2),
+                    "fee": risk.taker_fee(residual, price, self.s.taker_fee_rate),
+                    "model_prob": None, "edge": None, "confidence": 1.0,
+                    "signals": {"arbitrage": {"unwind_residual": True,
+                                              "original_order_id": order_id,
+                                              "filled_before_unwind": filled,
+                                              "unwound": unwound,
+                                              "failure": failure}},
+                    "order_id": order_id, "style": "taker",
+                })
+            except Exception as ledger_error:
+                failure = f"{failure or 'unwind incomplete'}; residual ledger failed: {ledger_error}"
+            message = (f"{ticker}: {residual} contract(s) remain after arbitrage unwind "
+                       f"(original order {order_id}). {failure or ''} Check position manually.")
+            log.error(message)
+            alerts.send("URGENT: arbitrage unwind incomplete", message,
+                        priority="urgent", tags=["warning"])
+        return residual
+
     def execute_ladder(self, a, now, summary):
-        """Re-check both books, then buy YES(low) + NO(high) in equal size."""
+        """Serialize arbitrage execution with every other order path."""
+        with _EXECUTION_LOCK:
+            return self._execute_ladder_locked(a, now, summary)
+
+    def _execute_ladder_locked(self, a, now, summary):
+        """Re-check both books and global risk caps, then buy YES(low) + NO(high)."""
         try:
             b_low, b_high = self.data.orderbook(a["low"]), self.data.orderbook(a["high"])
         except Exception:
@@ -659,78 +752,122 @@ class Engine:
         if not yes_low or not no_high:
             return
         (pl, ql), (ph, qh) = yes_low[0], no_high[0]
-        left_day = self.s.max_per_day - self.store.staked_since(risk.day_start_ts())
-        n = int(min(ql, qh, min(self.s.max_per_game, left_day) // (pl + ph)))
+        event_ticker = a.get("event_ticker") or a["low"]
+        budget = self._arbitrage_budget(event_ticker)
+        per_leg_cap = int(self.s.max_per_bet // max(pl, ph)) if max(pl, ph) > 0 else 0
+        n = int(min(ql, qh, per_leg_cap, budget // (pl + ph))) if budget > 0 else 0
         fees = risk.taker_fee(n, pl, self.s.taker_fee_rate) + risk.taker_fee(n, ph, self.s.taker_fee_rate)
         if n < 1 or n * (1 - pl - ph) - fees <= 0:
             return
-        placed = []   # place BOTH legs first; record only a complete arbitrage
+        allowed, reason = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
+        if not allowed:
+            log.warning("ladder arbitrage blocked at execution boundary: %s", reason)
+            return
+        placed = []   # track each leg's actual fills before checking completeness
         for ticker, side, px in ((a["low"], "yes", pl), (a["high"], "no", ph)):
             oid = f"paper-ladder-{uuid.uuid4().hex[:8]}"
+            filled = n
             if self.s.mode in ("demo", "live"):
                 try:
                     o = self.trade.place_limit_buy(ticker, side, n, px)
                     oid = o.get("order_id", "")
-                    if int(num(o, "fill_count") or num(o, "taker_fill_count") or 0) < n:
-                        raise RuntimeError("leg not fully filled")
+                    filled = int(num(o, "fill_count") or num(o, "taker_fill_count") or 0)
+                    placed.append((ticker, side, px, oid, filled))
+                    if filled < n:
+                        raise RuntimeError(f"leg only filled {filled}/{n} contracts")
                 except Exception as e:
+                    self._pause_for_reconciliation(
+                        f"ladder order outcome uncertain for {ticker}: {e}"
+                    )
                     log.error("LADDER LEG FAILED %s: %s", ticker, e)
-                    for t, sd, _, _ in placed:          # sell back what did fill
-                        try:
-                            bid = risk.bid_for(self.data.orderbook(t), sd)
-                            if bid:
-                                self.trade.place_limit_sell(t, sd, n, bid)
-                        except Exception as e2:
-                            log.error("UNWIND FAILED %s: %s", t, e2)
-                            alerts.send("Unwind failed", f"{t}: check manually", priority="urgent")
+                    for t, sd, px, original_order_id, qty in placed:
+                        self._unwind_leg(
+                            t, sd, px, original_order_id, qty, event_ticker,
+                            a.get("series") or "ARB"
+                        )
                     return
-            placed.append((ticker, side, px, oid))
-        for ticker, side, px, oid in placed:
+            else:
+                placed.append((ticker, side, px, oid, filled))
+        for ticker, side, px, oid, filled in placed:
+            if filled != n:
+                log.error("LADDER incomplete fill unexpectedly reached ledger: %s %s/%s",
+                          ticker, filled, n)
+                return
             self.store.add_bet({
-                "ts": now, "mode": self.s.mode, "ticker": ticker, "event_ticker": ticker,
-                "series": "ARB", "team": None, "side": side, "price": px, "contracts": n,
-                "stake": round(n * px, 2), "fee": risk.taker_fee(n, px, self.s.taker_fee_rate),
+                "ts": now, "mode": self.s.mode, "ticker": ticker, "event_ticker": event_ticker,
+                "series": a.get("series") or "ARB", "team": None, "side": side, "price": px, "contracts": filled,
+                "stake": round(filled * px, 2), "fee": risk.taker_fee(filled, px, self.s.taker_fee_rate),
                 "model_prob": None, "edge": None, "confidence": 1.0,
                 "signals": {"arbitrage": {"pair": [a["low"], a["high"]],
-                                          "locked": round(n * (1 - pl - ph) - fees, 2)}},
+                                          "locked": round(filled * (1 - pl - ph) - fees, 2)}},
                 "order_id": oid, "style": "taker"})
         summary["bets"] += 2
 
     def try_arb(self, ev, markets, summary, now):
+        """Serialize sports arbitrage with other order paths."""
+        with _EXECUTION_LOCK:
+            return self._try_arb_locked(ev, markets, summary, now)
+
+    def _try_arb_locked(self, ev, markets, summary, now):
         """Buy YES on both teams when together they cost < $1 after fees."""
-        if self.store.has_open_event_bet(ev["event_ticker"]):
+        if self.store.has_open_event_bet(ev["event_ticker"], mode=self.s.mode):
             return False
         try:
             books = [self.data.orderbook(m["ticker"]) for m in markets]
         except Exception:
             return False
-        left_day = self.s.max_per_day - self.store.staked_since(risk.day_start_ts())
+        budget = self._arbitrage_budget(ev["event_ticker"])
         plan = guard.arb_plan(ev["series_ticker"], books[0], books[1],
-                              self.s.taker_fee_rate, min(self.s.max_per_game, left_day))
+                              self.s.taker_fee_rate, budget)
         if not plan:
+            return False
+        # Each leg is an individual bet and must independently respect MAX_PER_BET.
+        per_leg_cap = int(self.s.max_per_bet // max(plan["price_a"], plan["price_b"]))
+        if plan["contracts"] > per_leg_cap:
+            plan = guard.arb_plan(
+                ev["series_ticker"], books[0], books[1], self.s.taker_fee_rate,
+                per_leg_cap * (plan["price_a"] + plan["price_b"])
+            )
+        if not plan:
+            return False
+        allowed, reason = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
+        if not allowed:
+            log.warning("sports arbitrage blocked at execution boundary: %s", reason)
             return False
         legs = [(markets[0], plan["price_a"]), (markets[1], plan["price_b"])]
         order_ids = []
         for m, px in legs:
             oid = f"paper-arb-{uuid.uuid4().hex[:8]}"
+            filled = plan["contracts"]
             if self.s.mode in ("demo", "live"):
                 try:
                     o = self.trade.place_limit_buy(m["ticker"], "yes", plan["contracts"], px)
                     oid = o.get("order_id", "")
-                    if int(num(o, "fill_count") or num(o, "taker_fill_count") or 0) < plan["contracts"]:
-                        raise RuntimeError("leg not fully filled")
+                    filled = int(num(o, "fill_count") or num(o, "taker_fill_count") or 0)
+                    order_ids.append((m, px, oid, filled))
+                    if filled < plan["contracts"]:
+                        raise RuntimeError(f"leg only filled {filled}/{plan['contracts']} contracts")
                 except Exception as e:
+                    self._pause_for_reconciliation(
+                        f"sports arbitrage order outcome uncertain for {m['ticker']}: {e}"
+                    )
                     log.error("ARB LEG FAILED %s: %s", m["ticker"], e)
-                    self.unwind(order_ids, plan["contracts"])
+                    self.unwind(order_ids, plan["contracts"],
+                                event_ticker=ev["event_ticker"], series=ev["series_ticker"])
                     return False
-            order_ids.append((m, px, oid))
-        for m, px, oid in order_ids:
-            fee = risk.taker_fee(plan["contracts"], px, self.s.taker_fee_rate)
+            else:
+                order_ids.append((m, px, oid, filled))
+        for m, px, oid, filled in order_ids:
+            if filled != plan["contracts"]:
+                log.error("ARB incomplete fill unexpectedly reached ledger: %s %s/%s",
+                          m["ticker"], filled, plan["contracts"])
+                return False
+            fee = risk.taker_fee(filled, px, self.s.taker_fee_rate)
             self.store.add_bet({
                 "ts": now, "mode": self.s.mode, "ticker": m["ticker"],
                 "event_ticker": ev["event_ticker"], "series": ev["series_ticker"],
                 "team": m.get("yes_sub_title"), "side": "yes", "price": px,
-                "contracts": plan["contracts"], "stake": round(plan["contracts"] * px, 2),
+                "contracts": filled, "stake": round(filled * px, 2),
                 "fee": fee, "model_prob": None, "edge": None, "confidence": 1.0,
                 "signals": {"arbitrage": {"locked_profit": plan["locked_profit"]}},
                 "order_id": oid})
@@ -740,19 +877,14 @@ class Engine:
         log.info("ARB %s locked $%.2f", ev["event_ticker"], plan["locked_profit"])
         return True
 
-    def unwind(self, legs, contracts):
-        """A half-built arbitrage is just an unhedged bet. Sell back any leg that
-        already filled, immediately, at whatever the market bids."""
-        for m, px, _ in legs:
-            try:
-                book = self.data.orderbook(m["ticker"])
-                bid = risk.bid_for(book, "yes")
-                if bid:
-                    self.trade.place_limit_sell(m["ticker"], "yes", contracts, bid)
-                    log.warning("unwound arb leg %s at $%.2f", m["ticker"], bid)
-            except Exception as e:
-                log.error("UNWIND FAILED %s: %s — check this position manually", m["ticker"], e)
-                alerts.send("Unwind failed", f"{m['ticker']}: check manually", priority="urgent")
+    def unwind(self, legs, contracts, event_ticker=None, series=None):
+        """Sell back actual filled quantities and ledger any residual exposure."""
+        for m, px, order_id, filled in legs:
+            self._unwind_leg(
+                m["ticker"], "yes", px, order_id, filled,
+                event_ticker or m.get("event_ticker") or m["ticker"],
+                series or m.get("series") or "ARB", team=m.get("yes_sub_title")
+            )
 
     def _skip(self, summary, reason):
         # group by the reason's wording, without the numbers
@@ -808,20 +940,67 @@ class Engine:
             self._record_decision(snap, readings, "rejected", why, prob, conf)
             self._skip(summary, why)
             return None
+        # Preserve any strategy-specific limits so the final execution-boundary
+        # recheck cannot accidentally loosen a stricter caller's budget.
+        plan["execution_min_edge"] = float(min_edge if min_edge is not None else self.s.min_edge)
+        plan["execution_max_per_bet"] = float(
+            max_per_bet if max_per_bet is not None else self.s.max_per_bet
+        )
         self._record_decision(snap, readings, "candidate", "passed deterministic risk checks",
                               prob, conf, side=plan["side"], market_price=plan["price"], edge=plan["edge"])
         return snap, plan, readings, prob, conf
     def place(self, snap, plan, readings, prob, conf, summary, now, executed=None):
+        """Serialize execution so concurrent reviewers cannot spend the same risk budget."""
+        with _EXECUTION_LOCK:
+            return self._place_locked(snap, plan, readings, prob, conf, summary, now, executed)
+
+    def _place_locked(self, snap, plan, readings, prob, conf, summary, now, executed=None):
         """Send (or simulate) the order and record the bet. `executed` = an order
         the live runner already filled as a resting maker order."""
+        if not executed:
+            # Recheck the hard circuit breakers at the final execution boundary,
+            # not only at the start of a long scan. Already-filled orders must
+            # still be recorded even if a breaker trips afterward.
+            allowed, reason = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
+            if not allowed:
+                self._skip(summary, f"execution guard: {reason}")
+                log.warning("order blocked at execution boundary: %s", reason)
+                return
+            # Rebuild the plan against the latest book and latest account exposure.
+            # The lock makes the risk check + ledger update atomic among async reviewers.
+            try:
+                fresh_book = self.data.orderbook(snap["ticker"])
+            except Exception as exc:
+                self._skip(summary, f"execution recheck: orderbook unavailable ({exc})")
+                log.warning("execution recheck failed for %s: %s", snap["ticker"], exc)
+                return
+            is_crypto = str(snap.get("series", "")).endswith("15M")
+            fresh_plan, why = risk.decide(
+                self.s, self.store, snap, prob, conf, fresh_book,
+                min_edge=plan.get(
+                    "execution_min_edge",
+                    self.s.crypto_min_edge if is_crypto else self.s.min_edge
+                ),
+                max_per_bet=plan.get(
+                    "execution_max_per_bet",
+                    self.s.crypto_max_per_bet if is_crypto else self.s.max_per_bet
+                ),
+                maker=False,
+            )
+            if not fresh_plan:
+                self._skip(summary, f"execution recheck: {why}")
+                log.info("execution recheck blocked %s: %s", snap["ticker"], why)
+                return
+            plan = fresh_plan
         order_id = f"paper-{uuid.uuid4().hex[:10]}"
         if executed:
             order_id = executed.get("order_id", order_id)
             plan["contracts"] = executed.get("contracts", plan["contracts"])
-            # Resting maker fills use the maker fee schedule, and only the
-            # contracts actually filled belong in the ledger.
-            plan["fee"] = risk.taker_fee(0, plan["price"], self.s.taker_fee_rate) + \
-                risk.taker_fee(plan["contracts"], plan["price"], self.s.maker_fee_rate)
+            # Ledger only the filled quantity. A partial maker fill must not
+            # retain the original full-order stake.
+            plan["stake"] = round(plan["contracts"] * plan["price"], 2)
+            # Resting maker fills use the maker fee schedule.
+            plan["fee"] = risk.taker_fee(plan["contracts"], plan["price"], self.s.maker_fee_rate)
         elif self.s.mode in ("demo", "live"):
             try:
                 order = self.trade.place_limit_buy(snap["ticker"], plan["side"],
@@ -847,6 +1026,9 @@ class Engine:
                     + risk.taker_fee(maker_filled, plan["price"], self.s.maker_fee_rate)
                 )
             except Exception as e:
+                self._pause_for_reconciliation(
+                    f"single-order submission or fill confirmation uncertain for {snap['ticker']}: {e}"
+                )
                 log.error("order failed %s: %s", snap["ticker"], e)
                 return
 

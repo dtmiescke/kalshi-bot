@@ -11,18 +11,21 @@
    - per-league: a league with a proven negative edge stops being bet
    Research and learning keep running while betting is paused.
 """
+import math
 import os
 import time
 
 from .risk import asks_from_book, taker_fee
 
-# leagues where a game can end tied (both "team wins" markets lose): no arb
-TIE_POSSIBLE = {"KXNFLGAME"}
+# Only these series have been explicitly allowlisted for two-team locked-profit
+# arbitrage. Unknown/future sports fail closed until their settlement rules are checked.
+# Soccer and other draw-capable events must never be treated as a two-outcome market.
+ARB_NO_TIE = {"KXNBAGAME", "KXMLBGAME", "KXNHLGAME", "KXNCAABGAME", "KXNCAAFGAME"}
 
 
 def arb_plan(series, book_a, book_b, fee_rate, max_dollars, min_profit_per=0.01):
     """Return a two-leg plan if YES(A)+YES(B) < $1 after fees, else None."""
-    if series in TIE_POSSIBLE:
+    if series not in ARB_NO_TIE:
         return None
     a = asks_from_book(book_a)["yes"]
     b = asks_from_book(book_b)["yes"]
@@ -43,7 +46,13 @@ def arb_plan(series, book_a, book_b, fee_rate, max_dollars, min_profit_per=0.01)
 
 
 def drawdown_tripped(store, bankroll, mode=None):
-    pct = float(os.environ.get("MAX_DRAWDOWN", 10))
+    try:
+        pct = float(os.environ.get("MAX_DRAWDOWN", 10))
+    except (TypeError, ValueError):
+        # Invalid circuit-breaker configuration must pause betting, not disable it.
+        return True
+    if not math.isfinite(pct) or pct <= 0 or pct > 100:
+        return True
     limit = (pct / 100 if pct > 1 else pct) * bankroll
     since = int(time.time()) - 7 * 86400
     r = store.q("""SELECT COALESCE(SUM(pnl),0) p FROM bets
@@ -87,9 +96,20 @@ def league_benched(store, series, n=40, mode=None):
 def status(store, bankroll, daily_loss_limit=None, mode=None):
     """(betting_allowed, reason)."""
     from .risk import day_start_ts
-    limit = daily_loss_limit if daily_loss_limit is not None else \
-        float(os.environ.get("DAILY_LOSS_LIMIT", 30))
+    try:
+        limit = (float(daily_loss_limit) if daily_loss_limit is not None
+                 else float(os.environ.get("DAILY_LOSS_LIMIT", 30)))
+    except (TypeError, ValueError):
+        return False, "invalid daily loss limit configuration; betting paused"
+    if not math.isfinite(limit) or limit < 0:
+        return False, "invalid daily loss limit configuration; betting paused"
     mode = mode or os.environ.get("BOT_MODE", "paper")
+    # Durable circuit breaker: an interrupted order submission or maker
+    # reconciliation survives process restarts. Clear only after manually
+    # reconciling the exchange's orders and positions against the local ledger.
+    incident = store.get_kv("execution_reconciliation_required")
+    if incident:
+        return False, str(incident)
     lost = store.realized_today(day_start_ts(), mode=mode)
     if lost <= -limit:
         return False, f"daily loss limit hit (${-lost:.2f} lost today; resets at midnight in {os.environ.get('BOT_TIMEZONE', 'America/Chicago')})"
@@ -131,6 +151,8 @@ def ladder_arbs(markets, fee_rate, min_profit_per=0.01):
                 profit = 1 - cost - fees
                 if profit >= min_profit_per:
                     found.append({"low": low["ticker"], "high": high["ticker"],
+                                  "event_ticker": low.get("event_ticker"),
+                                  "series": low.get("series"),
                                   "yes_low": yes_low, "no_high": round(no_high, 4),
                                   "profit_per": round(profit, 4)})
     return sorted(found, key=lambda x: -x["profit_per"])

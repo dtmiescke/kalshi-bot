@@ -11,8 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       days:
-        description: "Days of history to download"
+        description: "Days of history to download (1-90)"
         default: "14"
+        required: true
 
 concurrency:
   group: kalshi-bot
@@ -36,6 +37,7 @@ jobs:
         run: bash .github/load.sh
       - name: Download history + train
         env:
+          DAYS: ${{ github.event.inputs.days || '7' }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           ML_MIN_WINDOWS: ${{ vars.ML_MIN_WINDOWS || '300' }}
           ML_MIN_TEST_WINDOWS: ${{ vars.ML_MIN_TEST_WINDOWS || '100' }}
@@ -44,7 +46,14 @@ jobs:
           KALSHI_DATA_KEY_ID: ${{ secrets.KALSHI_DATA_KEY_ID }}
           KALSHI_DATA_PRIVATE_KEY: ${{ secrets.KALSHI_DATA_PRIVATE_KEY }}
         run: |
-          python -m bot.main history ${{ github.event.inputs.days || '7' }}
+          case "$DAYS" in
+            ''|*[!0-9]*) echo "ERROR: DAYS must be a whole number from 1 to 90." >&2; exit 2 ;;
+          esac
+          if [ "$DAYS" -lt 1 ] || [ "$DAYS" -gt 90 ]; then
+            echo "ERROR: DAYS must be between 1 and 90." >&2
+            exit 2
+          fi
+          python -m bot.main history "$DAYS"
           python -m bot.main train
       - name: Save memory
         if: always()

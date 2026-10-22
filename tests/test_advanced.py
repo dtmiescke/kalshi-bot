@@ -60,6 +60,38 @@ class TestVol(unittest.TestCase):
 
 
 class TestModel(unittest.TestCase):
+    def test_shared_roi_accounting_includes_fees(self):
+        from bot.metrics import binary_contract_roi, net_roi
+        self.assertAlmostEqual(net_roi(0.50, 1.10), 0.50 / 1.10)
+        self.assertIsNone(net_roi(1.0, 0.0))
+        pnl, capital, roi = binary_contract_roi([
+            {"won": True, "cost": 0.505, "fee": 0.02},
+            {"won": False, "cost": 0.40, "fee": 0.02},
+        ])
+        self.assertAlmostEqual(pnl, (1 - 0.505 - 0.02) + (-0.40 - 0.02))
+        self.assertAlmostEqual(capital, 0.505 + 0.02 + 0.40 + 0.02)
+        self.assertAlmostEqual(roi, pnl / capital)
+
+    def test_simulated_single_contract_fee_rounds_up_to_cent(self):
+        # Live risk.taker_fee rounds each order's fee up to a cent. The
+        # simulator must not use fractional cents that inflate backtest ROI.
+        self.assertEqual(risk.taker_fee(1, 0.505, 0.07), 0.02)
+
+        import numpy as np
+        cols = ["kalshi_logit", "kalshi_spread"]
+        X = np.array([[0.0, 0.0]])
+        # With a 50% market and 50.5c simulated entry, a 60% model probability
+        # has 7.5c gross edge; fee must be the live-compatible 2c.
+        out = ml.sim_trades(
+            np.array([0.60]), X, cols, np.array([1]), np.array(["window"]),
+            fee_rate=0.07, thresholds=(0.03,)
+        )
+        self.assertEqual(out[0.03]["trades"], 1)
+        # ROI uses total capital committed (premium + fee), not premium alone.
+        self.assertAlmostEqual(
+            out[0.03]["roi"], (1 - 0.505 - 0.02) / (0.505 + 0.02), places=4
+        )
+
     def test_train_promote_predict(self):
         with tempfile.TemporaryDirectory() as d:
             os.environ["MODEL_DIR"] = os.path.join(d, "models")
@@ -97,6 +129,18 @@ class TestModel(unittest.TestCase):
 
 
 class TestExecution(unittest.TestCase):
+    def test_uncertain_order_outcome_persists_reconciliation_pause(self):
+        from bot.engine import Engine
+        with tempfile.TemporaryDirectory() as d:
+            store = Store(os.path.join(d, "t.db"))
+            engine = Engine(Settings(), store, data_client=object(), odds_client=object(),
+                            price_feed=lambda *a, **k: [], spot_feed=lambda *a, **k: None,
+                            schedule_fetch=lambda *a, **k: [])
+            engine._pause_for_reconciliation("test exchange timeout")
+            self.assertIn("test exchange timeout",
+                          store.get_kv("execution_reconciliation_required"))
+            self.assertFalse(engine.betting_ok)
+
     def setUp(self):
         self.d = tempfile.TemporaryDirectory()
         self.st = Store(os.path.join(self.d.name, "t.db"))
@@ -187,6 +231,59 @@ class TestMarketData(unittest.TestCase):
             self.assertEqual(c["fear_greed"], 72)
             self.assertAlmostEqual(c["coinbase_premium"], 0.005)
 
+
+
+
+class TestChampionArtifactSafety(unittest.TestCase):
+    def test_champion_metadata_is_embedded_and_atomically_promoted(self):
+        from unittest.mock import patch
+        import json
+        import joblib
+
+        with tempfile.TemporaryDirectory() as d:
+            meta = {"feature_version": features.FEATURE_VERSION, "trained": 123}
+            bundle = {"model": "candidate", "iso": "calibrator", "cols": ["kalshi_logit"],
+                      "meta": meta}
+            with patch.object(ml, "MODEL_DIR", d):
+                ml._promote_champion(bundle, meta, joblib)
+                active = joblib.load(os.path.join(d, "crypto_model.joblib"))
+                with open(os.path.join(d, "crypto_model.json"), encoding="utf-8") as f:
+                    sidecar = json.load(f)
+                self.assertEqual(active["meta"], meta)
+                self.assertEqual(sidecar, meta)
+
+    def test_interrupted_sidecar_write_keeps_model_metadata_consistent(self):
+        from unittest.mock import patch
+        import joblib
+
+        with tempfile.TemporaryDirectory() as d:
+            old_meta = {"feature_version": features.FEATURE_VERSION, "trained": 1}
+            old_bundle = {"model": "old", "iso": "old-calibrator", "cols": ["kalshi_logit"],
+                          "meta": old_meta}
+            with patch.object(ml, "MODEL_DIR", d):
+                ml._promote_champion(old_bundle, old_meta, joblib)
+            new_meta = {"feature_version": features.FEATURE_VERSION, "trained": 2}
+            new_bundle = {"model": "new", "iso": "new-calibrator", "cols": ["kalshi_logit"],
+                          "meta": new_meta}
+            real_replace = os.replace
+            calls = {"n": 0}
+
+            def fail_second_replace(src, dst):
+                calls["n"] += 1
+                if calls["n"] == 2:
+                    raise OSError("simulated interruption before metadata sidecar commit")
+                return real_replace(src, dst)
+
+            with patch.object(ml, "MODEL_DIR", d), patch.object(os, "replace", side_effect=fail_second_replace):
+                with self.assertRaises(OSError):
+                    ml._promote_champion(new_bundle, new_meta, joblib)
+                active = joblib.load(os.path.join(d, "crypto_model.joblib"))
+                self.assertEqual(active["meta"], new_meta)
+                # The sidecar can lag after a crash, but prediction metadata travels
+                # inside the atomically committed model artifact and stays consistent.
+                self.assertEqual(ml.load_meta(), old_meta)
+                self.assertTrue(any(name.endswith(".joblib") and name.startswith("crypto_model_")
+                                    for name in os.listdir(d)))
 
 if __name__ == "__main__":
     unittest.main()

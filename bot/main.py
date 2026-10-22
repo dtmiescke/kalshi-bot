@@ -44,8 +44,10 @@ def run_scheduled(s, store, data):
       15-minute window is watched continuously, not glimpsed once.
       BURST_MINUTES=0 falls back to one quick snapshot.
     - grading, learning, AI briefing, and model retraining when due."""
-    if s.mode in ("demo", "live"):
-        s.validate()   # refuse real orders without confirmation + keys
+    # Validate all modes before data collection or any execution path. In
+    # demo/live this also enforces confirmation and credentials; in paper it
+    # still prevents invalid risk limits and unsupported execution settings.
+    s.validate()
     # Free-first public sports intelligence collection; data only, never order authority.
     if os.environ.get("SPORTS_INTEL_ENABLED", "yes").lower() in ("yes", "true", "1"):
         try:
@@ -192,6 +194,10 @@ def main(argv=None):
         m = ml.train(store, min_windows=int(os.environ.get("ML_MIN_WINDOWS", 300)),
                      fee_rate=s.taker_fee_rate)
         print(ml.text(m))
+        if m.get("status") == "not enough data":
+            # A green workflow must not imply training succeeded when no model
+            # evaluation was possible.
+            raise SystemExit(2)
         if m.get("promoted"):
             alerts.send("New model promoted", ml.text(m)[:1500], tags=["brain"])
         store.set_kv("last_train", time.time())
@@ -199,6 +205,12 @@ def main(argv=None):
     if cmd == "compact":
         store.compact()
         print("compacted")
+        return
+    if cmd == "clear-pause":
+        # Only after checking Kalshi positions/orders match the bot's ledger.
+        reason = store.get_kv("execution_reconciliation_required")
+        store.set_kv("execution_reconciliation_required", None)
+        print("cleared hard stop:", reason or "(none was set)")
         return
     if cmd == "live":
         from .live.runner import run as run_live

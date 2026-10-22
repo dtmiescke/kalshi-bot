@@ -3,6 +3,7 @@
 Secrets (API keys) are ONLY read from environment variables, never written in code.
 """
 import os
+import math
 from dataclasses import dataclass, field
 
 
@@ -208,3 +209,39 @@ class Settings:
                 "results prove a real edge.")
         if self.mode in ("demo", "live") and not (self.kalshi_key_id and self.kalshi_private_key):
             raise RuntimeError("Demo/live mode needs KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY.")
+
+        # Validate numeric risk settings before any scheduler or execution path
+        # can use them. NaN/inf bypass ordinary comparisons and must be rejected.
+        nonnegative = {
+            "MAX_PER_BET": self.max_per_bet,
+            "MAX_PER_GAME": self.max_per_game,
+            "MAX_PER_DAY": self.max_per_day,
+            "MAX_OPEN_COST": self.max_open_cost,
+            "DAILY_LOSS_LIMIT": self.daily_loss_limit,
+            "CRYPTO_MAX_PER_BET": self.crypto_max_per_bet,
+            "CRYPTO_MAX_PER_WINDOW": self.crypto_max_per_window,
+            "FIXED_BET": self.fixed_bet,
+        }
+        for name, value in nonnegative.items():
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be a finite non-negative dollar amount")
+        if not math.isfinite(self.bankroll) or self.bankroll <= 0:
+            raise ValueError("BANKROLL must be a finite positive dollar amount")
+        if self.max_open_positions < 0:
+            raise ValueError("MAX_OPEN_POSITIONS must be non-negative")
+        if not math.isfinite(self.kelly_fraction) or not 0 <= self.kelly_fraction <= 1:
+            raise ValueError("KELLY_FRACTION must be between 0 and 1")
+        for name, value in (("MIN_EDGE", self.min_edge),
+                            ("CRYPTO_MIN_EDGE", self.crypto_min_edge)):
+            if not math.isfinite(value) or not 0 < value < 1:
+                raise ValueError(f"{name} must be greater than 0 and less than 1")
+        if not math.isfinite(self.min_confidence) or not 0 < self.min_confidence <= 1:
+            raise ValueError("MIN_CONFIDENCE must be greater than 0 and at most 1")
+        for name, value in (("TAKER_FEE_RATE", self.taker_fee_rate),
+                            ("MAKER_FEE_RATE", self.maker_fee_rate)):
+            if not math.isfinite(value) or not 0 < value <= 1:
+                raise ValueError(f"{name} must be greater than 0 and at most 1")
+        if not math.isfinite(self.exit_margin) or not 0 <= self.exit_margin < 1:
+            raise ValueError("EXIT_MARGIN must be between 0 and 1")
+        if self.order_style not in ("maker", "taker"):
+            raise ValueError("ORDER_STYLE must be maker or taker")

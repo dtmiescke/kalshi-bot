@@ -44,11 +44,43 @@ class TestAudit(unittest.TestCase):
         self.assertEqual(live["open_positions"], 1)
         self.assertAlmostEqual(live["open_cost"], 5.2)
         self.assertAlmostEqual(live["cash"], 94.8)
-        self.assertEqual(self.st.staked_since(0, mode="live"), 5.0)
+        self.assertAlmostEqual(self.st.staked_since(0, mode="live"), 5.2)
+        self.assertAlmostEqual(self.st.staked_on_event("LIVE-E", mode="live"), 5.2)
         self.assertEqual(self.st.staked_on_event("PAPER-E", mode="live"), 0)
         self.assertFalse(self.st.has_open_event_bet("PAPER-E", mode="live"))
         self.assertTrue(self.st.has_open_event_bet("PAPER-E", mode="paper"))
         self.assertEqual([row["ticker"] for row in self.st.open_bets(mode="live")], ["LIVE-OPEN"])
+
+    def test_malformed_sportsbook_prices_are_skipped_not_crashing_consensus(self):
+        from bot.odds import consensus
+        event = {"bookmakers": [
+            {"key": "bad", "markets": [{"key": "h2h", "outcomes": [
+                {"name": "A", "price": None}, {"name": "B", "price": -110}]}]},
+            {"key": "good", "markets": [{"key": "h2h", "outcomes": [
+                {"name": "A", "price": -110}, {"name": "B", "price": -110}]}]},
+        ]}
+        result = consensus(event)
+        self.assertAlmostEqual(result["A"][0], 0.5)
+        self.assertAlmostEqual(result["B"][0], 0.5)
+        self.assertEqual(result["A"][1], 1)
+
+    def test_zero_and_nonfinite_sportsbook_prices_are_ignored(self):
+        from bot.odds import consensus
+        for bad_price in (0, float("nan"), float("inf"), "not-a-price"):
+            with self.subTest(price=bad_price):
+                event = {"bookmakers": [{"key": "bad", "markets": [{"key": "h2h", "outcomes": [
+                    {"name": "A", "price": bad_price}, {"name": "B", "price": -110}]}]}]}
+                self.assertEqual(consensus(event), {})
+
+    def test_risk_spend_caps_include_fees(self):
+        bet(self.st, ts=100, mode="paper", ticker="FEE-1",
+            event_ticker="KXBTC15M-26OCT191830", series="KXBTC15M",
+            stake=5.0, fee=0.25)
+        self.assertAlmostEqual(self.st.staked_since(0, mode="paper"), 5.25)
+        self.assertAlmostEqual(self.st.staked_on_event("KXBTC15M-26OCT191830",
+                                                       mode="paper"), 5.25)
+        self.assertAlmostEqual(risk.staked_on_window(self.st, "KXETH15M-26OCT191830",
+                                                     mode="paper"), 5.25)
 
     def test_earned_size_uses_only_selected_account_mode(self):
         paper_id = bet(self.st, mode="paper", ticker="PAPER-LOSS")
@@ -110,13 +142,18 @@ class TestAudit(unittest.TestCase):
         ):
             with self.subTest(final_state=final_state):
                 runner = LiveRunner.__new__(LiveRunner)
-                runner.s = type("SettingsStub", (), {"mode": "demo", "maker_wait_s": 30})()
+                runner.s = type("SettingsStub", (), {
+                    "mode": "demo", "maker_wait_s": 30, "bankroll": 1000.0
+                })()
                 trade = Trade(final_state)
                 recorded, skips, maker_logs = [], [], []
                 runner.engine = type("EngineStub", (), {"trade": trade,
                     "place": lambda _self, *args, **kwargs: recorded.append((args, kwargs))})()
+                kv = {}
                 runner.store = type("StoreStub", (), {
-                    "log_maker": lambda _self, *args: maker_logs.append(args)})()
+                    "log_maker": lambda _self, *args: maker_logs.append(args),
+                    "set_kv": lambda _self, key, value: kv.__setitem__(key, value),
+                })()
                 runner.summary = {"alerts": []}
                 runner.books = {}
                 runner.makers = {"T1": {
@@ -126,7 +163,8 @@ class TestAudit(unittest.TestCase):
                 runner._maker_edge_gone = lambda *args: False
                 runner._side_edge = lambda *args: 0.1
                 runner._skip = lambda why: skips.append(why)
-                runner.check_makers(101)
+                with mock.patch("bot.live.runner.guard.status", return_value=(True, "ok")):
+                    runner.check_makers(101)
                 self.assertEqual(trade.cancel_calls, 1)
                 self.assertEqual(bool(recorded), should_record)
                 if should_record:

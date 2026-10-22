@@ -21,11 +21,15 @@ import json
 import logging
 import math
 import os
+import shutil
+import tempfile
 import time
 
 import numpy as np
 
 from . import features
+from .risk import taker_fee
+from .metrics import binary_contract_roi
 
 log = logging.getLogger("bot")
 MODEL_DIR = os.environ.get("MODEL_DIR", "data/models")
@@ -123,7 +127,7 @@ def sim_trades(p, X, cols, y, groups, fee_rate=0.07, thresholds=(0.03, 0.05, 0.0
     li, si = cols.index("kalshi_logit"), cols.index("kalshi_spread")
     out = {}
     for t in thresholds:
-        done, pnl, staked, wins = set(), 0.0, 0.0, 0
+        done, trades, wins = set(), [], 0
         for i in range(len(p)):
             if groups[i] in done:
                 continue
@@ -135,17 +139,19 @@ def sim_trades(p, X, cols, y, groups, fee_rate=0.07, thresholds=(0.03, 0.05, 0.0
                                    ("no", 1 - p[i], 1 - mid + sp / 2 + SLIPPAGE)):
                 if not 0.05 <= cost <= 0.95:
                     continue
-                fee = math.ceil(fee_rate * cost * (1 - cost) * 100 * 100 - 1e-9) / 100 / 100
+                # Reuse the same fee implementation as live risk checks so
+                # simulation and execution cannot silently drift apart.
+                fee = taker_fee(1, cost, fee_rate)
                 if pw - cost - fee >= t:
                     won = (y[i] == 1) == (side == "yes")
-                    pnl += (1 - cost if won else -cost) - fee
-                    staked += cost
+                    trades.append({"won": bool(won), "cost": cost, "fee": fee})
                     wins += won
                     done.add(groups[i])
                     break
         n = len(done)
+        _, _, roi = binary_contract_roi(trades)
         out[t] = {"trades": n, "win_rate": round(wins / n, 3) if n else None,
-                  "roi": round(pnl / staked, 4) if staked else None}
+                  "roi": round(roi, 4) if roi is not None else None}
     return out
 
 
@@ -183,6 +189,23 @@ def learn_tails(store):
         if v:
             out[coin] = v
     return out
+
+
+def beats_champion(champion_present, champion_eval_ok, champion_loss, candidate_loss):
+    """Fail closed when an existing champion cannot be evaluated."""
+    if not champion_eval_ok:
+        return False
+    if not champion_present:
+        return True
+    return champion_loss is not None and candidate_loss < champion_loss
+
+
+def fresh_test_mask(groups, ts, champion_trained_at):
+    """Keep only whole test windows whose first decision is after the champion trained."""
+    first = {}
+    for group, stamp in zip(groups, ts):
+        first[group] = min(first.get(group, stamp), stamp)
+    return np.array([first[group] > champion_trained_at for group in groups], dtype=bool)
 
 
 def train(store, min_windows=300, fee_rate=0.07):
@@ -236,50 +259,137 @@ def train(store, min_windows=300, fee_rate=0.07):
         metrics["top_features"] = [["error", str(e)]]
 
     champ = load_meta()
-    champ_ll = None
-    if champ and os.path.exists(os.path.join(MODEL_DIR, "crypto_model.joblib")):
+    champ_path = os.path.join(MODEL_DIR, "crypto_model.joblib")
+    if os.path.exists(champ_path):
         try:
-            cm = joblib.load(os.path.join(MODEL_DIR, "crypto_model.joblib"))
-            champ_ll = logloss(cm["iso"].predict_with(cm["model"], X[te]), y[te], w[te])
-        except Exception:
+            champion_bundle = joblib.load(champ_path)
+            if isinstance(champion_bundle.get("meta"), dict):
+                # New model bundles carry authoritative matching metadata.
+                champ = champion_bundle["meta"]
+        except Exception as exc:
+            # Keep the champion marked present; later evaluation must fail closed.
+            log.error("Existing champion artifact cannot be read: %s", exc)
+    champion_present = bool(champ) or os.path.exists(champ_path)
+    test_groups, test_ts = groups[te], ts[te]
+    if champion_present:
+        try:
+            trained_at = float(champ["trained"]) if champ and champ.get("trained") is not None else None
+            if trained_at is None or not math.isfinite(trained_at):
+                raise ValueError("existing champion has no valid training timestamp")
+            fresh_mask = fresh_test_mask(test_groups, test_ts, trained_at)
+        except Exception as e:
+            log.warning("Cannot identify unseen windows after champion training: %s", e)
+            fresh_mask = np.zeros(len(test_groups), dtype=bool)
+    else:
+        fresh_mask = np.ones(len(test_groups), dtype=bool)
+
+    X_test, y_test, w_test = X[te], y[te], w[te]
+    p_fresh = p_test[fresh_mask]
+    X_fresh, y_fresh, w_fresh = X_test[fresh_mask], y_test[fresh_mask], w_test[fresh_mask]
+    groups_fresh = test_groups[fresh_mask]
+    kalshi_fresh = kalshi_p[te][fresh_mask]
+    fresh_windows = len(set(groups_fresh.tolist()))
+    promotion_ll = logloss(p_fresh, y_fresh, w_fresh) if len(y_fresh) else None
+    promotion_kalshi_ll = logloss(kalshi_fresh, y_fresh, w_fresh) if len(y_fresh) else None
+    promotion_trades = sim_trades(p_fresh, X_fresh, cols, y_fresh, groups_fresh, fee_rate) if len(y_fresh) else {}
+
+    champ_ll = None
+    champion_eval_ok = not champion_present
+    if champion_present and champ and os.path.exists(champ_path) and len(y_fresh):
+        try:
+            cm = joblib.load(champ_path)
+            champ_ll = logloss(cm["iso"].predict_with(cm["model"], X_fresh), y_fresh, w_fresh)
+            champion_eval_ok = math.isfinite(champ_ll)
+        except Exception as e:
+            # Fail closed: never replace an existing champion that could not be evaluated.
+            log.exception("Could not evaluate existing champion; candidate cannot be promoted: %s", e)
             champ_ll = None
-    metrics["test_logloss_champion"] = round(champ_ll, 5) if champ_ll else None
+            champion_eval_ok = False
+    elif champion_present:
+        champion_eval_ok = False
+    metrics["test_logloss_champion"] = round(champ_ll, 5) if champ_ll is not None else None
+    metrics["promotion_test_windows"] = fresh_windows
+    metrics["promotion_logloss_model"] = round(promotion_ll, 5) if promotion_ll is not None else None
+    metrics["promotion_logloss_kalshi"] = round(promotion_kalshi_ll, 5) if promotion_kalshi_ll is not None else None
+    metrics["promotion_logloss_champion"] = round(champ_ll, 5) if champ_ll is not None else None
+    metrics["promotion_trades"] = promotion_trades
 
     # PROMOTION GATES — every one must pass:
-    # 1. better than Kalshi's own price on unseen windows...
+    # 1. better than Kalshi's own price on test windows never available to the champion
     # 2. ...and not by luck: wins in >= 90% of bootstrap resamples of those windows
-    # 3. better than the current champion
-    # 4. enough unseen windows to judge at all
-    # 5. simulated trades on unseen data made money (>= 30 trades)
-    conf = paired_bootstrap(p_test, kalshi_p[te], y[te], groups[te])
+    # 3. better than the current champion; if it cannot be evaluated, reject promotion
+    # 4. enough truly fresh unseen windows to judge at all
+    # 5. simulated trades on fresh unseen data made money (>= 30 trades)
+    conf = paired_bootstrap(p_fresh, kalshi_fresh, y_fresh, groups_fresh) if len(y_fresh) else 0.0
     min_test = int(os.environ.get("ML_MIN_TEST_WINDOWS", 100))
-    beats_kalshi = metrics["test_logloss_model"] < metrics["test_logloss_kalshi"] * 0.998
-    beats_champ = champ_ll is None or metrics["test_logloss_model"] < champ_ll
-    profitable = [t for t, v in metrics["test_trades"].items()
+    beats_kalshi = (
+        promotion_ll is not None and promotion_kalshi_ll is not None
+        and promotion_ll < promotion_kalshi_ll * 0.998
+    )
+    beats_champ = beats_champion(champion_present, champion_eval_ok, champ_ll, promotion_ll)
+    profitable = [t for t, v in promotion_trades.items()
                   if v["trades"] >= 30 and (v["roi"] or 0) > 0]
-    enough = metrics["test_windows"] >= min_test
+    enough = fresh_windows >= min_test
     promoted = beats_kalshi and conf >= 0.90 and beats_champ and bool(profitable) and enough
     metrics.update({"beats_kalshi": beats_kalshi, "bootstrap_confidence": round(conf, 3),
+                    "champion_present": champion_present, "champion_evaluation_ok": champion_eval_ok,
                     "beats_champion": beats_champ, "enough_test_windows": enough,
                     "profitable_thresholds": profitable, "promoted": promoted})
     if promoted:
-        os.makedirs(MODEL_DIR, exist_ok=True)
-        if champ:   # keep the old champion
-            stamp = int(time.time())
-            for ext in ("joblib", "json"):
-                src = os.path.join(MODEL_DIR, f"crypto_model.{ext}")
-                if os.path.exists(src):
-                    os.replace(src, os.path.join(MODEL_DIR, f"crypto_model_{stamp}.{ext}"))
-        joblib.dump({"model": best, "iso": iso, "cols": cols}, os.path.join(MODEL_DIR, "crypto_model.joblib"))
         meta = {"trained": time.time(), "feature_version": features.FEATURE_VERSION,
                 "cols": cols, "min_edge": min(profitable), **metrics}
-        with open(os.path.join(MODEL_DIR, "crypto_model.json"), "w") as f:
-            json.dump(meta, f, indent=1, default=str)
+        _promote_champion({"model": best, "iso": iso, "cols": cols, "meta": meta},
+                          meta, joblib)
         _CACHE.clear()
     ensure_table(store)
     store.x("INSERT INTO model_runs VALUES(?,?,?,?)",
             (int(time.time()), "crypto_model", int(promoted), json.dumps(metrics, default=str)))
     return metrics
+
+
+
+def _promote_champion(bundle, meta, joblib_module=None):
+    """Commit a model+metadata pair safely; the atomic joblib bundle is authoritative.
+
+    Metadata is embedded in the bundle so a crash while updating the human-readable
+    JSON sidecar cannot pair a new model with old metadata. The prior champion is
+    copied to a timestamped backup before the atomic replacement.
+    """
+    if joblib_module is None:
+        import joblib as joblib_module
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    model_path = os.path.join(MODEL_DIR, "crypto_model.joblib")
+    meta_path = os.path.join(MODEL_DIR, "crypto_model.json")
+    stamp = f"{int(time.time())}_{os.getpid()}"
+    # Preserve, rather than move, the last-known-good artifacts. If backup fails,
+    # abort before touching the active champion.
+    for path in (model_path, meta_path):
+        if os.path.isfile(path):
+            shutil.copy2(path, os.path.join(MODEL_DIR, f"crypto_model_{stamp}{os.path.splitext(path)[1]}"))
+    model_tmp = None
+    meta_tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix=".crypto_model_", suffix=".joblib.tmp",
+                                         dir=MODEL_DIR, delete=False) as f:
+            model_tmp = f.name
+        joblib_module.dump(bundle, model_tmp)
+        # Ensure the completed file is readable before making it the active model.
+        joblib_module.load(model_tmp)
+        os.replace(model_tmp, model_path)
+        model_tmp = None
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix=".crypto_model_",
+                                         suffix=".json.tmp", dir=MODEL_DIR, delete=False) as f:
+            meta_tmp = f.name
+            json.dump(meta, f, indent=1, default=str)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(meta_tmp, meta_path)
+        meta_tmp = None
+    finally:
+        for path in (model_tmp, meta_tmp):
+            if path and os.path.exists(path):
+                os.unlink(path)
+
 
 
 # --- live prediction ---------------------------------------------------------------------
@@ -298,12 +408,24 @@ def predict(feats, coin):
     """Calibrated P(YES) from the champion model, or None if there isn't one."""
     if "m" not in _CACHE:
         path = os.path.join(MODEL_DIR, "crypto_model.joblib")
-        meta = load_meta()
-        if not (meta and os.path.exists(path) and meta.get("feature_version") == features.FEATURE_VERSION):
+        try:
+            if not os.path.isfile(path):
+                _CACHE["m"] = None
+            else:
+                import joblib
+                bundle = joblib.load(path)
+                # New artifacts carry their own matching metadata. Legacy bundles
+                # fall back to the JSON sidecar for backward compatibility.
+                meta = bundle.get("meta") or load_meta()
+                if not (isinstance(meta, dict)
+                        and meta.get("feature_version") == features.FEATURE_VERSION
+                        and all(k in bundle for k in ("model", "iso", "cols"))):
+                    _CACHE["m"] = None
+                else:
+                    _CACHE["m"] = (bundle, meta)
+        except Exception as exc:
+            log.error("Champion model artifact invalid; refusing prediction: %s", exc)
             _CACHE["m"] = None
-        else:
-            import joblib
-            _CACHE["m"] = (joblib.load(path), meta)
     if not _CACHE["m"] or "kalshi_logit" not in feats:
         return None, None
     bundle, meta = _CACHE["m"]
@@ -317,10 +439,13 @@ def text(m):
     if m.get("status"):
         return f"Model training skipped: {m['status']} ({m.get('windows')} windows, need {m.get('needed')})."
     lines = ["=== MODEL TRAINING (walk-forward, newest 15% held out) ===",
-             f"{m['windows']} windows, {m['rows']} rows, tested on {m['test_windows']} unseen windows",
-             f"Log loss (lower = better): model {m['test_logloss_model']} | Kalshi price "
-             f"{m['test_logloss_kalshi']} | formula {m['test_logloss_formula']} | champion "
-             f"{m['test_logloss_champion']}"]
+             f"{m['windows']} windows, {m['rows']} rows, tested on {m['test_windows']} candidate holdout windows",
+             f"Candidate holdout log loss (lower = better): model {m['test_logloss_model']} | "
+             f"Kalshi price {m['test_logloss_kalshi']} | formula {m['test_logloss_formula']}",
+             f"Promotion comparison on {m.get('promotion_test_windows', 0)} windows newer than "
+             f"the champion: model {m.get('promotion_logloss_model')} | "
+             f"Kalshi {m.get('promotion_logloss_kalshi')} | "
+             f"champion {m.get('promotion_logloss_champion')}"]
     for t, v in m["test_trades"].items():
         lines.append(f"  edge >= {float(t):.0%}: {v['trades']} trades, win "
                      f"{(v['win_rate'] or 0):.0%}, return {(v['roi'] or 0):+.1%}")

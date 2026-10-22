@@ -16,6 +16,7 @@ import logging
 import math
 import os
 import subprocess
+import shlex
 import time
 
 from .. import alerts, brain, briefing, council, crypto_brain, guard, ml, risk
@@ -25,6 +26,7 @@ from ..grader import grade
 from ..kalshi_client import KalshiClient, price
 from ..llm import LLM
 from ..signals import crypto as crypto_sig
+from ..signals import flow as flow_sig
 from ..signals import implied_vol as iv
 from ..signals.base import Reading, clamp
 from . import feeds, settlement
@@ -59,12 +61,20 @@ class LiveRunner:
         self.books = {}           # ticker -> KalshiBook
         self.pending = set()      # tickers under council review
         self.last_saved = {}
+        self.last_flow_poll = {}  # REST trade-flow polling is throttled per market
         self.betting_ok, self.betting_why = True, "ok"
         self.summary = {"mode": self.s.mode, "markets": 0, "bets": 0, "skipped": {}, "alerts": []}
         self.seed = seed
         self.with_context = with_context
         self.seed_candles = {}    # series -> Coinbase 1-minute candles (OHLCV)
         self.makers = {}          # ticker -> resting maker order
+        # A prior process may have died after Kalshi accepted a resting order.
+        # Do not resume trading until that exchange state is reconciled manually.
+        prior_maker = self.store.get_kv("maker_recovery")
+        if prior_maker and self.s.mode in ("demo", "live"):
+            reason = "unresolved maker order from prior run; reconcile Kalshi open orders/positions before resuming"
+            self.store.set_kv("execution_reconciliation_required", reason)
+            self.betting_ok, self.betting_why = False, reason
         self.vol_samples, self.vol_done = {}, {}
         self.ctx_cache = {}       # series -> market context, refreshed off the hot loop
 
@@ -137,6 +147,15 @@ class LiveRunner:
             context=self.ctx_cache.get(info["series"], {}) if self.with_context else {})
         if not readings:
             return None, None
+        # Kalshi's public trade tape is anonymous, but reveals which outcome
+        # aggressive traders are buying, trade size concentration, sweeps, and
+        # whether contract prices move before the reference spot/book.
+        # Keep it separate from spot-exchange aggressor flow; both are useful
+        # independent evidence and neither identifies individual traders.
+        kalshi_mid = (best_yes_bid + best_yes_ask) / 2
+        flow_reading = self.kalshi_flow_reading(ticker, kalshi_mid, now)
+        if flow_reading:
+            readings.append(flow_reading)
         base = next((r.prob for r in readings if r.name == "crypto_model"), None)
         f = a.flow(now, 60)
         if base is not None and f["trades"] >= 10:
@@ -159,6 +178,12 @@ class LiveRunner:
                                            "vol_ratio_15_60", "dist_sigma")},
                    "signals": {r.name: round(r.prob, 3) for r in readings}}
         return readings, context
+
+    def kalshi_flow_reading(self, ticker, kalshi_mid, now=None):
+        """Build an independent signal from anonymous Kalshi prints in the last 5m."""
+        now = time.time() if now is None else now
+        trades = self.store.flow(ticker, int(now - 300))
+        return flow_sig.trade_flow(trades, kalshi_mid)
 
     def tick(self, now=None):
         now = now or time.time()
@@ -225,6 +250,18 @@ class LiveRunner:
             if verdict["decision"] != "approve":
                 self._skip(f"council {verdict['decision']}")
                 return
+            # Resting maker orders reserve real buying power but are not yet in the
+            # ledger. Until reservations are represented in the shared risk planner,
+            # allow only one outstanding maker/order-review path in this runner.
+            # Otherwise a second approved candidate could spend the same cash.
+            if self.makers and ticker not in self.makers:
+                self._skip("recheck: pending maker reserves risk budget")
+                return
+            allowed, reason = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
+            if not allowed:
+                self.betting_ok, self.betting_why = False, reason
+                self._skip(f"execution guard: {reason}")
+                return
             fresh, _ = self.readings_for(ticker, time.time())
             if not fresh or (self.books[ticker].age() or 99) > 5:
                 self._skip("recheck: data stale")
@@ -246,15 +283,49 @@ class LiveRunner:
 
     # --- maker orders: rest at a better price, cancel if not filled ---------------------
     def start_maker(self, ticker, snap, plan, readings, prob, conf):
+        allowed, reason = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
+        if not allowed:
+            self.betting_ok, self.betting_why = False, reason
+            self._skip(f"maker blocked at execution boundary: {reason}")
+            return
         order_id = f"paper-maker-{int(time.time())}"
-        if self.s.mode in ("demo", "live"):
+        real_order = self.s.mode in ("demo", "live")
+        # Recovery persistence intentionally tracks one external maker intent.
+        # Never allow a second live/demo maker while one is active or uncertain.
+        if real_order and self.makers and ticker not in self.makers:
+            self._skip("maker blocked: another resting order is active; reconcile it first")
+            return
+        if real_order:
+            # Persist intent BEFORE network I/O. If the process dies or the
+            # response is lost after the exchange accepts it, the next run
+            # fails closed instead of silently forgetting the possible order.
+            self.store.set_kv("maker_recovery", {
+                "state": "submitting", "ticker": ticker, "side": plan["side"],
+                "contracts": int(plan["contracts"]), "limit": float(plan["limit"]),
+                "created_ts": int(time.time()), "mode": self.s.mode,
+            })
             try:
                 o = self.engine.trade.place_resting_buy(ticker, plan["side"], plan["contracts"],
                                                         plan["limit"], self.s.maker_wait_s + 15)
-                order_id = o.get("order_id", "")
+                order_id = str(o.get("order_id") or "").strip()
+                if not order_id:
+                    log.error("maker order response has no order ID for %s; cannot safely track it", ticker)
+                    self._skip("maker order ID missing; manual reconciliation required")
+                    self.betting_ok = False
+                    self.betting_why = "maker order ID missing; reconciliation required"
+                    self.store.set_kv("execution_reconciliation_required", self.betting_why)
+                    return
             except Exception as e:
                 log.error("maker order failed %s: %s", ticker, e)
+                self.betting_ok = False
+                self.betting_why = "maker submission outcome unknown; reconcile exchange orders before resuming"
+                self.store.set_kv("execution_reconciliation_required", self.betting_why)
                 return
+            self.store.set_kv("maker_recovery", {
+                "state": "active", "ticker": ticker, "side": plan["side"],
+                "contracts": int(plan["contracts"]), "limit": float(plan["limit"]),
+                "order_id": order_id, "created_ts": int(time.time()), "mode": self.s.mode,
+            })
         self.makers[ticker] = {"snap": snap, "plan": plan, "readings": readings, "prob": prob,
                                "conf": conf, "order_id": order_id, "placed": time.time()}
         log.info("MAKER %s %s x%d resting @ $%.2f", ticker, plan["side"], plan["contracts"],
@@ -262,11 +333,30 @@ class LiveRunner:
 
     @staticmethod
     def _maker_order_state(order, requested):
-        try:
-            filled = int(float(order.get("fill_count_fp") or order.get("fill_count") or 0))
-        except (TypeError, ValueError):
-            filled = 0
         status = str(order.get("status") or "").lower()
+        raw_filled = order.get("fill_count_fp")
+        if raw_filled in (None, ""):
+            raw_filled = order.get("fill_count")
+        if raw_filled in (None, ""):
+            # Some terminal statuses imply a full execution, but a missing fill
+            # count on other statuses is ambiguous and must not release exposure.
+            if status in {"executed", "filled"}:
+                filled = int(requested)
+            elif status in {"canceled", "cancelled", "expired", "rejected"}:
+                filled = 0
+            else:
+                filled = 0
+                status = status or "unknown"
+                return filled, status, False
+        else:
+            try:
+                numeric = float(raw_filled)
+                if not math.isfinite(numeric) or numeric < 0:
+                    raise ValueError("invalid fill count")
+                filled = int(numeric)
+            except (TypeError, ValueError, OverflowError):
+                # Malformed exchange fill data is not a zero-fill confirmation.
+                return 0, status or "unknown_fill_count", False
         terminal = status in {"canceled", "cancelled", "executed", "filled", "expired", "rejected"} \
             or filled >= requested
         return max(0, min(int(requested), filled)), status, terminal
@@ -289,6 +379,10 @@ class LiveRunner:
         return filled
 
     def check_makers(self, now):
+        if self.makers:
+            self.betting_ok, self.betting_why = guard.status(
+                self.store, self.s.bankroll, mode=self.s.mode
+            )
         for ticker, mk in list(self.makers.items()):
             plan, book = mk["plan"], self.books.get(ticker)
             real_order = self.s.mode in ("demo", "live")
@@ -310,13 +404,17 @@ class LiveRunner:
             edge_gone = self._maker_edge_gone(ticker, plan, now)
             expired = now - mk["placed"] >= self.s.maker_wait_s
             if real_order and not terminal and (
-                (filled > 0 and filled < plan["contracts"]) or (not filled and (edge_gone or expired))
+                (filled > 0 and filled < plan["contracts"])
+                or (not filled and (edge_gone or expired or not self.betting_ok))
             ):
                 # A partial fill does not mean the remainder stopped working.
                 # Cancel and verify the final cumulative fill before recording it.
                 reconciled = self._cancel_and_reconcile_maker(mk["order_id"], plan["contracts"])
                 if reconciled is None:
+                    message = f"maker {ticker} cancellation/final fills are unconfirmed; reconcile exchange orders and positions"
                     self._skip("maker cancel unconfirmed; order remains tracked")
+                    self.betting_ok, self.betting_why = False, message
+                    self.store.set_kv("execution_reconciliation_required", message)
                     continue
                 filled, terminal = reconciled, True
 
@@ -330,15 +428,22 @@ class LiveRunner:
                 self.summary["alerts"].append("{} maker fill {} x{} @ ${:.2f}".format(
                     ticker, plan["side"].upper(), filled, plan["limit"]))
                 self.store.log_maker(ticker, 1, "filled", now - mk["placed"])
+                if real_order:
+                    self.store.set_kv("maker_recovery", None)
                 del self.makers[ticker]
-            elif terminal or edge_gone or expired:
-                if edge_gone:
+            elif terminal or edge_gone or expired or not self.betting_ok:
+                if not self.betting_ok:
+                    self._skip(f"maker cancelled: risk guard {self.betting_why}")
+                    outcome = "risk_guard"
+                elif edge_gone:
                     self._skip("maker cancelled: edge faded")
                     outcome = "edge_faded"
                 else:
                     self._skip("maker not filled")
                     outcome = "expired" if expired else "cancelled"
                 self.store.log_maker(ticker, 0, outcome, now - mk["placed"])
+                if real_order:
+                    self.store.set_kv("maker_recovery", None)
                 del self.makers[ticker]
 
     def _side_edge(self, ticker, side, price, now):
@@ -438,6 +543,12 @@ class LiveRunner:
         self.summary["skipped"][why] = self.summary["skipped"].get(why, 0) + 1
 
     # --- async orchestration ---------------------------------------------------------
+    async def _poll_crypto_flow(self, ticker, now):
+        try:
+            await asyncio.to_thread(self.engine.pull_flow, ticker, now)
+        except Exception as exc:
+            log.warning("crypto trade-flow poll %s: %s", ticker, exc)
+
     async def main(self, minutes, sports=True):
         stop = asyncio.Event()
         if self.seed:
@@ -496,6 +607,15 @@ class LiveRunner:
                 self.betting_ok, self.betting_why = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
                 asyncio.create_task(asyncio.to_thread(self.refresh_context))
                 last_guard = now
+            # Poll only one due market per main-loop pass, oldest first. A
+            # burst over every ticker would serialize REST latency into the
+            # inference loop and risk provider rate limits as the universe grows.
+            due_flow = [t for t in self.markets
+                        if now - self.last_flow_poll.get(t, 0) >= 15]
+            if due_flow:
+                ticker = min(due_flow, key=lambda t: self.last_flow_poll.get(t, 0))
+                self.last_flow_poll[ticker] = now
+                asyncio.create_task(self._poll_crypto_flow(ticker, int(now)))
             for ticker, readings, ctx, plan in list(self.tick(now)):
                 asyncio.create_task(self._review(ticker, readings, ctx, plan))
             if now - last_dump >= 10:
@@ -506,19 +626,56 @@ class LiveRunner:
                 await asyncio.to_thread(self.sports_cycle)
                 last_sports = now
             if save_cmd and now - last_save >= 1800:
-                # save memory mid-session so a crash never loses hours of learning
-                await asyncio.to_thread(subprocess.run, save_cmd, shell=True)
-                last_save = now
+                # Treat SAVE_CMD as an argument vector, not shell source.
+                # This avoids shell injection and reports failed persistence attempts.
+                try:
+                    await asyncio.to_thread(
+                        subprocess.run, shlex.split(save_cmd), check=True,
+                        capture_output=True, text=True
+                    )
+                    last_save = now
+                except Exception as exc:
+                    log.error("mid-session memory save failed: %s", exc)
+                    alerts.send("Memory save failed", str(exc)[:500],
+                                priority="high", tags=["warning"])
             await asyncio.sleep(max(0.0, 1.0 - (time.time() - now)))
         stop.set()
         for t in tasks + ([kalshi_task] if kalshi_task else []):
             t.cancel()
-        for ticker, mk in list(self.makers.items()):      # never leave orders behind
+        for ticker, mk in list(self.makers.items()):
+            # Reconcile cumulative fills after cancellation before the process exits;
+            # otherwise a last-second fill could be missing from the ledger.
             if self.s.mode in ("demo", "live"):
-                try:
-                    self.engine.trade.cancel(mk["order_id"])
-                except Exception:
-                    pass
+                filled = None
+                for attempt in range(3):
+                    filled = await asyncio.to_thread(
+                        self._cancel_and_reconcile_maker, mk["order_id"], mk["plan"]["contracts"]
+                    )
+                    if filled is not None:
+                        break
+                    if attempt < 2:
+                        await asyncio.sleep(1)
+                if filled is None:
+                    message = (f"Could not confirm cancellation/final fills for {ticker} "
+                               f"order {mk['order_id']}; check Kalshi immediately.")
+                    log.error(message)
+                    self.store.set_kv("execution_reconciliation_required", message)
+                    alerts.send("URGENT: maker order status unknown", message,
+                                priority="urgent", tags=["warning"])
+                    continue
+                if filled:
+                    self.engine.place(
+                        mk["snap"], dict(mk["plan"], contracts=filled), mk["readings"],
+                        mk["prob"], mk["conf"], summary=self.summary, now=int(time.time()),
+                        executed={"order_id": mk["order_id"], "contracts": filled}
+                    )
+                    self.store.log_maker(ticker, 1, "filled_on_shutdown", time.time() - mk["placed"])
+                    self.store.set_kv("maker_recovery", None)
+                else:
+                    self.store.log_maker(ticker, 0, "shutdown_cancelled", time.time() - mk["placed"])
+                    self.store.set_kv("maker_recovery", None)
+            else:
+                self.store.log_maker(ticker, 0, "shutdown_cancelled", time.time() - mk["placed"])
         self.makers.clear()
         await asyncio.to_thread(grade, self.store, self.rest)
         return self.summary
