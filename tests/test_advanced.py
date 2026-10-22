@@ -60,6 +60,24 @@ class TestVol(unittest.TestCase):
 
 
 class TestModel(unittest.TestCase):
+    def test_simulated_single_contract_fee_rounds_up_to_cent(self):
+        # Live risk.taker_fee rounds each order's fee up to a cent. The
+        # simulator must not use fractional cents that inflate backtest ROI.
+        self.assertEqual(risk.taker_fee(1, 0.505, 0.07), 0.02)
+
+        import numpy as np
+        cols = ["kalshi_logit", "kalshi_spread"]
+        X = np.array([[0.0, 0.0]])
+        # With a 50% market and 50.5c simulated entry, a 60% model probability
+        # has 7.5c gross edge; fee must be the live-compatible 2c.
+        out = ml.sim_trades(
+            np.array([0.60]), X, cols, np.array([1]), np.array(["window"]),
+            fee_rate=0.07, thresholds=(0.03,)
+        )
+        self.assertEqual(out[0.03]["trades"], 1)
+        # One winning contract returns 1 - 0.505 - 0.02, divided by 0.505 stake.
+        self.assertAlmostEqual(out[0.03]["roi"], (1 - 0.505 - 0.02) / 0.505, places=4)
+
     def test_train_promote_predict(self):
         with tempfile.TemporaryDirectory() as d:
             os.environ["MODEL_DIR"] = os.path.join(d, "models")
