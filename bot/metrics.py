@@ -5,6 +5,12 @@ and historical replay cannot silently report different returns.
 """
 
 
+def net_roi(net_pnl, committed_capital):
+    """Return net P&L divided by all committed capital, or None if zero."""
+    capital = float(committed_capital)
+    return float(net_pnl) / capital if capital > 0 else None
+
+
 def binary_contract_roi(trades):
     """Return (net_pnl, committed_capital, roi) for binary contract trades.
 
@@ -19,4 +25,4 @@ def binary_contract_roi(trades):
         fee = float(trade["fee"])
         net_pnl += (1.0 - cost if trade["won"] else -cost) - fee
         committed += cost + fee
-    return net_pnl, committed, (net_pnl / committed if committed > 0 else None)
+    return net_pnl, committed, net_roi(net_pnl, committed)
