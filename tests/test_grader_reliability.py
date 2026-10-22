@@ -24,7 +24,6 @@ class TestGradingReliability(unittest.TestCase):
         self.store = Store(os.path.join(self.tmp.name, "test.sqlite"))
 
     def tearDown(self):
-        self.store.close()
         self.tmp.cleanup()
 
     def test_learning_cursor_prevents_unsettled_early_rows_starving_later_markets(self):
