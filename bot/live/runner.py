@@ -290,6 +290,11 @@ class LiveRunner:
             return
         order_id = f"paper-maker-{int(time.time())}"
         real_order = self.s.mode in ("demo", "live")
+        # Recovery persistence intentionally tracks one external maker intent.
+        # Never allow a second live/demo maker while one is active or uncertain.
+        if real_order and self.makers and ticker not in self.makers:
+            self._skip("maker blocked: another resting order is active; reconcile it first")
+            return
         if real_order:
             # Persist intent BEFORE network I/O. If the process dies or the
             # response is lost after the exchange accepts it, the next run
