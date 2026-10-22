@@ -75,8 +75,10 @@ class TestModel(unittest.TestCase):
             fee_rate=0.07, thresholds=(0.03,)
         )
         self.assertEqual(out[0.03]["trades"], 1)
-        # One winning contract returns 1 - 0.505 - 0.02, divided by 0.505 stake.
-        self.assertAlmostEqual(out[0.03]["roi"], (1 - 0.505 - 0.02) / 0.505, places=4)
+        # ROI uses total capital committed (premium + fee), not premium alone.
+        self.assertAlmostEqual(
+            out[0.03]["roi"], (1 - 0.505 - 0.02) / (0.505 + 0.02), places=4
+        )
 
     def test_train_promote_predict(self):
         with tempfile.TemporaryDirectory() as d:
