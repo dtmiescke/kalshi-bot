@@ -51,6 +51,27 @@ class TestAudit(unittest.TestCase):
         self.assertTrue(self.st.has_open_event_bet("PAPER-E", mode="paper"))
         self.assertEqual([row["ticker"] for row in self.st.open_bets(mode="live")], ["LIVE-OPEN"])
 
+    def test_malformed_sportsbook_prices_are_skipped_not_crashing_consensus(self):
+        from bot.odds import consensus
+        event = {"bookmakers": [
+            {"key": "bad", "markets": [{"key": "h2h", "outcomes": [
+                {"name": "A", "price": None}, {"name": "B", "price": -110}]}]},
+            {"key": "good", "markets": [{"key": "h2h", "outcomes": [
+                {"name": "A", "price": -110}, {"name": "B", "price": -110}]}]},
+        ]}
+        result = consensus(event)
+        self.assertAlmostEqual(result["A"][0], 0.5)
+        self.assertAlmostEqual(result["B"][0], 0.5)
+        self.assertEqual(result["A"][1], 1)
+
+    def test_zero_and_nonfinite_sportsbook_prices_are_ignored(self):
+        from bot.odds import consensus
+        for bad_price in (0, float("nan"), float("inf"), "not-a-price"):
+            with self.subTest(price=bad_price):
+                event = {"bookmakers": [{"key": "bad", "markets": [{"key": "h2h", "outcomes": [
+                    {"name": "A", "price": bad_price}, {"name": "B", "price": -110}]}]}]}
+                self.assertEqual(consensus(event), {})
+
     def test_risk_spend_caps_include_fees(self):
         bet(self.st, ts=100, mode="paper", ticker="FEE-1",
             event_ticker="KXBTC15M-26OCT191830", series="KXBTC15M",
