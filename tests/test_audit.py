@@ -128,8 +128,11 @@ class TestAudit(unittest.TestCase):
                 recorded, skips, maker_logs = [], [], []
                 runner.engine = type("EngineStub", (), {"trade": trade,
                     "place": lambda _self, *args, **kwargs: recorded.append((args, kwargs))})()
+                kv = {}
                 runner.store = type("StoreStub", (), {
-                    "log_maker": lambda _self, *args: maker_logs.append(args)})()
+                    "log_maker": lambda _self, *args: maker_logs.append(args),
+                    "set_kv": lambda _self, key, value: kv.__setitem__(key, value),
+                })()
                 runner.summary = {"alerts": []}
                 runner.books = {}
                 runner.makers = {"T1": {
