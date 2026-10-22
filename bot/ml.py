@@ -27,6 +27,7 @@ import numpy as np
 
 from . import features
 from .risk import taker_fee
+from .metrics import binary_contract_roi
 
 log = logging.getLogger("bot")
 MODEL_DIR = os.environ.get("MODEL_DIR", "data/models")
@@ -124,7 +125,7 @@ def sim_trades(p, X, cols, y, groups, fee_rate=0.07, thresholds=(0.03, 0.05, 0.0
     li, si = cols.index("kalshi_logit"), cols.index("kalshi_spread")
     out = {}
     for t in thresholds:
-        done, pnl, staked, wins = set(), 0.0, 0.0, 0
+        done, trades, wins = set(), [], 0
         for i in range(len(p)):
             if groups[i] in done:
                 continue
@@ -141,17 +142,14 @@ def sim_trades(p, X, cols, y, groups, fee_rate=0.07, thresholds=(0.03, 0.05, 0.0
                 fee = taker_fee(1, cost, fee_rate)
                 if pw - cost - fee >= t:
                     won = (y[i] == 1) == (side == "yes")
-                    pnl += (1 - cost if won else -cost) - fee
-                    # ROI denominator is total capital committed, including fees.
-                    # Excluding fees here slightly inflates backtest returns and can
-                    # make a marginal strategy pass the promotion profitability gate.
-                    staked += cost + fee
+                    trades.append({"won": bool(won), "cost": cost, "fee": fee})
                     wins += won
                     done.add(groups[i])
                     break
         n = len(done)
+        _, _, roi = binary_contract_roi(trades)
         out[t] = {"trades": n, "win_rate": round(wins / n, 3) if n else None,
-                  "roi": round(pnl / staked, 4) if staked else None}
+                  "roi": round(roi, 4) if roi is not None else None}
     return out
 
 
