@@ -645,6 +645,7 @@ class LiveRunner:
                     message = (f"Could not confirm cancellation/final fills for {ticker} "
                                f"order {mk['order_id']}; check Kalshi immediately.")
                     log.error(message)
+                    self.store.set_kv("execution_reconciliation_required", message)
                     alerts.send("URGENT: maker order status unknown", message,
                                 priority="urgent", tags=["warning"])
                     continue
@@ -655,8 +656,10 @@ class LiveRunner:
                         executed={"order_id": mk["order_id"], "contracts": filled}
                     )
                     self.store.log_maker(ticker, 1, "filled_on_shutdown", time.time() - mk["placed"])
+                    self.store.set_kv("maker_recovery", None)
                 else:
                     self.store.log_maker(ticker, 0, "shutdown_cancelled", time.time() - mk["placed"])
+                    self.store.set_kv("maker_recovery", None)
             else:
                 self.store.log_maker(ticker, 0, "shutdown_cancelled", time.time() - mk["placed"])
         self.makers.clear()
