@@ -64,6 +64,13 @@ class TestWorkflowSafety(unittest.TestCase):
             self.assertTrue((cwd / "data" / ".memory_restored").exists())
             self.assertFalse((cwd / "data" / "bot.sqlite").exists())
 
+
+    def test_dashboard_reads_compressed_memory_and_legacy_snapshot(self):
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn('x.name==="bot.sqlite.gz"', html)
+        self.assertIn('x.name==="bot.sqlite"', html)
+        self.assertIn("new DecompressionStream(\"gzip\")", html)
+
     def test_save_refuses_to_publish_without_verified_restore_marker(self):
         with tempfile.TemporaryDirectory() as tmp:
             cwd = Path(tmp)
