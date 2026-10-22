@@ -411,7 +411,10 @@ class LiveRunner:
                 # Cancel and verify the final cumulative fill before recording it.
                 reconciled = self._cancel_and_reconcile_maker(mk["order_id"], plan["contracts"])
                 if reconciled is None:
+                    message = f"maker {ticker} cancellation/final fills are unconfirmed; reconcile exchange orders and positions"
                     self._skip("maker cancel unconfirmed; order remains tracked")
+                    self.betting_ok, self.betting_why = False, message
+                    self.store.set_kv("execution_reconciliation_required", message)
                     continue
                 filled, terminal = reconciled, True
 
