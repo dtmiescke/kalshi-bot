@@ -43,7 +43,7 @@ The model trade simulator now rounds a one-contract fee up to the same cent boun
 | Contract fees and cost basis | `bot/risk.py` (`taker_fee`) | Separate fee formulas inside model, replay, or external adapters |
 | Historical replay and realized outcomes | `bot/history.py`, `bot/backtest.py` | Independent ROI formulas in each replay path |
 | Model fitting, time splits, promotion gate | `bot/ml.py` | Qlib/Freqtrade runtime model trainer in production |
-| Live order book, freshness, and final recheck | `bot/live/` runner/book modules | Hummingbot/NautilusTrader order-book or execution engine replacement |
+| Live order book, freshness, and final recheck | `bot/live/` runner/book modules | Hummingbot/NautilusTrader order-book or execution engine replacement; pending maker orders block competing candidates until reconciled |
 | Settled-bet grading, CLV, decision audit | `bot/grader.py` + `bot/storage.py`; ROI reporting via `bot/report.py` and `bot/metrics.py` | Duplicate settlement/grading tables or independent ROI formulas |
 | Risk limits and order sizing | `bot/risk.py`, `bot/guard.py`, `bot/engine.py`, `bot/storage.py` | Second independent risk engine; daily, event, and crypto-window spend caps now include fees |
 | User interface | Existing dashboard assets | External project dashboard or UI framework replacement |
