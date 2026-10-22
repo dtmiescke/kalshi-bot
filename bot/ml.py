@@ -26,6 +26,7 @@ import time
 import numpy as np
 
 from . import features
+from .risk import taker_fee
 
 log = logging.getLogger("bot")
 MODEL_DIR = os.environ.get("MODEL_DIR", "data/models")
@@ -135,10 +136,9 @@ def sim_trades(p, X, cols, y, groups, fee_rate=0.07, thresholds=(0.03, 0.05, 0.0
                                    ("no", 1 - p[i], 1 - mid + sp / 2 + SLIPPAGE)):
                 if not 0.05 <= cost <= 0.95:
                     continue
-                # Each simulated trade is one contract/order. Match the live
-                # fee rule: round the order fee UP to the next cent. Fractional-
-                # cent fees overstate historical ROI and can falsely pass promotion.
-                fee = math.ceil(fee_rate * cost * (1 - cost) * 100 - 1e-9) / 100
+                # Reuse the same fee implementation as live risk checks so
+                # simulation and execution cannot silently drift apart.
+                fee = taker_fee(1, cost, fee_rate)
                 if pw - cost - fee >= t:
                     won = (y[i] == 1) == (side == "yes")
                     pnl += (1 - cost if won else -cost) - fee
