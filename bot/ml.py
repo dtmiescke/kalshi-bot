@@ -142,7 +142,10 @@ def sim_trades(p, X, cols, y, groups, fee_rate=0.07, thresholds=(0.03, 0.05, 0.0
                 if pw - cost - fee >= t:
                     won = (y[i] == 1) == (side == "yes")
                     pnl += (1 - cost if won else -cost) - fee
-                    staked += cost
+                    # ROI denominator is total capital committed, including fees.
+                    # Excluding fees here slightly inflates backtest returns and can
+                    # make a marginal strategy pass the promotion profitability gate.
+                    staked += cost + fee
                     wins += won
                     done.add(groups[i])
                     break
