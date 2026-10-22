@@ -209,6 +209,22 @@ class TestRunnerExecution(unittest.TestCase):
         del os.environ["BOT_DB"]
         self.d.cleanup()
 
+    def test_live_crypto_intel_includes_kalshi_aggressor_flow(self):
+        ticker = "KXBTC15M-E-00"
+        trades = []
+        for i in range(4):
+            trades.append({"trade_id": f"yes-{i}", "ticker": ticker,
+                           "ts": int(self.now - 30 + i), "count": 100,
+                           "yes_price": 0.60 + i * 0.01, "taker_side": "yes"})
+        trades.append({"trade_id": "no-1", "ticker": ticker, "ts": int(self.now - 20),
+                       "count": 5, "yes_price": 0.59, "taker_side": "no"})
+        self.store.add_flow_trades(trades)
+        reading = self.r.kalshi_flow_reading(ticker, 0.60, self.now)
+        self.assertIsNotNone(reading)
+        self.assertEqual(reading.name, "trade_flow")
+        self.assertGreater(reading.prob, 0.60)
+        self.assertGreater(reading.detail["imbalance"], 0)
+
     def test_maker_terminal_execution_without_fill_count_assumes_full_fill(self):
         self.assertEqual(self.r._maker_order_state({"status": "executed"}, 7), (7, "executed", True))
 
