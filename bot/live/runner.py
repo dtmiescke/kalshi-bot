@@ -72,8 +72,9 @@ class LiveRunner:
         # Do not resume trading until that exchange state is reconciled manually.
         prior_maker = self.store.get_kv("maker_recovery")
         if prior_maker and self.s.mode in ("demo", "live"):
-            self.store.set_kv("execution_reconciliation_required",
-                              "unresolved maker order from prior run; reconcile Kalshi open orders/positions before resuming")
+            reason = "unresolved maker order from prior run; reconcile Kalshi open orders/positions before resuming"
+            self.store.set_kv("execution_reconciliation_required", reason)
+            self.betting_ok, self.betting_why = False, reason
         self.vol_samples, self.vol_done = {}, {}
         self.ctx_cache = {}       # series -> market context, refreshed off the hot loop
 
