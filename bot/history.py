@@ -176,7 +176,9 @@ def evaluate(records_by_market, fee_rate, thresholds=THRESHOLDS):
                     continue
                 break
         if bets:
-            staked = sum(b["cost"] for b in bets)
+            # Return on total committed capital must include transaction fees;
+            # excluding them inflates the historical replay ROI.
+            staked = sum(b["cost"] + b["fee"] for b in bets)
             pnl = sum((1 - b["cost"] if b["won"] else -b["cost"]) - b["fee"] for b in bets)
             res["thresholds"][t] = {"bets": len(bets),
                                     "win_rate": round(sum(b["won"] for b in bets) / len(bets), 3),
