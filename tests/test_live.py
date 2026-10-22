@@ -209,6 +209,16 @@ class TestRunnerExecution(unittest.TestCase):
         del os.environ["BOT_DB"]
         self.d.cleanup()
 
+    def test_stale_kalshi_book_blocks_post_council_execution(self):
+        ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
+        # Simulate a feed gap after the initial shortlist/council review.
+        self.r.books[ticker].needs_resync = True
+        self.r.books[ticker].last_update = 0.0
+        self.r.finish(ticker, readings, ctx, plan, {"decision": "approve", "by": "numbers"})
+        self.assertEqual(self.store.open_bets(), [])
+        self.assertEqual(self.r.summary["bets"], 0)
+        self.assertIn("recheck: data stale", self.r.summary["skipped"])
+
     def test_maker_rests_then_fills(self):
         ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
         self.assertEqual(plan[1]["style"], "maker")
