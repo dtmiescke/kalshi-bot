@@ -226,6 +226,13 @@ class LiveRunner:
             if verdict["decision"] != "approve":
                 self._skip(f"council {verdict['decision']}")
                 return
+            # Resting maker orders reserve real buying power but are not yet in the
+            # ledger. Until reservations are represented in the shared risk planner,
+            # allow only one outstanding maker/order-review path in this runner.
+            # Otherwise a second approved candidate could spend the same cash.
+            if self.makers and ticker not in self.makers:
+                self._skip("recheck: pending maker reserves risk budget")
+                return
             allowed, reason = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
             if not allowed:
                 self.betting_ok, self.betting_why = False, reason
