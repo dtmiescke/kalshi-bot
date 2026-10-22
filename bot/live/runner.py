@@ -269,7 +269,13 @@ class LiveRunner:
             try:
                 o = self.engine.trade.place_resting_buy(ticker, plan["side"], plan["contracts"],
                                                         plan["limit"], self.s.maker_wait_s + 15)
-                order_id = o.get("order_id", "")
+                order_id = str(o.get("order_id") or "").strip()
+                if not order_id:
+                    log.error("maker order response has no order ID for %s; cannot safely track it", ticker)
+                    self._skip("maker order ID missing; manual reconciliation required")
+                    self.betting_ok = False
+                    self.betting_why = "maker order ID missing; reconciliation required"
+                    return
             except Exception as e:
                 log.error("maker order failed %s: %s", ticker, e)
                 return
