@@ -41,14 +41,14 @@ The model trade simulator now rounds a one-contract fee up to the same cent boun
 | Capability | Single source of truth in this bot | Do not add in parallel |
 |---|---|---|
 | Contract fees and cost basis | `bot/risk.py` (`taker_fee`) | Separate fee formulas inside model, replay, or external adapters |
-| Historical replay and realized outcomes | `bot/history.py` | A second Kalshi backtester that reports competing ROI figures |
+| Historical replay and realized outcomes | `bot/history.py`, `bot/backtest.py` | Independent ROI formulas in each replay path |
 | Model fitting, time splits, promotion gate | `bot/ml.py` | Qlib/Freqtrade runtime model trainer in production |
 | Live order book, freshness, and final recheck | `bot/live/` runner/book modules | Hummingbot/NautilusTrader order-book or execution engine replacement |
 | Settled-bet grading, CLV, decision audit | `bot/grader.py` + `bot/storage.py` | Duplicate settlement/grading tables or parallel win-rate dashboards |
 | Risk limits and order sizing | `bot/risk.py`, `bot/guard.py`, `bot/engine.py` | Second independent risk engine that can disagree with existing gates |
 | User interface | Existing dashboard assets | External project dashboard or UI framework replacement |
 
-**Implementation from this pass:** `bot/ml.py` calls `bot.risk.taker_fee` rather than maintaining a separate fee-rounding formula. Both `bot/ml.py` and `bot/history.py` now use `bot/metrics.py::binary_contract_roi` for net P&L and ROI, including premium plus fees in committed capital. A regression test covers the shared helper. This is consolidation, not another feature. No upstream source code or production dependency was added.
+**Implementation from this pass:** `bot/ml.py` calls `bot.risk.taker_fee` rather than maintaining a separate fee-rounding formula. `bot/ml.py`, `bot/history.py`, and `bot/backtest.py` now use `bot/metrics.py::binary_contract_roi` for net P&L and ROI, including premium plus fees in committed capital. A regression test covers the shared helper. This is consolidation, not another feature. No upstream source code or production dependency was added.
 
 ## Recommended integration order
 
