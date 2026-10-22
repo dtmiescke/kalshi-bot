@@ -260,6 +260,19 @@ class TestRunnerExecution(unittest.TestCase):
         self.assertIn("prior run", self.store.get_kv("execution_reconciliation_required"))
         self.assertFalse(restarted.betting_ok)  # no new order can be placed before reconciliation
 
+    def test_second_live_maker_is_blocked_while_recovery_slot_is_occupied(self):
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
+        calls = []
+        fake_trade = SimpleNamespace(place_resting_buy=lambda *args, **kwargs: calls.append(args) or {"order_id": "NEW"})
+        self.r.makers["EXISTING-ORDER"] = {"order_id": "OLD"}
+        with patch.object(self.s, "mode", "live"), patch.object(self.r.engine, "trade", fake_trade):
+            self.r.start_maker(ticker, {"ticker": ticker}, plan[1], readings, 0.6, 0.8)
+        self.assertEqual(calls, [])
+        self.assertNotIn(ticker, self.r.makers)
+        self.assertTrue(any("another resting order" in s for s in self.r.summary["skipped"]))
+
     def test_live_maker_without_order_id_fails_closed(self):
         from unittest.mock import patch
         ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
