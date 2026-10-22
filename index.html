@@ -349,6 +349,11 @@ function explain(e){
   return "Couldn’t reach GitHub: "+e.message;
 }
 async function file(path){try{return await gh("/contents/"+path+"?ref="+DATA_BRANCH,{raw:true})}catch(e){if(e.status===404||e.demo)return null;throw e}}
+async function gunzip(buf){
+  if(typeof DecompressionStream==="undefined")throw new Error("This browser cannot decompress the saved database. Update Chrome and try again.");
+  const stream=new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return await new Response(stream).arrayBuffer();
+}
 
 /* ================= bets ================= */
 function parseCSV(t){const rows=[];let row=[],c="",q=false;for(let i=0;i<t.length;i++){const ch=t[i];
@@ -399,7 +404,7 @@ function label(b){
 }
 function category(b){return /BTC|ETH|SOL/.test(b.series)?(/15M/.test(b.series)?"crypto":"ladder"):"sports"}
 
-/* ================= the bot's own database (bot.sqlite on bot-data) ================= */
+/* ================= the bot's own database (bot.sqlite.gz or legacy bot.sqlite on bot-data) ================= */
 // Real council verdicts live in the kv table as council_<ticker>; model results in model_runs.
 let council=[], model=null, lessons=[], audit=[], combos=[], dbNote="";
 const ROLE_KEY={crypto:"crypto_analyst",liquidity:"liquidity_analyst",prob:"probability_check",risk:"risk_controller"};
@@ -408,15 +413,18 @@ let SQLlib=null;
 async function loadDB(){
   if(demo)return;
   let list;try{list=await gh("/contents/?ref="+DATA_BRANCH)}catch(e){dbNote=e.status===404?"No saved bot data yet.":explain(e);return}
-  const f=(list||[]).find(x=>x.name==="bot.sqlite");
+  const f=(list||[]).find(x=>x.name==="bot.sqlite.gz")||(list||[]).find(x=>x.name==="bot.sqlite");
   if(!f){dbNote="No bot database saved yet.";return}
   if(f.sha===loadDB.sha)return;
-  if(f.size>45e6){dbNote="Bot database is too big to open on a phone ("+Math.round(f.size/1e6)+" MB).";return}
+  if(f.size>45e6){dbNote="Saved bot database is too large to fetch on a phone ("+Math.round(f.size/1e6)+" MB).";return}
   try{
     if(!SQLlib){await loadScript("https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js");
       SQLlib=await initSqlJs({locateFile:n=>"https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/"+n})}
-    const buf=await gh("/contents/bot.sqlite?ref="+DATA_BRANCH,{bin:true});
-    const db=new SQLlib.Database(new Uint8Array(buf));
+    const compressed=f.name==="bot.sqlite.gz";
+    const buf=await gh("/contents/"+encodeURIComponent(f.name)+"?ref="+DATA_BRANCH,{bin:true});
+    const dbBytes=compressed?await gunzip(buf):buf;
+    if(dbBytes.byteLength>100e6){dbNote="Decompressed bot database is too large for safe mobile loading ("+Math.round(dbBytes.byteLength/1e6)+" MB).";return}
+    const db=new SQLlib.Database(new Uint8Array(dbBytes));
     const q=(sql)=>{try{const r=db.exec(sql);if(!r.length)return[];const{columns,values}=r[0];return values.map(v=>Object.fromEntries(columns.map((c,i)=>[c,v[i]])))}catch(e){return[]}};
     council=q("SELECT k,v FROM kv WHERE k LIKE 'council_%'").map(r=>{let v;try{v=JSON.parse(r.v)}catch(e){return null}
       const res=v&&v.result;if(!res||res.by!=="council")return null;

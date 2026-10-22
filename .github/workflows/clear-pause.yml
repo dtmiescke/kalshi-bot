@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: "Type YES after checking your Kalshi positions match the bot"
+        description: "Type YES only after reconciling Kalshi open orders AND positions against the bot ledger"
         required: true
 
 concurrency:
@@ -24,8 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -33,6 +33,8 @@ jobs:
       - name: Load memory
         run: bash .github/load.sh
       - name: Clear hard stop
+        env:
+          CONFIRM_RECONCILED: ${{ inputs.confirm == 'YES' && 'yes' || 'no' }}
         run: python -m bot.main clear-pause
       - name: Save memory
         env:

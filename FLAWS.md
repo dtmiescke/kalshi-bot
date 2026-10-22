@@ -65,6 +65,18 @@ so it can't silently come back.
 | 30 | **Hammering Kalshi after a 429.** Fixed short retries ignored Kalshi's requested wait. | Longer blocks; data outages. | Honors Retry-After with one shared cooldown and steady pacing; prices never cached. `kalshi_client._req` |
 | 31 | **Spending money the account doesn't have.** No cash balance or position-count limits. | Over-exposure. | Cash floor, max open positions, max open cost, daily loss breaker. `risk.decide`, `guard.status` · TestAccountLimits |
 
+## G. Third-pass reliability findings
+
+| # | Leak | Effect | Fix |
+|---|---|---|---|
+| 32 | **Grading starvation.** The first bounded batch of unsettled or temporarily unavailable tickers could occupy every grading pass forever. | Settled markets later in the list never become learning examples, and model weights lag indefinitely. | Rotate through ungraded tickers with persistent cursors for signal learning, decision audits and combo audits; retry skipped rows on later passes. `grader.py` · `tests/test_grader_reliability.py` |
+| 33 | **Invalid model-decay comparisons.** The decay monitor grouped by event instead of exact contract and mixed sports grades into a crypto-model health decision. | A few arbitrary strike rows or unrelated sports results could mask or falsely trigger crypto model demotion. | Store new grade segments by exact market ticker and compare paired `ml_model` / `kalshi_market` Brier scores only on 15-minute crypto contracts. Historical event-keyed rows remain less granular. `grader.py` · `tests/test_grader_reliability.py` |
+| 34 | **Hard-stop bypass by direct command.** The CLI's `clear-pause` command previously removed the durable stop without requiring the workflow's manual confirmation. | A local or accidental invocation could resume order attempts while exchange orders/positions remain unreconciled. | Require `CONFIRM_RECONCILED=yes` and pass it only after the manual workflow's explicit YES input; update the prompt to require checking open orders and positions. `main.py` · `tests/test_clear_pause.py` |
+
+Combo research remains explicitly opt-in through the existing `COMBO_RESEARCH_ENABLED` control; `COMBOS_ENABLED` remains off and is rejected by config validation because combo order execution is not implemented.
+
+| 35 | **Dashboard/storage format mismatch.** The persistence workflow migrated the memory branch to `bot.sqlite.gz`, but the phone dashboard searched only for `bot.sqlite`. | The bot saved memory successfully while the existing dashboard reported no database and lost access to its research scorecards. | Dashboard data loading now prefers `bot.sqlite.gz`, decompresses it in-browser with the native gzip stream, retains compatibility with legacy `bot.sqlite`, and fails gracefully for unsupported browsers/oversized snapshots. No visual layout changes. `index.html` |
+
 ## What code can't remove
 - **Competition.** Professional bots trade these markets; a real edge may not exist. The promotion gates and the live monitor are how you find out without paying for it.
 - **Kalshi rules and fees change.** Check the fee rate (`TAKER_FEE_RATE`, `MAKER_FEE_RATE`), the averaging window (`SETTLE_AVG_SECONDS`), and the series tickers.

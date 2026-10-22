@@ -143,6 +143,18 @@ def run_scheduled(s, store, data):
         store.set_kv("last_compact", time.time())
 
 
+def clear_pause(store, confirmed=False):
+    """Clear the durable execution stop only after explicit reconciliation confirmation."""
+    if not confirmed:
+        raise RuntimeError(
+            "Refusing to clear the execution hard stop without CONFIRM_RECONCILED=yes. "
+            "First reconcile Kalshi open orders and positions against the bot ledger."
+        )
+    reason = store.get_kv("execution_reconciliation_required")
+    store.set_kv("execution_reconciliation_required", None)
+    return reason
+
+
 def main(argv=None):
     argv = argv or sys.argv[1:]
     cmd = argv[0] if argv else "cycle"
@@ -207,9 +219,8 @@ def main(argv=None):
         print("compacted")
         return
     if cmd == "clear-pause":
-        # Only after checking Kalshi positions/orders match the bot's ledger.
-        reason = store.get_kv("execution_reconciliation_required")
-        store.set_kv("execution_reconciliation_required", None)
+        confirmed = os.environ.get("CONFIRM_RECONCILED", "").strip().lower() == "yes"
+        reason = clear_pause(store, confirmed=confirmed)
         print("cleared hard stop:", reason or "(none was set)")
         return
     if cmd == "live":

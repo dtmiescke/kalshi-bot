@@ -25,6 +25,36 @@ def closing_yes(store, ticker, start_ts):
     return r["last_price"]
 
 
+def _rotating_tickers(store, source, cursor_key, max_fetch):
+    """Fetch a bounded, rotating batch so ungraded rows cannot starve later ones."""
+    limit = max(1, int(max_fetch))
+    cursor = str(store.get_kv(cursor_key, "") or "")
+    if source == "signals":
+        after_sql = """SELECT DISTINCT s.ticker FROM signal_readings s
+                       LEFT JOIN graded_markets g ON g.ticker=s.ticker
+                       WHERE g.ticker IS NULL AND s.ticker>? ORDER BY s.ticker LIMIT ?"""
+        wrap_sql = """SELECT DISTINCT s.ticker FROM signal_readings s
+                      LEFT JOIN graded_markets g ON g.ticker=s.ticker
+                      WHERE g.ticker IS NULL AND s.ticker<=? ORDER BY s.ticker LIMIT ?"""
+    elif source == "decision_audit":
+        after_sql = "SELECT DISTINCT ticker FROM decision_audit WHERE outcome IS NULL AND ticker>? ORDER BY ticker LIMIT ?"
+        wrap_sql = "SELECT DISTINCT ticker FROM decision_audit WHERE outcome IS NULL AND ticker<=? ORDER BY ticker LIMIT ?"
+    elif source == "combo_prediction_audit":
+        after_sql = "SELECT DISTINCT ticker FROM combo_prediction_audit WHERE outcome IS NULL AND ticker>? ORDER BY ticker LIMIT ?"
+        wrap_sql = "SELECT DISTINCT ticker FROM combo_prediction_audit WHERE outcome IS NULL AND ticker<=? ORDER BY ticker LIMIT ?"
+    else:
+        raise ValueError(f"unknown grading source: {source}")
+    rows = store.q(after_sql, (cursor, limit))
+    if len(rows) < limit:
+        rows.extend(store.q(wrap_sql, (cursor, limit - len(rows))))
+    return [row["ticker"] for row in rows]
+
+
+def _advance_cursor(store, cursor_key, tickers):
+    if tickers:
+        store.set_kv(cursor_key, tickers[-1])
+
+
 def settle_bets(store, client):
     done = 0
     for b in store.open_bets():
@@ -54,12 +84,9 @@ def settle_bets(store, client):
 def learn_from_markets(store, client, max_fetch=150):
     """Grade every researched market that has settled, then update weights."""
     now = int(time.time())
-    candidates = store.q("""SELECT DISTINCT s.ticker FROM signal_readings s
-                            LEFT JOIN graded_markets g ON g.ticker = s.ticker
-                            WHERE g.ticker IS NULL LIMIT ?""", (max_fetch,))
+    tickers = _rotating_tickers(store, "signals", "learning_cursor_ticker", max_fetch)
     graded = []
-    for c in candidates:
-        t = c["ticker"]
+    for t in tickers:
         start = store.get_kv(f"start_{t}")
         settle_after = store.get_kv(f"settle_after_{t}") or (start + 3 * 3600 if start else None)
         if not start or now < settle_after:
@@ -85,7 +112,7 @@ def learn_from_markets(store, client, max_fetch=150):
                        (t, brain.decision_cutoff(t, start), brain.decision_cutoff(t, start)))
         if not rows:
             store.x("INSERT OR IGNORE INTO graded_markets VALUES(?,?,?,?)",
-                    (t, now, y, m.get("series_ticker") or ""))
+                    (t, now, y, m.get("series_ticker") or m.get("series") or ""))
             continue
         g = {r["signal"]: r["prob"] for r in rows}
         g["_outcome"] = y
@@ -94,9 +121,10 @@ def learn_from_markets(store, client, max_fetch=150):
         for r in rows:
             store.x("INSERT INTO signal_grades VALUES(?,?,?,?,?,?,?,?)",
                     (now, None, r["signal"], r["prob"], y, (r["prob"] - y) ** 2, None,
-                     m.get("event_ticker", "")))
+                     t))
         store.x("INSERT OR IGNORE INTO graded_markets VALUES(?,?,?,?)",
-                (t, now, y, m.get("event_ticker", "")))
+                (t, now, y, m.get("series_ticker") or m.get("series") or ""))
+    _advance_cursor(store, "learning_cursor_ticker", tickers)
     changes = {}
     # Learn independently by identifiable league. Unknown leagues stay in the
     # shared sports bucket; crypto remains isolated from all sports weights.
@@ -110,10 +138,9 @@ def learn_from_markets(store, client, max_fetch=150):
 
 def grade_decision_audits(store, client, max_fetch=150):
     """Grade logged candidates and rejections from real Kalshi settlements only."""
-    tickers = store.q("SELECT DISTINCT ticker FROM decision_audit WHERE outcome IS NULL LIMIT ?", (max_fetch,))
+    tickers = _rotating_tickers(store, "decision_audit", "decision_grade_cursor_ticker", max_fetch)
     graded = 0
-    for row in tickers:
-        ticker = row["ticker"]
+    for ticker in tickers:
         try:
             market = client.market(ticker)
         except Exception as e:
@@ -126,6 +153,7 @@ def grade_decision_audits(store, client, max_fetch=150):
         cutoff = brain.decision_cutoff(ticker, start) if start else 0
         graded += store.grade_decision_audit(
             ticker, 1 if result == "yes" else 0, cutoff_ts=cutoff)
+    _advance_cursor(store, "decision_grade_cursor_ticker", tickers)
     return graded
 
 
@@ -134,9 +162,13 @@ def monitor_model(store, window=300):
     the last `window` settled crypto markets the model's live forecasts are worse
     than Kalshi's own price, retire it automatically (it's kept, not deleted)."""
     import os
+    # Compare the model and Kalshi on the SAME 15-minute contract only.
+    # Sports outcomes must not trigger demotion of the crypto model, and using
+    # event_ticker as the key merges multiple strikes into one misleading pair.
     rows = store.q("""SELECT segment, signal, brier FROM signal_grades
                       WHERE signal IN ('ml_model', 'kalshi_market')
-                      ORDER BY ts DESC LIMIT ?""", (window * 2,))
+                        AND segment LIKE '%15M%'
+                      ORDER BY ts DESC, rowid DESC LIMIT ?""", (window * 2,))
     by = {}
     for r in rows:
         by.setdefault(r["segment"], {})[r["signal"]] = r["brier"]
@@ -166,17 +198,18 @@ def monitor_model(store, window=300):
 
 def grade_combo_predictions(store, client, max_fetch=150):
     """Grade combo forecasts only after Kalshi reports actual settled YES/NO."""
-    rows = store.q("SELECT ticker FROM combo_prediction_audit WHERE outcome IS NULL LIMIT ?", (max_fetch,))
+    tickers = _rotating_tickers(store, "combo_prediction_audit", "combo_grade_cursor_ticker", max_fetch)
     graded = 0
-    for row in rows:
+    for ticker in tickers:
         try:
-            market = client.market(row["ticker"])
+            market = client.market(ticker)
         except Exception as exc:
-            log.debug("combo audit market lookup %s: %s", row["ticker"], exc)
+            log.debug("combo audit market lookup %s: %s", ticker, exc)
             continue
         result = market.get("result")
         if result in ("yes", "no"):
-            graded += store.grade_combo_prediction(row["ticker"], 1 if result == "yes" else 0)
+            graded += store.grade_combo_prediction(ticker, 1 if result == "yes" else 0)
+    _advance_cursor(store, "combo_grade_cursor_ticker", tickers)
     return graded
 
 
