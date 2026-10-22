@@ -206,6 +206,12 @@ def main(argv=None):
         store.compact()
         print("compacted")
         return
+    if cmd == "clear-pause":
+        # Only after checking Kalshi positions/orders match the bot's ledger.
+        reason = store.get_kv("execution_reconciliation_required")
+        store.set_kv("execution_reconciliation_required", None)
+        print("cleared hard stop:", reason or "(none was set)")
+        return
     if cmd == "live":
         from .live.runner import run as run_live
         s.validate()
