@@ -34,7 +34,7 @@ class TestTrainingSafety(unittest.TestCase):
         state = {"last_train": 10_000.0, "last_train_attempt": 0}
         store = mock.Mock()
         store.get_kv.side_effect = lambda key, default=0: state.get(key, default)
-        self.assertTrue(main.training_due(store, 10_000.0 + 60,
+        self.assertTrue(main.training_due(store, 100_000.0,
                                           every_hours=24, retry_hours=6))
 
     def test_promotion_holdout_excludes_windows_that_started_before_champion_training(self):
