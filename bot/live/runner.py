@@ -89,19 +89,37 @@ class LiveRunner:
                 self.coins[series].mids.append((c["ts"], c["close"]))
 
     def discover(self):
-        """Find open 15-minute windows (REST, once a minute)."""
+        """Find open 15-minute windows and retain per-series coverage diagnostics."""
         found = {}
+        by_series = {}
         for series in COINS:
+            stats = {"events": 0, "markets_seen": 0, "active_markets": 0,
+                     "event_statuses": {}, "market_statuses": {}, "missing_tickers": 0}
+            by_series[series] = stats
             try:
                 events = self.rest.sports_events(series)
+                stats["events"] = len(events)
             except Exception as e:
+                stats["error"] = str(e)[:240]
                 log.warning("discover %s: %s", series, e)
                 continue
             for ev in events:
-                for m in ev.get("markets", []):
-                    if m.get("status") in ("active", "open"):
-                        found[m["ticker"]] = {"series": series, "event": ev.get("event_ticker"),
-                                              "raw": m, "terms": settlement.contract_terms(m)}
+                event_status = str(ev.get("status") or "unknown")
+                stats["event_statuses"][event_status] = stats["event_statuses"].get(event_status, 0) + 1
+                markets = ev.get("markets") or []
+                stats["markets_seen"] += len(markets)
+                for m in markets:
+                    status = str(m.get("status") or "unknown")
+                    stats["market_statuses"][status] = stats["market_statuses"].get(status, 0) + 1
+                    if status not in ("active", "open"):
+                        continue
+                    ticker = m.get("ticker")
+                    if not ticker:
+                        stats["missing_tickers"] += 1
+                        continue
+                    found[ticker] = {"series": series, "event": ev.get("event_ticker"),
+                                     "raw": m, "terms": settlement.contract_terms(m)}
+                    stats["active_markets"] += 1
         changed = set(found) != set(self.markets)
         self.markets = found
         for t in found:
@@ -109,6 +127,13 @@ class LiveRunner:
         for t in list(self.books):
             if t not in found:
                 del self.books[t]
+        health = {"ts": int(time.time()), "series": by_series,
+                  "events_seen": sum(v["events"] for v in by_series.values()),
+                  "markets_seen": sum(v["markets_seen"] for v in by_series.values()),
+                  "active_markets": len(found), "changed": changed}
+        self.summary["discovery"] = health
+        self.store.set_kv("live_discovery_health", health)
+        log.info("live market discovery: %s", json.dumps(health, sort_keys=True))
         return changed
 
     def poll_books(self, only_resync=False, only_quiet=False):
