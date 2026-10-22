@@ -25,6 +25,17 @@ This overlap means importing full competing trading systems would duplicate infr
 
 Licenses and default branches can change; re-check the exact commit and license file before copying code. This table records repository metadata, not legal advice.
 
+## Findings from the next source comparison (2026-10-21)
+
+- **Kalshi-specific reference:** its README describes forward-only settlement evaluation, Brier score/log-loss, and comparison of realized win rate with the implied price paid. This bot already has settlement grading, decision-audit outcomes, Brier scores, model-vs-Kalshi log-loss, and chronological splits. Therefore, do not import a duplicate evaluator; use those concepts to check for metric/reporting gaps.
+- **Freqtrade:** its backtesting test suite is extensive and emphasizes explicit, testable behavior around fills, fees, and exit conditions. The appropriate adaptation is targeted offline regression tests in this repository, not the Freqtrade runtime or GPL code.
+- **Qlib:** keep experiments optional and offline. A framework import is not evidence of better forecasts; compare against the current model on the same chronological holdout and retain only if it improves proper scoring and net-of-cost simulated results.
+- **Hummingbot / NautilusTrader:** use their order-book and order-lifecycle testing patterns as design references. No upstream implementation code has been copied into this bot in this step; upstream test paths and APIs must be pinned to a reviewed commit before any further reuse.
+
+### Local correction made during this pass
+
+The model trade simulator now rounds a one-contract fee up to the same cent boundary as risk.taker_fee, and the ROI denominator includes both premium and fee. The latter matters because excluding fees from committed capital inflates reported returns. Regression coverage checks the exact expected fee and net ROI. CI status for the latest commit must be verified before calling this step complete.
+
 ## Recommended integration order
 
 1. Finish and review the current safety/memory PR; do not merge automatically.
