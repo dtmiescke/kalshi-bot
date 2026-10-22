@@ -146,8 +146,7 @@ class LiveRunner:
         # Keep it separate from spot-exchange aggressor flow; both are useful
         # independent evidence and neither identifies individual traders.
         kalshi_mid = (best_yes_bid + best_yes_ask) / 2
-        recent_kalshi_flow = self.store.flow(ticker, int(now - 300))
-        flow_reading = flow_sig.trade_flow(recent_kalshi_flow, kalshi_mid)
+        flow_reading = self.kalshi_flow_reading(ticker, kalshi_mid, now)
         if flow_reading:
             readings.append(flow_reading)
         base = next((r.prob for r in readings if r.name == "crypto_model"), None)
@@ -172,6 +171,12 @@ class LiveRunner:
                                            "vol_ratio_15_60", "dist_sigma")},
                    "signals": {r.name: round(r.prob, 3) for r in readings}}
         return readings, context
+
+    def kalshi_flow_reading(self, ticker, kalshi_mid, now=None):
+        """Build an independent signal from anonymous Kalshi prints in the last 5m."""
+        now = time.time() if now is None else now
+        trades = self.store.flow(ticker, int(now - 300))
+        return flow_sig.trade_flow(trades, kalshi_mid)
 
     def tick(self, now=None):
         now = now or time.time()
