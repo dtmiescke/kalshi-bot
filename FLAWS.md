@@ -79,6 +79,8 @@ Combo research remains explicitly opt-in through the existing `COMBO_RESEARCH_EN
 
 | 36 | **Insufficient training data looked like successful training.** The scheduler updated `last_train` even when the model returned `not enough data`. | Training could be silently postponed for another 24 hours despite the dataset still being below the required 300 windows; the workflow remained green without a new model. | Track attempt time and outcome separately, retry insufficient-data cases on a configurable 6-hour backoff, and keep the normal 24-hour cadence after a real training run. A missing legacy status triggers one migration attempt. `main.py` · `tests/test_training_safety.py` |
 
+| 37 | **A zero-market live burst had no root-cause telemetry.** The scheduler could report `markets: 0` without showing whether each crypto series had no events, no nested markets, inactive statuses, missing tickers, or an API error. | An apparently green 8-minute burst could silently do no market research, and operators could not distinguish a quiet market window from a discovery/API regression. | Persist `live_discovery_health` with per-series event counts, nested-market counts, market/event status distributions, missing ticker counts, and errors; include it in the existing live summary/logs. This is observability only and does not change trading eligibility. `live/runner.py` · `tests/test_live.py` |
+
 ## What code can't remove
 - **Competition.** Professional bots trade these markets; a real edge may not exist. The promotion gates and the live monitor are how you find out without paying for it.
 - **Kalshi rules and fees change.** Check the fee rate (`TAKER_FEE_RATE`, `MAKER_FEE_RATE`), the averaging window (`SETTLE_AVG_SECONDS`), and the series tickers.
