@@ -118,3 +118,10 @@ A real/demo maker response without an exchange order ID is no longer inserted in
 ### Maker fill-count ambiguity
 
 Order reconciliation now treats missing or malformed fill counts as unknown rather than proof of zero fills. Explicit terminal `executed`/`filled` states without a count conservatively reserve the requested quantity as filled; explicit canceled/expired/rejected states without a count are treated as zero filled. Ambiguous nonterminal states remain tracked. Regression tests cover these cases. This policy intentionally favors not losing a possible position over silently releasing exposure.
+
+
+### Durable maker-order recovery and flow intelligence
+
+For demo/live maker orders, the runner now persists a `maker_recovery` intent before the placement request, updates it with the exchange order ID after a confirmed response, and clears it only after a confirmed terminal reconciliation / ledger action. A lost response or missing order ID sets `execution_reconciliation_required`; `guard.status` honors this durable circuit breaker across restarts. If a prior run left a maker intent, the next live/demo runner pauses and requires manual reconciliation of Kalshi open orders and positions against the local ledger before the incident key is cleared. This is intentionally fail-closed and is not automatic exchange recovery.
+
+Sports intelligence already included vig-free sportsbook consensus and historical line movement, plus anonymous Kalshi trade-flow features. The crypto live runner now polls Kalshi public trades at a 15-second per-market cadence and includes the latest five minutes in its trade-flow reading, alongside Kraken/Coinbase aggressor and order-book flow. These are anonymous public prints: they can indicate side, size concentration, and sweeps, but cannot reveal individual bettor identities or their account-level positions. The flow signal is research evidence, not proof of informed money and not a standalone order trigger.
