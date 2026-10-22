@@ -25,6 +25,7 @@ import requests
 from . import brain, features, ml, vol as volmod
 from .live.settlement import contract_terms, prob_above
 from .risk import taker_fee
+from .metrics import binary_contract_roi
 
 log = logging.getLogger("bot")
 COINBASE_CANDLES = "https://api.exchange.coinbase.com/products/{pair}/candles"
@@ -176,13 +177,10 @@ def evaluate(records_by_market, fee_rate, thresholds=THRESHOLDS):
                     continue
                 break
         if bets:
-            # Return on total committed capital must include transaction fees;
-            # excluding them inflates the historical replay ROI.
-            staked = sum(b["cost"] + b["fee"] for b in bets)
-            pnl = sum((1 - b["cost"] if b["won"] else -b["cost"]) - b["fee"] for b in bets)
+            _, _, roi = binary_contract_roi(bets)
             res["thresholds"][t] = {"bets": len(bets),
                                     "win_rate": round(sum(b["won"] for b in bets) / len(bets), 3),
-                                    "roi": round(pnl / staked, 4)}
+                                    "roi": round(roi, 4) if roi is not None else None}
         else:
             res["thresholds"][t] = {"bets": 0}
     # FOMO check: after big 5-minute moves, how does Kalshi compare with the model?
