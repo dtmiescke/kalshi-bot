@@ -48,7 +48,7 @@ The model trade simulator now rounds a one-contract fee up to the same cent boun
 | Risk limits and order sizing | `bot/risk.py`, `bot/guard.py`, `bot/engine.py` | Second independent risk engine that can disagree with existing gates |
 | User interface | Existing dashboard assets | External project dashboard or UI framework replacement |
 
-**Implementation from this pass:** `bot/ml.py` now calls `bot.risk.taker_fee` rather than maintaining a separate fee-rounding formula. This is intentionally a consolidation, not another feature. Historical replay already uses the shared risk helper. The ROI denominator in both paths includes premium plus fees. No upstream source code or production dependency was added.
+**Implementation from this pass:** `bot/ml.py` calls `bot.risk.taker_fee` rather than maintaining a separate fee-rounding formula. Both `bot/ml.py` and `bot/history.py` now use `bot/metrics.py::binary_contract_roi` for net P&L and ROI, including premium plus fees in committed capital. A regression test covers the shared helper. This is consolidation, not another feature. No upstream source code or production dependency was added.
 
 ## Recommended integration order
 
