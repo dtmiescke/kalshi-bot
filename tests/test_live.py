@@ -209,6 +209,16 @@ class TestRunnerExecution(unittest.TestCase):
         del os.environ["BOT_DB"]
         self.d.cleanup()
 
+    def test_live_maker_without_order_id_fails_closed(self):
+        from unittest.mock import patch
+        ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
+        with patch.object(self.s, "mode", "live"), patch.object(
+                self.r.engine.trade, "place_resting_buy", return_value={}):
+            self.r.start_maker(ticker, {"ticker": ticker}, plan[1], readings, 0.6, 0.8)
+        self.assertNotIn(ticker, self.r.makers)
+        self.assertFalse(self.r.betting_ok)
+        self.assertIn("maker order ID missing", self.r.betting_why)
+
     def test_pending_maker_reserves_budget_against_new_candidate(self):
         ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
         other = "KXETH15M-TEST"
