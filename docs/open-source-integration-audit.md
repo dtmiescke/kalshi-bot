@@ -108,3 +108,8 @@ The intended product is proprietary software owned by the user, with the option 
 The champion promotion path now writes the candidate bundle to a temporary file, verifies that the serialized artifact can be loaded, and atomically replaces the active model file. The previous model and metadata are copied to timestamped backups before the active artifact changes. New bundles include their own metadata, so prediction uses a consistent model/metadata pair even if the human-readable JSON sidecar update is interrupted. Legacy model bundles still fall back to the existing JSON metadata for compatibility. Unreadable/corrupt model artifacts fail closed to no prediction rather than being trusted.
 
 Regression tests cover successful artifact promotion and a simulated interruption between model replacement and sidecar replacement. This improves recovery safety but does not eliminate every filesystem, storage-provider, or power-loss failure mode. The latest workflow must pass on the final branch head before this change is considered verified.
+
+
+### Maker order identity safeguard
+
+A real/demo maker response without an exchange order ID is no longer inserted into the in-memory maker tracker as though it were safely managed. The runner records a skipped reason and pauses further betting pending reconciliation. A regression test covers the missing-ID response. This is a conservative stop, not automatic recovery: if the exchange accepted an order but omitted its ID, the operator still needs to reconcile the account's open orders before resuming.
