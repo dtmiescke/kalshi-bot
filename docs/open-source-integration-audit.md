@@ -113,3 +113,8 @@ Regression tests cover successful artifact promotion and a simulated interruptio
 ### Maker order identity safeguard
 
 A real/demo maker response without an exchange order ID is no longer inserted into the in-memory maker tracker as though it were safely managed. The runner records a skipped reason and pauses further betting pending reconciliation. A regression test covers the missing-ID response. This is a conservative stop, not automatic recovery: if the exchange accepted an order but omitted its ID, the operator still needs to reconcile the account's open orders before resuming.
+
+
+### Maker fill-count ambiguity
+
+Order reconciliation now treats missing or malformed fill counts as unknown rather than proof of zero fills. Explicit terminal `executed`/`filled` states without a count conservatively reserve the requested quantity as filled; explicit canceled/expired/rejected states without a count are treated as zero filled. Ambiguous nonterminal states remain tracked. Regression tests cover these cases. This policy intentionally favors not losing a possible position over silently releasing exposure.
