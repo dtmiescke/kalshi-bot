@@ -21,6 +21,8 @@ import json
 import logging
 import math
 import os
+import shutil
+import tempfile
 import time
 
 import numpy as np
@@ -325,23 +327,60 @@ def train(store, min_windows=300, fee_rate=0.07):
                     "beats_champion": beats_champ, "enough_test_windows": enough,
                     "profitable_thresholds": profitable, "promoted": promoted})
     if promoted:
-        os.makedirs(MODEL_DIR, exist_ok=True)
-        if champ:   # keep the old champion
-            stamp = int(time.time())
-            for ext in ("joblib", "json"):
-                src = os.path.join(MODEL_DIR, f"crypto_model.{ext}")
-                if os.path.exists(src):
-                    os.replace(src, os.path.join(MODEL_DIR, f"crypto_model_{stamp}.{ext}"))
-        joblib.dump({"model": best, "iso": iso, "cols": cols}, os.path.join(MODEL_DIR, "crypto_model.joblib"))
         meta = {"trained": time.time(), "feature_version": features.FEATURE_VERSION,
                 "cols": cols, "min_edge": min(profitable), **metrics}
-        with open(os.path.join(MODEL_DIR, "crypto_model.json"), "w") as f:
-            json.dump(meta, f, indent=1, default=str)
+        _promote_champion({"model": best, "iso": iso, "cols": cols, "meta": meta},
+                          meta, joblib)
         _CACHE.clear()
     ensure_table(store)
     store.x("INSERT INTO model_runs VALUES(?,?,?,?)",
             (int(time.time()), "crypto_model", int(promoted), json.dumps(metrics, default=str)))
     return metrics
+
+
+
+def _promote_champion(bundle, meta, joblib_module=None):
+    """Commit a model+metadata pair safely; the atomic joblib bundle is authoritative.
+
+    Metadata is embedded in the bundle so a crash while updating the human-readable
+    JSON sidecar cannot pair a new model with old metadata. The prior champion is
+    copied to a timestamped backup before the atomic replacement.
+    """
+    if joblib_module is None:
+        import joblib as joblib_module
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    model_path = os.path.join(MODEL_DIR, "crypto_model.joblib")
+    meta_path = os.path.join(MODEL_DIR, "crypto_model.json")
+    stamp = f"{int(time.time())}_{os.getpid()}"
+    # Preserve, rather than move, the last-known-good artifacts. If backup fails,
+    # abort before touching the active champion.
+    for path in (model_path, meta_path):
+        if os.path.isfile(path):
+            shutil.copy2(path, os.path.join(MODEL_DIR, f"crypto_model_{stamp}{os.path.splitext(path)[1]}"))
+    model_tmp = None
+    meta_tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix=".crypto_model_", suffix=".joblib.tmp",
+                                         dir=MODEL_DIR, delete=False) as f:
+            model_tmp = f.name
+        joblib_module.dump(bundle, model_tmp)
+        # Ensure the completed file is readable before making it the active model.
+        joblib_module.load(model_tmp)
+        os.replace(model_tmp, model_path)
+        model_tmp = None
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", prefix=".crypto_model_",
+                                         suffix=".json.tmp", dir=MODEL_DIR, delete=False) as f:
+            meta_tmp = f.name
+            json.dump(meta, f, indent=1, default=str)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(meta_tmp, meta_path)
+        meta_tmp = None
+    finally:
+        for path in (model_tmp, meta_tmp):
+            if path and os.path.exists(path):
+                os.unlink(path)
+
 
 
 # --- live prediction ---------------------------------------------------------------------
@@ -360,12 +399,24 @@ def predict(feats, coin):
     """Calibrated P(YES) from the champion model, or None if there isn't one."""
     if "m" not in _CACHE:
         path = os.path.join(MODEL_DIR, "crypto_model.joblib")
-        meta = load_meta()
-        if not (meta and os.path.exists(path) and meta.get("feature_version") == features.FEATURE_VERSION):
+        try:
+            if not os.path.isfile(path):
+                _CACHE["m"] = None
+            else:
+                import joblib
+                bundle = joblib.load(path)
+                # New artifacts carry their own matching metadata. Legacy bundles
+                # fall back to the JSON sidecar for backward compatibility.
+                meta = bundle.get("meta") or load_meta()
+                if not (isinstance(meta, dict)
+                        and meta.get("feature_version") == features.FEATURE_VERSION
+                        and all(k in bundle for k in ("model", "iso", "cols"))):
+                    _CACHE["m"] = None
+                else:
+                    _CACHE["m"] = (bundle, meta)
+        except (OSError, EOFError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+            log.error("Champion model artifact invalid; refusing prediction: %s", exc)
             _CACHE["m"] = None
-        else:
-            import joblib
-            _CACHE["m"] = (joblib.load(path), meta)
     if not _CACHE["m"] or "kalshi_logit" not in feats:
         return None, None
     bundle, meta = _CACHE["m"]
