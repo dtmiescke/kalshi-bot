@@ -28,7 +28,12 @@ on unseen data** (crypto).
 - **Market context** (`marketdata.py`): futures funding, open interest change, basis,
   options put/call ratio, Coinbase-vs-Kraken premium, Fear & Greed, economic calendar
 - **Live streams** (`live/`): Kraken 100-level book + trades, Coinbase ticker, Kalshi book;
-  depth, imbalance, aggressive flow, walls appearing / pulled / consumed, data-quality checks
+  depth, imbalance, aggressive flow, walls appearing / pulled / consumed, data-quality checks.
+- **Crowd / money-flow intelligence**: sportsbook odds are de-vigged and tracked over time;
+  sports Kalshi public prints are measured for YES/NO aggressor imbalance, large prints and sweeps.
+  The crypto live runner now also polls Kalshi's anonymous public trade tape and blends its
+  recent flow signal with Kraken/Coinbase aggressor flow. These feeds show side and size,
+  not individual bettor identities or account-level positions.
 
 **Hourly/daily crypto ladders** ("BTC above $X at 5 PM"): traded directionally with the same
 exact-contract model every run — stricter (8% edge, $5 bets, one strike per event) since the
