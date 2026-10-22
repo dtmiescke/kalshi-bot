@@ -2,8 +2,9 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
-from bot.sports_intel import _football_matchup_profile, _parse_espn, _parse_rss, ensure_schema, recent, _record_items
+from bot.sports_intel import _football_matchup_profile, _parse_espn, _parse_rss, _request, ensure_schema, recent, _record_items
 from bot.storage import Store
 
 
@@ -15,6 +16,25 @@ class TestSportsIntelligence(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    @patch("bot.sports_intel.requests.get")
+    def test_espn_request_falls_back_when_primary_host_is_forbidden(self, get):
+        forbidden = Mock()
+        forbidden.raise_for_status.side_effect = __import__("requests").HTTPError("403 Forbidden")
+        ok = Mock()
+        ok.content = b'{"events":[]}'
+        ok.raise_for_status.return_value = None
+        get.side_effect = [forbidden, ok]
+
+        response = _request("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard")
+
+        self.assertIs(response, ok)
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(
+            get.call_args_list[1].args[0],
+            "https://site.web.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
+        )
+        self.assertIn("Referer", get.call_args_list[1].kwargs["headers"])
 
     def test_rss_parses_and_deduplicates_stable_ids(self):
         xml = b"""<?xml version="1.0"?><rss><channel><item><title>Star player ruled out</title><link>https://example.test/story</link><description>Official update</description><pubDate>Wed, 21 Oct 2026 12:00:00 GMT</pubDate></item></channel></rss>"""
