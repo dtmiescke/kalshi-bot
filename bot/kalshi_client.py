@@ -225,8 +225,8 @@ class KalshiClient:
 
     def orderbook(self, ticker, depth=20):
         """Returns {'yes': [(price, qty), ...], 'no': [...]} as bids, best first."""
-        ob = self._req("GET", f"/markets/{ticker}/orderbook",
-                       params={"depth": depth}).get("orderbook") or {}
+        data = self._req("GET", f"/markets/{ticker}/orderbook", params={"depth": depth})
+        ob = data.get("orderbook_fp") or data.get("orderbook") or {}
         out = {}
         for side in ("yes", "no"):
             levels = ob.get(f"{side}_dollars") or ob.get(side) or []
