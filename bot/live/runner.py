@@ -26,6 +26,7 @@ from ..grader import grade
 from ..kalshi_client import KalshiClient, price
 from ..llm import LLM
 from ..signals import crypto as crypto_sig
+from ..signals import flow as flow_sig
 from ..signals import implied_vol as iv
 from ..signals.base import Reading, clamp
 from . import feeds, settlement
@@ -60,6 +61,7 @@ class LiveRunner:
         self.books = {}           # ticker -> KalshiBook
         self.pending = set()      # tickers under council review
         self.last_saved = {}
+        self.last_flow_poll = {}  # REST trade-flow polling is throttled per market
         self.betting_ok, self.betting_why = True, "ok"
         self.summary = {"mode": self.s.mode, "markets": 0, "bets": 0, "skipped": {}, "alerts": []}
         self.seed = seed
@@ -138,6 +140,16 @@ class LiveRunner:
             context=self.ctx_cache.get(info["series"], {}) if self.with_context else {})
         if not readings:
             return None, None
+        # Kalshi's public trade tape is anonymous, but reveals which outcome
+        # aggressive traders are buying, trade size concentration, sweeps, and
+        # whether contract prices move before the reference spot/book.
+        # Keep it separate from spot-exchange aggressor flow; both are useful
+        # independent evidence and neither identifies individual traders.
+        kalshi_mid = (best_yes_bid + best_yes_ask) / 2
+        recent_kalshi_flow = self.store.flow(ticker, int(now - 300))
+        flow_reading = flow_sig.trade_flow(recent_kalshi_flow, kalshi_mid)
+        if flow_reading:
+            readings.append(flow_reading)
         base = next((r.prob for r in readings if r.name == "crypto_model"), None)
         f = a.flow(now, 60)
         if base is not None and f["trades"] >= 10:
@@ -547,6 +559,16 @@ class LiveRunner:
                 self.betting_ok, self.betting_why = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
                 asyncio.create_task(asyncio.to_thread(self.refresh_context))
                 last_guard = now
+            # Pull the public Kalshi trade tape at a conservative per-market
+            # cadence. This complements Kraken/Coinbase aggressor flow and avoids
+            # hammering REST on every one-second inference tick.
+            for ticker in list(self.markets):
+                if now - self.last_flow_poll.get(ticker, 0) >= 15:
+                    try:
+                        await asyncio.to_thread(self.engine.pull_flow, ticker, int(now))
+                    except Exception as exc:
+                        log.warning("crypto trade-flow poll %s: %s", ticker, exc)
+                    self.last_flow_poll[ticker] = now
             for ticker, readings, ctx, plan in list(self.tick(now)):
                 asyncio.create_task(self._review(ticker, readings, ctx, plan))
             if now - last_dump >= 10:
