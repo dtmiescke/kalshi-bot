@@ -73,7 +73,7 @@ so it can't silently come back.
 | 33 | **Invalid model-decay comparisons.** The decay monitor grouped by event instead of exact contract and mixed sports grades into a crypto-model health decision. | A few arbitrary strike rows or unrelated sports results could mask or falsely trigger crypto model demotion. | Store new grade segments by exact market ticker and compare paired `ml_model` / `kalshi_market` Brier scores only on 15-minute crypto contracts. Historical event-keyed rows remain less granular. `grader.py` · `tests/test_grader_reliability.py` |
 | 34 | **Hard-stop bypass by direct command.** The CLI's `clear-pause` command previously removed the durable stop without requiring the workflow's manual confirmation. | A local or accidental invocation could resume order attempts while exchange orders/positions remain unreconciled. | Require `CONFIRM_RECONCILED=yes` and pass it only after the manual workflow's explicit YES input; update the prompt to require checking open orders and positions. `main.py` · `tests/test_clear_pause.py` |
 
-Read-only combo research now defaults to enabled in the scheduled workflow while `COMBOS_ENABLED` remains off; set the repository variable `COMBO_RESEARCH_ENABLED=no` to disable the scan. This changes discovery/telemetry only, not order execution.
+Combo research remains explicitly opt-in through the existing `COMBO_RESEARCH_ENABLED` control; `COMBOS_ENABLED` remains off and is rejected by config validation because combo order execution is not implemented.
 
 ## What code can't remove
 - **Competition.** Professional bots trade these markets; a real edge may not exist. The promotion gates and the live monitor are how you find out without paying for it.
