@@ -156,6 +156,23 @@ class FakeRest:
 
 
 class TestRunner(unittest.TestCase):
+    def test_discover_records_per_series_market_coverage(self):
+        from bot.live.runner import LiveRunner
+        with tempfile.TemporaryDirectory() as d:
+            os.environ["BOT_DB"] = os.path.join(d, "b.db")
+            s = Settings()
+            store = Store(s.db_path)
+            r = LiveRunner(s, store, rest=FakeRest(time.time() + 360),
+                           llm=None, seed=False, with_context=False)
+            r.discover()
+            health = store.get_kv("live_discovery_health")
+            self.assertEqual(health["active_markets"], 1)
+            self.assertEqual(health["series"]["KXBTC15M"]["events"], 1)
+            self.assertEqual(health["series"]["KXBTC15M"]["markets_seen"], 1)
+            self.assertEqual(health["series"]["KXBTC15M"]["active_markets"], 1)
+            self.assertEqual(health["series"]["KXETH15M"]["events"], 0)
+            del os.environ["BOT_DB"]
+
     def test_tick_shortlists_then_council_and_recheck_place(self):
         from bot.live.runner import LiveRunner
         with tempfile.TemporaryDirectory() as d:
