@@ -21,7 +21,9 @@ python -m bot.main dashboard > /dev/null || echo "WARNING: dashboard failed; sav
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
-cp data/bot.sqlite "$WORK/bot.sqlite"
+# Store a compressed SQLite snapshot on bot-data to keep Git objects below
+# GitHub's 50 MB recommended file size. load.sh still reads legacy bot.sqlite.
+gzip -n -c data/bot.sqlite > "$WORK/bot.sqlite.gz"
 cp /tmp/REPORT.txt "$WORK/REPORT.txt"
 [ ! -f data/BRIEFING.txt ] || cp data/BRIEFING.txt "$WORK/BRIEFING.txt"
 [ ! -f data/live_summary.json ] || cp data/live_summary.json "$WORK/LIVE.json"

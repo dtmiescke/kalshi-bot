@@ -10,13 +10,16 @@ if git fetch -q origin bot-data; then
   rm -rf /tmp/bd
   git worktree add -q /tmp/bd origin/bot-data
 
-  if [ ! -s /tmp/bd/bot.sqlite ]; then
-    echo "ERROR: Persistent bot-data branch has no non-empty bot.sqlite; refusing to start fresh." >&2
+  if [ -s /tmp/bd/bot.sqlite.gz ]; then
+    gzip -dc /tmp/bd/bot.sqlite.gz > data/bot.sqlite
+  elif [ -s /tmp/bd/bot.sqlite ]; then
+    # Backward-compatible migration from older bot-data snapshots.
+    cp /tmp/bd/bot.sqlite data/bot.sqlite
+  else
+    echo "ERROR: Persistent bot-data branch has neither bot.sqlite.gz nor bot.sqlite; refusing to start fresh." >&2
     git worktree remove --force /tmp/bd || true
     exit 1
   fi
-
-  cp /tmp/bd/bot.sqlite data/bot.sqlite
   [ ! -f /tmp/bd/BRIEFING.txt ] || cp /tmp/bd/BRIEFING.txt data/BRIEFING.txt
   [ ! -d /tmp/bd/models ] || cp -r /tmp/bd/models/. data/models/
   git worktree remove --force /tmp/bd

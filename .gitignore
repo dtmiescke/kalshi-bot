@@ -2,3 +2,8 @@
 *.pem
 __pycache__/
 *.pyc
+
+# Runtime database is persisted separately on the bot-data branch.
+data/bot.sqlite
+data/bot.sqlite-*
+data/bot.sqlite.gz
