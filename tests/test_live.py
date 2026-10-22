@@ -209,6 +209,16 @@ class TestRunnerExecution(unittest.TestCase):
         del os.environ["BOT_DB"]
         self.d.cleanup()
 
+    def test_maker_terminal_execution_without_fill_count_assumes_full_fill(self):
+        self.assertEqual(self.r._maker_order_state({"status": "executed"}, 7), (7, "executed", True))
+
+    def test_maker_missing_fill_count_on_open_order_is_not_terminal(self):
+        self.assertEqual(self.r._maker_order_state({"status": "resting"}, 7), (0, "resting", False))
+
+    def test_maker_malformed_fill_count_is_not_zero_fill_confirmation(self):
+        self.assertEqual(self.r._maker_order_state({"status": "resting", "fill_count_fp": "bad"}, 7),
+                         (0, "resting", False))
+
     def test_live_maker_without_order_id_fails_closed(self):
         from unittest.mock import patch
         ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
