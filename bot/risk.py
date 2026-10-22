@@ -147,7 +147,7 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
     earned = earned_size(store, mkt, mode=s.mode)
     if s.fixed_bet > 0:
         # A fixed target is still scaled by the earned-size safety ramp.
-        want = s.fixed_bet * earned
+        want = max(min(s.fixed_bet, 1.0), s.fixed_bet * earned)
     else:   # fractional Kelly on the FEE-INCLUSIVE cost, scaled by confidence
         cost = price + taker_fee(100, price, rate) / 100
         kelly = max(0.0, (p_win - cost) / (1 - cost))
