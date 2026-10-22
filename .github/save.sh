@@ -16,8 +16,8 @@ if [ -z "${GITHUB_TOKEN:-}" ] || [ -z "${GITHUB_REPOSITORY:-}" ]; then
 fi
 
 python -c 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); result=c.execute("PRAGMA quick_check").fetchone()[0]; print("SQLite quick_check:", result); sys.exit(result != "ok")' data/bot.sqlite
-python -m bot.main report > /tmp/REPORT.txt
-python -m bot.main dashboard > /dev/null
+python -m bot.main report > /tmp/REPORT.txt || { echo "WARNING: report failed; saving memory anyway." >&2; echo "report unavailable" > /tmp/REPORT.txt; }
+python -m bot.main dashboard > /dev/null || echo "WARNING: dashboard failed; saving memory anyway." >&2
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
