@@ -209,6 +209,16 @@ class TestRunnerExecution(unittest.TestCase):
         del os.environ["BOT_DB"]
         self.d.cleanup()
 
+    def test_pending_maker_reserves_budget_against_new_candidate(self):
+        ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
+        other = "KXETH15M-TEST"
+        self.r.makers[other] = {"order_id": "pending", "placed": self.now,
+                                "plan": {"contracts": 10, "limit": 0.5}}
+        self.r.finish(ticker, readings, ctx, plan, {"decision": "approve", "by": "numbers"})
+        self.assertEqual(self.store.open_bets(), [])
+        self.assertEqual(self.r.summary["bets"], 0)
+        self.assertIn("recheck: pending maker reserves risk budget", self.r.summary["skipped"])
+
     def test_stale_kalshi_book_blocks_post_council_execution(self):
         ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
         # Simulate a feed gap after the initial shortlist/council review.
