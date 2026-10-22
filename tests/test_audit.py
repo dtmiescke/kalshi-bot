@@ -44,11 +44,20 @@ class TestAudit(unittest.TestCase):
         self.assertEqual(live["open_positions"], 1)
         self.assertAlmostEqual(live["open_cost"], 5.2)
         self.assertAlmostEqual(live["cash"], 94.8)
-        self.assertEqual(self.st.staked_since(0, mode="live"), 5.0)
+        self.assertAlmostEqual(self.st.staked_since(0, mode="live"), 5.2)
+        self.assertAlmostEqual(self.st.staked_on_event("LIVE-E", mode="live"), 5.2)
         self.assertEqual(self.st.staked_on_event("PAPER-E", mode="live"), 0)
         self.assertFalse(self.st.has_open_event_bet("PAPER-E", mode="live"))
         self.assertTrue(self.st.has_open_event_bet("PAPER-E", mode="paper"))
         self.assertEqual([row["ticker"] for row in self.st.open_bets(mode="live")], ["LIVE-OPEN"])
+
+    def test_risk_spend_caps_include_fees(self):
+        bet(self.st, ts=100, mode="paper", ticker="FEE-1", event_ticker="GAME-E",
+            series="KXBTC15M", stake=5.0, fee=0.25)
+        self.assertAlmostEqual(self.st.staked_since(0, mode="paper"), 5.25)
+        self.assertAlmostEqual(self.st.staked_on_event("GAME-E", mode="paper"), 5.25)
+        self.assertAlmostEqual(risk.staked_on_window(self.st, "KXBTC15M-26OCT191830",
+                                                   mode="paper"), 5.25)
 
     def test_earned_size_uses_only_selected_account_mode(self):
         paper_id = bet(self.st, mode="paper", ticker="PAPER-LOSS")
