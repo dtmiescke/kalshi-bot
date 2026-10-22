@@ -222,3 +222,54 @@ class TestMarketData(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestChampionArtifactSafety(unittest.TestCase):
+    def test_champion_metadata_is_embedded_and_atomically_promoted(self):
+        from unittest.mock import patch
+        import json
+        import joblib
+
+        with tempfile.TemporaryDirectory() as d:
+            meta = {"feature_version": features.FEATURE_VERSION, "trained": 123}
+            bundle = {"model": "candidate", "iso": "calibrator", "cols": ["kalshi_logit"],
+                      "meta": meta}
+            with patch.object(ml, "MODEL_DIR", d):
+                ml._promote_champion(bundle, meta, joblib)
+                active = joblib.load(os.path.join(d, "crypto_model.joblib"))
+                with open(os.path.join(d, "crypto_model.json"), encoding="utf-8") as f:
+                    sidecar = json.load(f)
+                self.assertEqual(active["meta"], meta)
+                self.assertEqual(sidecar, meta)
+
+    def test_interrupted_sidecar_write_keeps_model_metadata_consistent(self):
+        from unittest.mock import patch
+        import joblib
+
+        with tempfile.TemporaryDirectory() as d:
+            old_meta = {"feature_version": features.FEATURE_VERSION, "trained": 1}
+            old_bundle = {"model": "old", "iso": "old-calibrator", "cols": ["kalshi_logit"],
+                          "meta": old_meta}
+            ml._promote_champion(old_bundle, old_meta, joblib)
+            new_meta = {"feature_version": features.FEATURE_VERSION, "trained": 2}
+            new_bundle = {"model": "new", "iso": "new-calibrator", "cols": ["kalshi_logit"],
+                          "meta": new_meta}
+            real_replace = os.replace
+            calls = {"n": 0}
+
+            def fail_second_replace(src, dst):
+                calls["n"] += 1
+                if calls["n"] == 2:
+                    raise OSError("simulated interruption before metadata sidecar commit")
+                return real_replace(src, dst)
+
+            with patch.object(ml, "MODEL_DIR", d), patch.object(os, "replace", side_effect=fail_second_replace):
+                with self.assertRaises(OSError):
+                    ml._promote_champion(new_bundle, new_meta, joblib)
+                active = joblib.load(os.path.join(d, "crypto_model.joblib"))
+                self.assertEqual(active["meta"], new_meta)
+                # The sidecar can lag after a crash, but prediction metadata travels
+                # inside the atomically committed model artifact and stays consistent.
+                self.assertEqual(ml.load_meta(), old_meta)
+                self.assertTrue(any(name.endswith(".joblib") and name.startswith("crypto_model_")
+                                    for name in os.listdir(d)))
