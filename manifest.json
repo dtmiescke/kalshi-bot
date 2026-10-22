@@ -1,0 +1,10 @@
+{
+  "name": "Kalshi Bot",
+  "short_name": "Kalshi Bot",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#120b2e",
+  "theme_color": "#120b2e",
+  "icons": [{"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}]
+}
