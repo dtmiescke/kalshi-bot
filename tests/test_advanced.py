@@ -61,7 +61,9 @@ class TestVol(unittest.TestCase):
 
 class TestModel(unittest.TestCase):
     def test_shared_roi_accounting_includes_fees(self):
-        from bot.metrics import binary_contract_roi
+        from bot.metrics import binary_contract_roi, net_roi
+        self.assertAlmostEqual(net_roi(0.50, 1.10), 0.50 / 1.10)
+        self.assertIsNone(net_roi(1.0, 0.0))
         pnl, capital, roi = binary_contract_roi([
             {"won": True, "cost": 0.505, "fee": 0.02},
             {"won": False, "cost": 0.40, "fee": 0.02},
