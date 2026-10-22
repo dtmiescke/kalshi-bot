@@ -80,7 +80,7 @@ def window_key(event_ticker):
 
 def staked_on_window(store, event_ticker, mode=None):
     key = window_key(event_ticker)
-    r = store.q("""SELECT COALESCE(SUM(stake),0) s FROM bets WHERE status='open'
+    r = store.q("""SELECT COALESCE(SUM(stake + fee),0) s FROM bets WHERE status='open'
                    AND series LIKE '%15M' AND event_ticker LIKE ?
                    AND (? IS NULL OR mode=?)""", (f"%-{key}", mode, mode))
     return r[0]["s"]
