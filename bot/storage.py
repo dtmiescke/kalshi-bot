@@ -354,12 +354,12 @@ class Store:
                           AND (? IS NULL OR mode=?) ORDER BY ts""", (mode, mode))
 
     def staked_since(self, ts, mode=None):
-        r = self.q("""SELECT COALESCE(SUM(stake),0) s FROM bets
+        r = self.q("""SELECT COALESCE(SUM(stake + fee),0) s FROM bets
                       WHERE ts>=? AND (? IS NULL OR mode=?)""", (ts, mode, mode))
         return r[0]["s"]
 
     def staked_on_event(self, event_ticker, mode=None):
-        r = self.q("""SELECT COALESCE(SUM(stake),0) s FROM bets
+        r = self.q("""SELECT COALESCE(SUM(stake + fee),0) s FROM bets
                       WHERE event_ticker=? AND (? IS NULL OR mode=?)""",
                    (event_ticker, mode, mode))
         return r[0]["s"]
