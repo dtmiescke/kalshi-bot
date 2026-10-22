@@ -75,3 +75,29 @@ The model trade simulator now rounds a one-contract fee up to the same cent boun
 ## Scope and limitations
 
 This is an initial architecture/source review, not a formal security audit of every file in each upstream project. No upstream code has been copied by this document. The goal is to select and verify small, justified improvements instead of combining entire bots.
+
+
+## Expanded pinned-source comparison (2026-10-22)
+
+This is a targeted source review, not a line-by-line audit of each entire upstream repository. The following upstream source files were retrieved and inspected directly; refs are pinned so the reviewed snapshot can be reproduced.
+
+| Upstream | Reviewed source at pinned commit | What it contributes to the comparison | Decision for this bot |
+|---|---|---|---|
+| Hummingbot | [client_order_tracker.py](https://github.com/hummingbot/hummingbot/blob/9af100d6822da7d2d0291a906c730ef172284ee2/hummingbot/connector/client_order_tracker.py) — `9af100d6822da7d2d0291a906c730ef172284ee2` | Client-side order state tracking and exchange event reconciliation | Keep the existing Kalshi runner/client. Continue adding focused tests around missing status, partial fills, cancellation and reconciliation; do not introduce a second order tracker without a demonstrated gap. |
+| Freqtrade | [backtesting.py](https://github.com/freqtrade/freqtrade/blob/0db79d391f646eafbdf3c0976dd55dc90b296522/freqtrade/optimize/backtesting.py) — `0db79d391f646eafbdf3c0976dd55dc90b296522` | Backtest execution assumptions, order processing and performance accounting | Use as a test-design reference. Do not copy GPL-3.0 implementation code into the product without a deliberate distribution/licensing decision. |
+| Microsoft Qlib | [backtest.py](https://github.com/microsoft/qlib/blob/54355232463878d2eebb91fe0ee5fa7fa1f5976c/qlib/backtest/backtest.py) — `54355232463878d2eebb91fe0ee5fa7fa1f5976c` | Separation of strategy decisions, execution and portfolio/account simulation | Keep any experiment offline and benchmarked on the same chronological settled Kalshi windows. Qlib is not currently a production dependency. |
+| NautilusTrader | [manager.rs](https://github.com/nautechsystems/nautilus_trader/blob/bb8050e2173851ec84ce78b553cd5089fe232166/crates/execution/src/order_manager/manager.rs) — `bb8050e2173851ec84ce78b553cd5089fe232166` | Explicit order lifecycle and execution state management | Retain the current smaller runner. Use lifecycle cases to guide tests; do not wholesale replace the engine or copy LGPL-3.0 code without license review. |
+| Kalshi AI Trading Bot | [jev_backtest.py](https://github.com/ryanfrigo/kalshi-ai-trading-bot/blob/7b9667bb7e7e7b263f14b54ab8647a05cbdd1383/scripts/jev_backtest.py) — `7b9667bb7e7e7b263f14b54ab8647a05cbdd1383` | Explicit out-of-sample evaluation against Kalshi market prices at a defined decision time | Existing bot already has chronological splits, market-implied log-loss comparison and settlement grading. Compare methodology and add only a missing, tested metric—not a duplicate evaluator. |
+
+The pinned snapshots were resolved through GitHub repository metadata and source files were retrieved. The license identifiers were separately checked from repository metadata on 2026-10-21/22: Hummingbot Apache-2.0; Freqtrade GPL-3.0; Qlib MIT; NautilusTrader LGPL-3.0; Kalshi AI Trading Bot MIT. This is an engineering comparison, not a legal opinion or a guarantee that every file in a repository has identical licensing.
+
+### Commercial ownership constraint
+
+The intended product is proprietary software owned by the user, with the option to offer subscription access later. No upstream source code was copied in this comparison and no runtime dependency was added. Prefer independent implementations of general ideas. Before any future code reuse or dependency addition, record the exact source commit, file, license, modifications, notices/source-offer obligations (if any), dependency transitivity, and whether distribution or hosted use changes the analysis. The Freqtrade GPL-3.0 and NautilusTrader LGPL-3.0 projects need particular review before code-level reuse. Subscription hosting does not transfer ownership of the user's original code, but it also does not erase third-party license obligations.
+
+### Verification checkpoint
+
+- Latest checked CI for branch head `e6f7d2a0d3899d5e1009a5ab76fcd5bc347fec9b`: 136 tests passed; Python compilation and workflow shell validation passed.
+- PR #2 is still open and unmerged.
+- The pending-maker regression confirms a second candidate is blocked while an earlier maker order is tracked. This is a conservative interim guard, not a complete reservation ledger; the robust future design is explicit reserved exposure plus reconciliation of unknown order states.
+- Remaining verification is broader than CI: this review has not established live exchange correctness under every network failure, conducted an external security audit, verified every deployment secret/setting, or proven trading profitability. Those are not claims this document makes.
