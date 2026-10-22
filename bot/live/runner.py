@@ -68,6 +68,12 @@ class LiveRunner:
         self.with_context = with_context
         self.seed_candles = {}    # series -> Coinbase 1-minute candles (OHLCV)
         self.makers = {}          # ticker -> resting maker order
+        # A prior process may have died after Kalshi accepted a resting order.
+        # Do not resume trading until that exchange state is reconciled manually.
+        prior_maker = self.store.get_kv("maker_recovery")
+        if prior_maker and self.s.mode in ("demo", "live"):
+            self.store.set_kv("execution_reconciliation_required",
+                              "unresolved maker order from prior run; reconcile Kalshi open orders/positions before resuming")
         self.vol_samples, self.vol_done = {}, {}
         self.ctx_cache = {}       # series -> market context, refreshed off the hot loop
 
@@ -282,7 +288,16 @@ class LiveRunner:
             self._skip(f"maker blocked at execution boundary: {reason}")
             return
         order_id = f"paper-maker-{int(time.time())}"
-        if self.s.mode in ("demo", "live"):
+        real_order = self.s.mode in ("demo", "live")
+        if real_order:
+            # Persist intent BEFORE network I/O. If the process dies or the
+            # response is lost after the exchange accepts it, the next run
+            # fails closed instead of silently forgetting the possible order.
+            self.store.set_kv("maker_recovery", {
+                "state": "submitting", "ticker": ticker, "side": plan["side"],
+                "contracts": int(plan["contracts"]), "limit": float(plan["limit"]),
+                "created_ts": int(time.time()), "mode": self.s.mode,
+            })
             try:
                 o = self.engine.trade.place_resting_buy(ticker, plan["side"], plan["contracts"],
                                                         plan["limit"], self.s.maker_wait_s + 15)
@@ -292,10 +307,19 @@ class LiveRunner:
                     self._skip("maker order ID missing; manual reconciliation required")
                     self.betting_ok = False
                     self.betting_why = "maker order ID missing; reconciliation required"
+                    self.store.set_kv("execution_reconciliation_required", self.betting_why)
                     return
             except Exception as e:
                 log.error("maker order failed %s: %s", ticker, e)
+                self.betting_ok = False
+                self.betting_why = "maker submission outcome unknown; reconcile exchange orders before resuming"
+                self.store.set_kv("execution_reconciliation_required", self.betting_why)
                 return
+            self.store.set_kv("maker_recovery", {
+                "state": "active", "ticker": ticker, "side": plan["side"],
+                "contracts": int(plan["contracts"]), "limit": float(plan["limit"]),
+                "order_id": order_id, "created_ts": int(time.time()), "mode": self.s.mode,
+            })
         self.makers[ticker] = {"snap": snap, "plan": plan, "readings": readings, "prob": prob,
                                "conf": conf, "order_id": order_id, "placed": time.time()}
         log.info("MAKER %s %s x%d resting @ $%.2f", ticker, plan["side"], plan["contracts"],
@@ -395,6 +419,8 @@ class LiveRunner:
                 self.summary["alerts"].append("{} maker fill {} x{} @ ${:.2f}".format(
                     ticker, plan["side"].upper(), filled, plan["limit"]))
                 self.store.log_maker(ticker, 1, "filled", now - mk["placed"])
+                if real_order:
+                    self.store.set_kv("maker_recovery", None)
                 del self.makers[ticker]
             elif terminal or edge_gone or expired or not self.betting_ok:
                 if not self.betting_ok:
@@ -407,6 +433,8 @@ class LiveRunner:
                     self._skip("maker not filled")
                     outcome = "expired" if expired else "cancelled"
                 self.store.log_maker(ticker, 0, outcome, now - mk["placed"])
+                if real_order:
+                    self.store.set_kv("maker_recovery", None)
                 del self.makers[ticker]
 
     def _side_edge(self, ticker, side, price, now):
