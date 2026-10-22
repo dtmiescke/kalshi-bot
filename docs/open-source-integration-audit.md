@@ -45,7 +45,7 @@ The model trade simulator now rounds a one-contract fee up to the same cent boun
 | Model fitting, time splits, promotion gate | `bot/ml.py` | Qlib/Freqtrade runtime model trainer in production |
 | Live order book, freshness, and final recheck | `bot/live/` runner/book modules | Hummingbot/NautilusTrader order-book or execution engine replacement |
 | Settled-bet grading, CLV, decision audit | `bot/grader.py` + `bot/storage.py`; ROI reporting via `bot/report.py` and `bot/metrics.py` | Duplicate settlement/grading tables or independent ROI formulas |
-| Risk limits and order sizing | `bot/risk.py`, `bot/guard.py`, `bot/engine.py` | Second independent risk engine that can disagree with existing gates |
+| Risk limits and order sizing | `bot/risk.py`, `bot/guard.py`, `bot/engine.py`, `bot/storage.py` | Second independent risk engine; daily, event, and crypto-window spend caps now include fees |
 | User interface | Existing dashboard assets | External project dashboard or UI framework replacement |
 
 **Implementation from this pass:** `bot/ml.py` calls `bot.risk.taker_fee` rather than maintaining a separate fee-rounding formula. `bot/ml.py`, `bot/history.py`, and `bot/backtest.py` use `bot/metrics.py::binary_contract_roi`. The realized performance report uses `bot/metrics.py::net_roi` and now includes fees in committed capital; reported P&L remains net of fees. The shared helper handles zero capital safely. A regression test covers the shared helper. This is consolidation, not another feature. No upstream source code or production dependency was added.
