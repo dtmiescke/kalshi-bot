@@ -36,6 +36,20 @@ Licenses and default branches can change; re-check the exact commit and license 
 
 The model trade simulator now rounds a one-contract fee up to the same cent boundary as risk.taker_fee, and the ROI denominator includes both premium and fee. The latter matters because excluding fees from committed capital inflates reported returns. Regression coverage checks the exact expected fee and net ROI. CI status for the latest commit must be verified before calling this step complete.
 
+## Duplicate-feature / ownership matrix
+
+| Capability | Single source of truth in this bot | Do not add in parallel |
+|---|---|---|
+| Contract fees and cost basis | `bot/risk.py` (`taker_fee`) | Separate fee formulas inside model, replay, or external adapters |
+| Historical replay and realized outcomes | `bot/history.py` | A second Kalshi backtester that reports competing ROI figures |
+| Model fitting, time splits, promotion gate | `bot/ml.py` | Qlib/Freqtrade runtime model trainer in production |
+| Live order book, freshness, and final recheck | `bot/live/` runner/book modules | Hummingbot/NautilusTrader order-book or execution engine replacement |
+| Settled-bet grading, CLV, decision audit | `bot/grader.py` + `bot/storage.py` | Duplicate settlement/grading tables or parallel win-rate dashboards |
+| Risk limits and order sizing | `bot/risk.py`, `bot/guard.py`, `bot/engine.py` | Second independent risk engine that can disagree with existing gates |
+| User interface | Existing dashboard assets | External project dashboard or UI framework replacement |
+
+**Implementation from this pass:** `bot/ml.py` now calls `bot.risk.taker_fee` rather than maintaining a separate fee-rounding formula. This is intentionally a consolidation, not another feature. Historical replay already uses the shared risk helper. The ROI denominator in both paths includes premium plus fees. No upstream source code or production dependency was added.
+
 ## Recommended integration order
 
 1. Finish and review the current safety/memory PR; do not merge automatically.
