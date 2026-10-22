@@ -4,6 +4,7 @@ import time
 from collections import defaultdict
 
 from . import brain, guard
+from .metrics import net_roi
 
 
 def _pct(x):
@@ -32,11 +33,14 @@ def build(store):
         makers = [b for b in bets if b.get("style") == "maker"]
         if makers:
             lines.append(f"Maker (limit) fills: {len(makers)} of {len(bets)} bets")
-        staked = sum(b["stake"] for b in graded)
+        # Settlement P&L is already net of fees; include those fees in
+        # committed capital too so reported ROI matches offline simulations.
+        staked = sum((b["stake"] or 0) + (b["fee"] or 0) for b in graded)
         pnl = sum(b["pnl"] or 0 for b in graded)
+        roi = net_roi(pnl, staked)
         clvs = [b["clv"] for b in graded if b["clv"] is not None]
         lines.append(f"Win rate: {_pct(wins / len(graded))}  (means little on its own)")
-        lines.append(f"P&L: ${pnl:+.2f} on ${staked:.2f} staked  ROI {_pct(pnl / staked) if staked else 'n/a'}")
+        lines.append(f"P&L: ${pnl:+.2f} on ${staked:.2f} committed  ROI {_pct(roi) if roi is not None else 'n/a'}")
         if clvs:
             beat = sum(1 for c in clvs if c > 0)
             lines.append(f"Avg CLV: {sum(clvs) / len(clvs) * 100:+.2f}%  | beat close "
