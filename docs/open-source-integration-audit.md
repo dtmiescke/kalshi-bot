@@ -125,3 +125,10 @@ Order reconciliation now treats missing or malformed fill counts as unknown rath
 For demo/live maker orders, the runner now persists a `maker_recovery` intent before the placement request, updates it with the exchange order ID after a confirmed response, and clears it only after a confirmed terminal reconciliation / ledger action. A lost response or missing order ID sets `execution_reconciliation_required`; `guard.status` honors this durable circuit breaker across restarts. If a prior run left a maker intent, the next live/demo runner pauses and requires manual reconciliation of Kalshi open orders and positions against the local ledger before the incident key is cleared. This is intentionally fail-closed and is not automatic exchange recovery.
 
 Sports intelligence already included vig-free sportsbook consensus and historical line movement, plus anonymous Kalshi trade-flow features. The crypto live runner now polls Kalshi public trades at a 15-second per-market cadence and includes the latest five minutes in its trade-flow reading, alongside Kraken/Coinbase aggressor and order-book flow. These are anonymous public prints: they can indicate side, size concentration, and sweeps, but cannot reveal individual bettor identities or their account-level positions. The flow signal is research evidence, not proof of informed money and not a standalone order trigger.
+
+
+### Additional live-order and feed validation hardening
+
+The durable recovery design uses a single `maker_recovery` key, so the live/demo runner now blocks a second external maker order while an earlier maker is active. If cancel/final-fill reconciliation is ambiguous, it sets the persistent `execution_reconciliation_required` circuit breaker immediately, not only after a restart. Regression tests cover the recovery-slot constraint and the prior failure in the StoreStub test fixture.
+
+Sportsbook odds ingestion now skips a malformed or non-finite price set at the individual-book level, allowing other valid books to contribute instead of letting one bad feed record crash or contaminate consensus. Regression tests cover null, zero, non-finite, and malformed prices.
