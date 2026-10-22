@@ -212,8 +212,9 @@ class TestRunnerExecution(unittest.TestCase):
     def test_live_maker_without_order_id_fails_closed(self):
         from unittest.mock import patch
         ticker, readings, ctx, plan = list(self.r.tick(self.now))[0]
-        with patch.object(self.s, "mode", "live"), patch.object(
-                self.r.engine.trade, "place_resting_buy", return_value={}):
+        from types import SimpleNamespace
+        fake_trade = SimpleNamespace(place_resting_buy=lambda *args, **kwargs: {})
+        with patch.object(self.s, "mode", "live"), patch.object(self.r.engine, "trade", fake_trade):
             self.r.start_maker(ticker, {"ticker": ticker}, plan[1], readings, 0.6, 0.8)
         self.assertNotIn(ticker, self.r.makers)
         self.assertFalse(self.r.betting_ok)
