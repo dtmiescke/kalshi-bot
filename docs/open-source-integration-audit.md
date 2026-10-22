@@ -101,3 +101,10 @@ The intended product is proprietary software owned by the user, with the option 
 - PR #2 is still open and unmerged.
 - The pending-maker regression confirms a second candidate is blocked while an earlier maker order is tracked. This is a conservative interim guard, not a complete reservation ledger; the robust future design is explicit reserved exposure plus reconciliation of unknown order states.
 - Remaining verification is broader than CI: this review has not established live exchange correctness under every network failure, conducted an external security audit, verified every deployment secret/setting, or proven trading profitability. Those are not claims this document makes.
+
+
+## Additional model-artifact recovery fix (2026-10-22)
+
+The champion promotion path now writes the candidate bundle to a temporary file, verifies that the serialized artifact can be loaded, and atomically replaces the active model file. The previous model and metadata are copied to timestamped backups before the active artifact changes. New bundles include their own metadata, so prediction uses a consistent model/metadata pair even if the human-readable JSON sidecar update is interrupted. Legacy model bundles still fall back to the existing JSON metadata for compatibility. Unreadable/corrupt model artifacts fail closed to no prediction rather than being trusted.
+
+Regression tests cover successful artifact promotion and a simulated interruption between model replacement and sidecar replacement. This improves recovery safety but does not eliminate every filesystem, storage-provider, or power-loss failure mode. The latest workflow must pass on the final branch head before this change is considered verified.
