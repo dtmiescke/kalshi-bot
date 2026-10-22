@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from bot.sports_intel import _football_matchup_profile, _parse_espn, _parse_rss, _request, ensure_schema, recent, _record_items
+from bot.sports_intel import (_football_matchup_profile, _parse_espn, _parse_rss, _request,
+                              _select_summary_candidates, ensure_schema, recent, _record_items)
 from bot.storage import Store
 
 
@@ -96,6 +97,34 @@ class TestSportsIntelligence(unittest.TestCase):
         self.assertFalse(profile["data_quality"]["injury_data_available"])
         self.assertFalse(profile["lineups_confirmed"])
         self.assertIn("confirmed_starting_lineups", profile["missing_information"])
+
+    def test_summary_selection_covers_manual_leagues_and_rotates_extra_slots(self):
+        categories = [
+            "nfl", "college_football", "nba", "mlb", "nhl",
+            "soccer_epl", "tennis_atp", "golf_pga",
+        ]
+        candidates = [
+            (category, "football", category, {
+                "provider_event_id": category, "state": "pre",
+                "start_time": None, "name": category,
+            })
+            for category in categories
+        ]
+        env = {
+            "SPORTS_MODE": "manual",
+            "SPORTS_SELECTED": "KXNFLGAME,KXNBAGAME,KXNHLGAME,KXNCAAFGAME,KXMLBGAME",
+        }
+        with patch.dict(os.environ, env):
+            first = _select_summary_candidates(self.store, candidates, 6, 1000)
+            second = _select_summary_candidates(self.store, candidates, 6, 1000)
+
+        first_categories = [row[0] for row in first]
+        second_categories = [row[0] for row in second]
+        selected = {"nfl", "college_football", "nba", "mlb", "nhl"}
+        self.assertTrue(selected.issubset(set(first_categories)))
+        self.assertEqual(len(first_categories), 6)
+        self.assertEqual(len(second_categories), 6)
+        self.assertNotEqual(first_categories[5], second_categories[5])
 
     def test_store_deduplicates_repeated_items(self):
         item = {"id": "same", "kind": "news", "category": "football", "source": "fixture",
