@@ -1,0 +1,63 @@
+=== KALSHI SPORTS BOT REPORT ===
+Bets: 5 total | 0 open | 5 graded
+Betting status: ACTIVE
+Sold early: 3 positions, P&L $+16.50
+Win rate: 60.0%  (means little on its own)
+P&L: $+11.64 on $12.91 committed  ROI 90.2%
+Sample is small (5). Treat results as noise until ~200+.
+
+-- By league --
+KXBTC15M: 3 bets, P&L $+1.02, CLV n/a
+KXETH15M: 2 bets, P&L $+10.62, CLV n/a
+
+-- Signal weights: sports (learned) --
+ml_model                 2.000
+book_consensus           1.500
+crypto_model             1.200
+kalshi_market            1.000
+crypto_model_iv          0.800
+line_movement            0.400
+reverse_line_movement    0.400
+trade_flow               0.300
+ai_news                  0.300
+schedule_spot            0.300
+crypto_momentum          0.200
+spot_flow                0.200
+
+-- Signal weights: crypto (learned) --
+ml_model                 2.000
+book_consensus           1.500
+crypto_model             1.063
+kalshi_market            1.000
+crypto_model_iv          0.703
+line_movement            0.400
+reverse_line_movement    0.400
+trade_flow               0.300
+ai_news                  0.300
+schedule_spot            0.300
+spot_flow                0.200
+crypto_momentum          0.177
+
+-- Signals vs market (Brier score, lower = better) --
+crypto_model             n= 3068  brier=0.0040
+crypto_momentum          n= 3068  brier=0.0040
+crypto_model_iv          n= 3068  brier=0.0041
+kalshi_market            n= 3068  brier=0.0049
+
+-- Calibration (said vs happened) --
+~5.0%: n=1670 actual 0.1%
+~15.0%: n=   9 actual 0.0%
+~25.0%: n=   8 actual 25.0%
+~35.0%: n=   6 actual 33.3%
+~45.0%: n=   6 actual 33.3%
+~55.0%: n=   5 actual 60.0%
+~65.0%: n=   5 actual 40.0%
+~75.0%: n=   8 actual 75.0%
+~85.0%: n=  11 actual 100.0%
+~95.0%: n=1373 actual 100.0%
+\n-- Forecast scorecard: today (settled audit forecasts) --
+crypto: n=2201, model Brier=0.0036, market-price Brier=0.0061, model better by 0.0025
+Small samples are descriptive only; this scorecard is not a guarantee of profit.
+\n-- Forecast scorecard: 7 days (settled audit forecasts) --
+crypto: n=3101, model Brier=0.0037, market-price Brier=0.0058, model better by 0.0022
+Small samples are descriptive only; this scorecard is not a guarantee of profit.

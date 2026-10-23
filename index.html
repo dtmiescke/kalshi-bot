@@ -1,0 +1,44 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="refresh" content="120"><title>Kalshi bot</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1d1b;--mut:#6b6a66;--card:#fff;--line:#e7e4dd;--good:#1b7f4b;--bad:#b3261e;--warn:#9a6700}
+@media (prefers-color-scheme:dark){:root{--bg:#141413;--fg:#efede8;--mut:#9c9a94;--card:#1d1d1b;--line:#2e2d2a;--good:#5fd39a;--bad:#ff8a80;--warn:#e3b341}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+padding:env(safe-area-inset-top,0) 14px env(safe-area-inset-bottom,0)}
+h1{font-size:20px;margin:16px 0 4px}h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin:0 0 8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:12px 0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.k{color:var(--mut);font-size:12px}.v{font-size:20px;font-weight:600}
+.good{color:var(--good)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}td{padding:6px 4px;border-top:1px solid var(--line);white-space:nowrap}
+details{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}summary{cursor:pointer;font-weight:600;padding:4px 0}summary:focus-visible{outline:2px solid var(--mut);outline-offset:3}
+pre{white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.5;margin:0}
+td div.mut{white-space:normal}.mut{color:var(--mut);font-size:12px}a{color:inherit}
+</style></head><body>
+<h1>Kalshi bot <span class="mut">· PAPER</span></h1>
+<div class="mut">Updated 2026-10-23 19:24 UTC · last run 4.0 h ago · refreshes every 2 min</div>
+<div class="card"><h2>Status</h2>
+<div class="good"><b>Betting active</b> — ok</div>
+<div class="good">Kalshi connection: 50 ok · 0 rate-limited (429) last run</div></div>
+<div class="card"><h2>Account</h2><div class="grid">
+<div><div class="k">Cash</div><div class="v">$1,011.64</div></div>
+<div><div class="k">Realized P&amp;L</div><div class="v good">$+11.64</div></div>
+<div><div class="k">Open cost</div><div class="v">$0.00</div></div>
+<div><div class="k">Overall · settled · won · win %</div><div class="v">2 · 0 · 0.0%</div></div>
+<div><div class="k">Today · settled · won · win %</div><div class="v">0 · 0 · —</div></div></div></div>
+<div class="card"><h2>Open positions (0)</h2><div class="scroll"><table>
+<tr><td class="k">Position</td><td class="k">Now</td><td class="k">Quote age</td></tr>
+<tr><td colspan=3 class="mut">none</td></tr></table></div></div>
+<div class="card"><h2>Live feeds</h2><div class="scroll"><table>
+<tr><td class="k">Coin</td><td class="k">Price</td><td class="k">Regime</td><td class="k">Data</td><td class="k">Errors</td></tr>
+<tr><td colspan=5 class="mut">no live burst yet</td></tr></table></div></div>
+<div class="card"><h2>Recent results</h2><div class="scroll"><table><tr><td class='good'><b>$+4.94</b></td><td>ETH 15m 06:30<div class='mut'>NO · sold</div></td></tr><tr><td class='good'><b>$+5.88</b></td><td>BTC 15m 06:30<div class='mut'>NO · sold</div></td></tr><tr><td class='bad'><b>$-2.34</b></td><td>BTC 15m 17:00<div class='mut'>YES · no</div></td></tr><tr><td class='bad'><b>$-2.52</b></td><td>BTC 15m 16:45<div class='mut'>YES · no</div></td></tr><tr><td class='good'><b>$+5.68</b></td><td>ETH 15m 16:45<div class='mut'>YES · sold</div></td></tr></table></div>
+<details><summary>All completed bets (5)</summary>
+<div class="scroll"><table>
+<tr><td class="k">Closed (UTC)</td><td class="k">Market</td><td class="k">Position / prices</td><td class="k">Result</td><td class="k">Realized P&amp;L</td></tr>
+<tr><td>2026-10-23 10:26 UTC</td><td>ETH 15m 06:30<div class='mut'>PAPER</div></td><td>NO · 12<div class='mut'>entry $0.20 · exit $0.64</div></td><td><b class=''>SOLD EARLY</b><div class='mut'>position closed before settlement</div></td><td class='good'><b>$+4.94</b></td></tr><tr><td>2026-10-23 10:23 UTC</td><td>BTC 15m 06:30<div class='mut'>PAPER</div></td><td>NO · 13<div class='mut'>entry $0.23 · exit $0.71</div></td><td><b class=''>SOLD EARLY</b><div class='mut'>position closed before settlement</div></td><td class='good'><b>$+5.88</b></td></tr><tr><td>2026-10-23 02:27 UTC</td><td>BTC 15m 17:00<div class='mut'>PAPER</div></td><td>YES · 20<div class='mut'>entry $0.11</div></td><td><b class='bad'>LOST</b><div class='mut'>settled NO</div></td><td class='bad'><b>$-2.34</b></td></tr><tr><td>2026-10-22 20:54 UTC</td><td>BTC 15m 16:45<div class='mut'>PAPER</div></td><td>YES · 14<div class='mut'>entry $0.17</div></td><td><b class='bad'>LOST</b><div class='mut'>settled NO</div></td><td class='bad'><b>$-2.52</b></td></tr><tr><td>2026-10-22 20:41 UTC</td><td>ETH 15m 16:45<div class='mut'>PAPER</div></td><td>YES · 17<div class='mut'>entry $0.13 · exit $0.49</div></td><td><b class=''>SOLD EARLY</b><div class='mut'>position closed before settlement</div></td><td class='good'><b>$+5.68</b></td></tr>
+</table></div></details>
+<div class="mut"><a href="bets.csv">Download all trades (CSV)</a></div></div>
+<div class="card"><h2>Model</h2><div>No training run yet.</div><div class="mut">Top crypto weights: crypto_model 1.06, kalshi_market 1.00, crypto_model_iv 0.70, trade_flow 0.30, spot_flow 0.20, crypto_momentum 0.18</div></div>
+<div class="card"><h2>AI briefing</h2><pre>No briefing yet.</pre></div>
+</body></html>
