@@ -314,14 +314,32 @@ class Store:
         supported for legacy imports.
         """
         order_id = b.get("order_id")
+        signals = b.get("signals") or {}
+        is_unwind_residual = bool(
+            isinstance(signals, dict)
+            and isinstance(signals.get("arbitrage"), dict)
+            and signals["arbitrage"].get("unwind_residual")
+        )
         with self.lock:
             if order_id:
-                existing = self.db.execute(
-                    "SELECT id FROM bets WHERE mode=? AND ticker=? AND order_id=? "
-                    "ORDER BY id LIMIT 1",
-                    (b["mode"], b["ticker"], str(order_id))).fetchone()
-                if existing:
-                    return existing["id"]
+                candidates = self.db.execute(
+                    "SELECT id, signals_json FROM bets WHERE mode=? AND ticker=? AND order_id=? "
+                    "ORDER BY id",
+                    (b["mode"], b["ticker"], str(order_id))).fetchall()
+                for existing in candidates:
+                    try:
+                        prior_signals = json.loads(existing["signals_json"] or "{}")
+                    except (TypeError, ValueError):
+                        prior_signals = {}
+                    prior_arb = prior_signals.get("arbitrage", {}) if isinstance(prior_signals, dict) else {}
+                    prior_is_residual = bool(
+                        isinstance(prior_arb, dict) and prior_arb.get("unwind_residual")
+                    )
+                    # A residual position is a distinct ledger exposure even when it
+                    # references the original exchange order. Deduplicate only within
+                    # the same record class.
+                    if prior_is_residual == is_unwind_residual:
+                        return existing["id"]
             cur = self.db.execute("""INSERT INTO bets(ts, mode, ticker, event_ticker, series, team,
                         side, price, contracts, stake, fee, model_prob, edge,
                         confidence, signals_json, order_id, style)
