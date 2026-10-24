@@ -32,7 +32,8 @@ def inspect_store(store, full_integrity=False):
             report["checks"][pragma] = rows[:20]
             if rows != ["ok"]:
                 raise RuntimeError(f"SQLite {pragma} failed: {rows[:5]}")
-            report["checks"]["db_path_exists"] = os.path.exists(getattr(db, "database", ""))
+            db_path = db.execute("PRAGMA database_list").fetchone()[2]
+            report["checks"]["db_path_exists"] = bool(db_path and os.path.exists(db_path))
         report["ok"] = True
         return report
     except Exception as exc:
