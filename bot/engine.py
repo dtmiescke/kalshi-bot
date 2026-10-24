@@ -987,6 +987,45 @@ class Engine:
             self._record_decision(snap, readings, "rejected", why, prob, conf)
             self._skip(summary, why)
             return None
+        # Sports candidates go through the existing counsel component after
+        # deterministic risk approval and before they can become bet records.
+        # Counsel can veto/wait, but cannot increase size or override risk limits.
+        if not str(snap.get("series", "")).endswith("15M"):
+            from . import council
+            counsel_context = {
+                "domain": "sports", "series": snap.get("series"),
+                "event_ticker": snap.get("event_ticker"), "ticker": snap.get("ticker"),
+                "team": snap.get("team"), "side": plan.get("side"),
+                "market_price": plan.get("price"), "model_probability": prob,
+                "side_probability": (prob if plan.get("side") == "yes" else 1 - prob),
+                "edge_after_fees": plan.get("edge"), "confidence": conf,
+                "risk_checks_passed": True,
+                "signals": [{"name": r.name, "probability": r.prob,
+                             "confidence": r.confidence, "detail": r.detail}
+                            for r in readings],
+            }
+            try:
+                verdict = council.review_sports(self.llm, self.store, snap["ticker"], counsel_context)
+            except Exception as exc:
+                log.exception("sports counsel failed for %s", snap["ticker"])
+                verdict = ({"decision": "wait", "by": "rules", "reason": f"counsel error: {exc}"}
+                           if os.environ.get("COUNCIL_MODE", "advisory") == "required"
+                           else {"decision": "approve", "by": "numbers",
+                                 "reason": "counsel unavailable; deterministic checks only"})
+            summary.setdefault("sports_counsel", {"approved": 0, "rejected": 0, "wait": 0})
+            decision = str(verdict.get("decision", "wait")).lower()
+            if decision not in ("approve", "reject", "wait"):
+                decision = "wait"
+            summary["sports_counsel"][("approved" if decision == "approve" else decision)] += 1
+            self.store.set_kv(f"sports_counsel_latest_{snap['ticker']}", {
+                "ts": int(time.time()), "decision": decision, "by": verdict.get("by"),
+                "reason": verdict.get("reason", "")})
+            if decision != "approve":
+                reason = f"sports counsel {decision}: {verdict.get('reason', 'no reason supplied')}"
+                self._record_decision(snap, readings, "rejected", reason, prob, conf,
+                                      side=plan["side"], market_price=plan["price"], edge=plan["edge"])
+                self._skip(summary, reason)
+                return None
         # Preserve any strategy-specific limits so the final execution-boundary
         # recheck cannot accidentally loosen a stricter caller's budget.
         plan["execution_min_edge"] = float(min_edge if min_edge is not None else self.s.min_edge)
