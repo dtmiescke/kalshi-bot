@@ -149,6 +149,10 @@ def _quick_check(store):
 def code_nerd_preflight(store, root="."):
     """Check database integrity, required schema, and Python syntax before work."""
     check, missing = _quick_check(store)
+    if check != ["ok"]:
+        # Never write into a database that fails integrity checks. The workflow
+        # must stop and preserve the original file for recovery.
+        raise RuntimeError("Code Nerd preflight blocked scheduled work: SQLite quick_check failed: " + "; ".join(check[:5]))
     source_root = Path(root) / "bot"
     required_files = ("main.py", "engine.py", "config.py", "storage.py", "guard.py",
                       "risk.py", "kalshi_client.py", "agent_fleet.py")
@@ -183,9 +187,13 @@ def code_nerd_preflight(store, root="."):
 def code_nerd_postflight(store):
     """Verify persisted data after work; never rewrite source code automatically."""
     check, missing = _quick_check(store)
-    problems = []
     if check != ["ok"]:
-        problems.append("SQLite quick_check failed after cycle: " + "; ".join(check[:5]))
+        # Preserve a corrupt file untouched for offline recovery.
+        log.critical("SQLite quick_check failed after cycle: %s", check[:5])
+        return {"ts": int(time.time()), "status": "blocked",
+                "sqlite": check, "missing_tables": missing,
+                "problems": ["SQLite quick_check failed after cycle"]}
+    problems = []
     if missing:
         problems.append("missing required tables: " + ", ".join(missing))
     report = {"ts": int(time.time()), "status": "degraded" if problems else "ok",
