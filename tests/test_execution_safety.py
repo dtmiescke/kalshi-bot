@@ -33,7 +33,7 @@ class TestExecutionMathSafety(unittest.TestCase):
     def test_exact_contract_sizing_respects_available_depth(self):
         contracts, avg = fill_plan_contracts([(0.40, 2), (0.41, 3)], 8, 0.41)
         self.assertEqual(contracts, 5)
-        self.assertAlmostEqual(avg, 2.05 / 5)
+        self.assertAlmostEqual(avg, 0.406)
 
     def test_fee_rounds_up_to_cent(self):
         self.assertEqual(taker_fee(1, 0.50, 0.07), 0.02)
