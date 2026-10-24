@@ -126,8 +126,8 @@ class Store:
         receives Brier/P&L metrics. Later scans are retained as settled audit
         history but left unscored so one market cannot inflate the sample.
         """
-        if outcome not in (0, 1):
-            raise ValueError("decision-audit outcome must be binary (0 or 1)")
+        if type(outcome) is not int or outcome not in (0, 1):
+            raise ValueError("decision-audit outcome must be integer 0 or 1")
         settled_ts = int(settled_ts or time.time())
         with self.lock:
             rows = self.db.execute(
@@ -180,7 +180,7 @@ class Store:
 
     def grade_combo_prediction(self, ticker, outcome, settled_ts=None):
         """Grade only against a real YES/NO settlement returned by Kalshi."""
-        if outcome not in (0, 1):
+        if type(outcome) is not int or outcome not in (0, 1):
             return 0
         settled_ts = int(settled_ts or time.time())
         with self.lock:
