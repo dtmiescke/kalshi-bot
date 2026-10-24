@@ -196,6 +196,12 @@ class Settings:
             raise ValueError("SPORTS_MODE=manual requires at least one SPORTS_SELECTED series ticker")
         if self.combo_audit_lead_seconds < 0:
             raise ValueError("COMBO_AUDIT_LEAD_SECONDS must be non-negative")
+        # A zero/negative odds refresh interval can hammer the free API budget;
+        # a nonpositive maker wait can bypass the intended order reconciliation window.
+        if self.odds_refresh_minutes <= 0:
+            raise ValueError("ODDS_REFRESH_MINUTES must be positive")
+        if self.maker_wait_s <= 0:
+            raise ValueError("MAKER_WAIT_SECONDS must be positive")
         if self.combos_enabled:
             raise ValueError(
                 "Combo order execution is not implemented; keep COMBOS_ENABLED=no. "
