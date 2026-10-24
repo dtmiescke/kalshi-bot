@@ -61,7 +61,20 @@ def drawdown_tripped(store, bankroll, mode=None):
     return r[0]["p"] < -limit
 
 
-RECOVERY_DAYS = int(os.environ.get("RECOVERY_DAYS", 21))
+def _recovery_days(raw=None):
+    """Parse the recovery window safely; invalid values must never disable circuit breakers."""
+    if raw is None:
+        raw = os.environ.get("RECOVERY_DAYS", "21")
+    try:
+        days = int(raw)
+    except (TypeError, ValueError, OverflowError):
+        return 21
+    # Keep the rolling recovery window bounded and positive. A negative value
+    # moves the cutoff into the future and can silently bypass loss/CLV benches.
+    return days if 1 <= days <= 365 else 21
+
+
+RECOVERY_DAYS = _recovery_days()
 
 
 def _since():
