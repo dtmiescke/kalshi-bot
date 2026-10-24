@@ -24,7 +24,7 @@ import logging
 import os
 import sys
 
-from .config import Settings
+from .config import Settings, SPORTS
 from .engine import Engine
 from .grader import grade
 from .kalshi_client import KalshiClient
@@ -84,7 +84,11 @@ def run_scheduled(s, store, data):
     if os.environ.get("SPORTS_INTEL_ENABLED", "yes").lower() in ("yes", "true", "1"):
         try:
             from . import sports_intel
-            intel_result = sports_intel.collect(store)
+            selected_series = s.selected_series()
+            intel_categories = sports_intel.categories_for_series(
+                selected_series if selected_series is not None else SPORTS.keys(),
+                SPORTS, mode=s.sports_mode)
+            intel_result = sports_intel.collect(store, categories=intel_categories)
             print("sports intelligence:", json.dumps(intel_result, default=str))
             if os.environ.get("SPORTS_INTEL_EVENT_SEARCH", "yes").lower() in ("yes", "true", "1"):
                 try:
