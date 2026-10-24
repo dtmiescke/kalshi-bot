@@ -92,20 +92,47 @@ def forecast(store, coin, closes, dvol_pct=None, now=None, events=None):
     return sigma, parts
 
 
+# Bounds on the fat-tail adjustment. Below 1.0 fattens the tails; an unbounded
+# fit once reached 0.5, which priced a ~1% long shot at ~10-13% and bought it.
+DEFAULT_TAIL_SHRINK = 0.9
+TAIL_SHRINK_MIN, TAIL_SHRINK_MAX = 0.8, 1.05
+
+
+def _bounded_shrink(value):
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_TAIL_SHRINK
+    if not math.isfinite(v) or v <= 0:
+        return DEFAULT_TAIL_SHRINK
+    return min(max(v, TAIL_SHRINK_MIN), TAIL_SHRINK_MAX)
+
+
 def tail_shrink(store, coin):
-    return float(store.get_kv(f"tail_shrink_{coin}") or 0.9)
+    """Learned shrink, clamped so a stale or bad stored fit can't distort pricing."""
+    return _bounded_shrink(store.get_kv(f"tail_shrink_{coin}"))
 
 
 def learn_tail_shrink(store, coin, rows):
     """rows: [(formula_prob_made_with_0.9, outcome)]. Crypto has fat tails; the
-    right amount of shrink is measured from real settled windows, not assumed."""
+    right amount of shrink is measured from real settled windows, not assumed,
+    but only within [TAIL_SHRINK_MIN, TAIL_SHRINK_MAX]."""
     from statistics import NormalDist
     nd = NormalDist()
-    zs = [(nd.inv_cdf(min(max(p, 1e-4), 1 - 1e-4)) / 0.9, y) for p, y in rows]
+    zs = []
+    for p, y in rows:
+        try:
+            p, y = float(p), int(y)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(p) or y not in (0, 1):
+            continue
+        zs.append((nd.inv_cdf(min(max(p, 1e-4), 1 - 1e-4)) / DEFAULT_TAIL_SHRINK, y))
     if len(zs) < 200:
         return None
-    best, best_ll = 0.9, 1e9
-    for a in [x / 100 for x in range(50, 126, 2)]:
+    lo, hi = round(TAIL_SHRINK_MIN * 100), round(TAIL_SHRINK_MAX * 100)
+    best, best_ll = DEFAULT_TAIL_SHRINK, 1e18
+    for a in [x / 100 for x in range(lo, hi + 1)]:
         ll = 0.0
         for z, y in zs:
             p = min(max(nd.cdf(a * z), 1e-4), 1 - 1e-4)

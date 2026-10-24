@@ -1085,7 +1085,8 @@ class Engine:
             log.warning("orderbook %s: %s", snap["ticker"], e)
             return None
         plan, why = risk.decide(self.s, self.store, snap, prob, conf, book,
-                                min_edge=min_edge, max_per_bet=max_per_bet)
+                                min_edge=min_edge, max_per_bet=max_per_bet,
+                                raw_model_prob=risk.crypto_model_prob(readings))
         if not plan:
             self._record_decision(snap, readings, "rejected", why, prob, conf)
             self._skip(summary, why)
@@ -1136,6 +1137,7 @@ class Engine:
                     self.s.crypto_max_per_bet if is_crypto else self.s.max_per_bet
                 ),
                 maker=False,
+                raw_model_prob=risk.crypto_model_prob(readings),
             )
             if not fresh_plan:
                 self._skip(summary, f"execution recheck: {why}")
