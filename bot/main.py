@@ -65,6 +65,10 @@ def run_scheduled(s, store, data):
     # demo/live this also enforces confirmation and credentials; in paper it
     # still prevents invalid risk limits and unsupported execution settings.
     s.validate()
+    # Code Nerd runs before any scheduled market analysis. A failed integrity/schema
+    # check stops the cycle rather than allowing a possibly unsafe order path.
+    from . import agent_fleet
+    agent_fleet.code_nerd_preflight(store, root='.')
     # Free-first public sports intelligence collection; data only, never order authority.
     if os.environ.get("SPORTS_INTEL_ENABLED", "yes").lower() in ("yes", "true", "1"):
         try:
@@ -174,9 +178,11 @@ def run_scheduled(s, store, data):
                                    "other": sum(1 for r in log_ if r["status"] >= 400 and r["status"] != 429),
                                    "ts": time.time()})
     store.set_kv("last_run_ts", time.time())
-    if time.time() - store.get_kv("last_compact", 0) >= 86400:
-        store.compact()
-        store.set_kv("last_compact", time.time())
+    # Two janitors and the Code Nerd are part of the same scheduled closed loop.
+    # Janitors only remove exact duplicate raw observations / apply existing retention;
+    # they never delete bets, grades, lessons, or learned weights.
+    agent_fleet.run_janitors(store)
+    agent_fleet.code_nerd_postflight(store)
 
 
 def clear_pause(store, confirmed=False):
