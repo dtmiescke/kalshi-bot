@@ -7,9 +7,10 @@ on:
 permissions:
   contents: read
 concurrency:
-  # Keep isolated from the production scheduler so smoke runs cannot delay/replace a tick.
+  # This is an isolated paper-only CI workflow; newer commits should supersede stale
+  # smoke runs instead of waiting behind a slow or stuck prior run.
   group: kalshi-bot-paper-smoke
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   smoke:
     runs-on: ubuntu-latest
