@@ -71,10 +71,26 @@ class LiveRunner:
         # A prior process may have died after Kalshi accepted a resting order.
         # Do not resume trading until that exchange state is reconciled manually.
         prior_maker = self.store.get_kv("maker_recovery")
-        if prior_maker and self.s.mode in ("demo", "live"):
-            reason = "unresolved maker order from prior run; reconcile Kalshi open orders/positions before resuming"
+        prior_reconciliation = self.store.get_kv("execution_reconciliation_required")
+        reason = self._startup_reconciliation_reason(
+            self.s.mode, prior_maker, prior_reconciliation
+        )
+        if reason:
+            # A prior uncertainty marker is durable until an operator explicitly
+            # reconciles the exchange. Never clear it just because maker_recovery
+            # was cleared by a later code path or a restart.
             self.store.set_kv("execution_reconciliation_required", reason)
             self.betting_ok, self.betting_why = False, reason
+
+    @staticmethod
+    def _startup_reconciliation_reason(mode, prior_maker, prior_reconciliation):
+        if mode not in ("demo", "live"):
+            return None
+        if prior_reconciliation:
+            return str(prior_reconciliation)
+        if prior_maker:
+            return "unresolved maker order from prior run; reconcile Kalshi open orders/positions before resuming"
+        return None
         self.vol_samples, self.vol_done = {}, {}
         self.ctx_cache = {}       # series -> market context, refreshed off the hot loop
 

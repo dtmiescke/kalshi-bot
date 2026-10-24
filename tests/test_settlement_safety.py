@@ -47,6 +47,20 @@ class TestSettlementTimestampSafety(unittest.TestCase):
             else:
                 os.environ["SETTLE_AVG_SECONDS"] = original
 
+
+    def test_probability_rejects_nonfinite_or_invalid_inputs(self):
+        for args in (
+            (float("nan"), 100, 0.01, 30),
+            (100, float("inf"), 0.01, 30),
+            (100, 100, float("nan"), 30),
+            (100, 100, 0.01, float("inf")),
+            (100, 100, 0.01, 30, 0),
+            (100, 100, 0.01, 30, 60, -1),
+        ):
+            with self.subTest(args=args):
+                self.assertIsNone(settlement.prob_above(*args))
+        self.assertIsNone(settlement.prob_above(100, 100, 0.01, 30, realized_avg=float("nan")))
+
     def test_invalid_proxy_uncertainty_config_uses_safe_default(self):
         original = os.environ.get("SETTLE_PROXY_BPS")
         try:

@@ -81,7 +81,20 @@ def prob_above(spot, strike, vol_per_min, seconds_left, avg_seconds=60,
     realized_avg: average price already observed inside the window, if we're
     already in it (needed for an exact answer in the last minute).
     """
-    if not (spot and strike and vol_per_min) or spot <= 0 or strike <= 0:
+    try:
+        numeric_inputs = (spot, strike, vol_per_min, seconds_left, avg_seconds, tail_shrink)
+        if any(not math.isfinite(float(value)) for value in numeric_inputs):
+            return None
+        spot, strike, vol_per_min = float(spot), float(strike), float(vol_per_min)
+        seconds_left, avg_seconds = float(seconds_left), float(avg_seconds)
+        tail_shrink = float(tail_shrink)
+        if realized_avg is not None:
+            realized_avg = float(realized_avg)
+            if not math.isfinite(realized_avg) or realized_avg <= 0:
+                return None
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if spot <= 0 or strike <= 0 or vol_per_min <= 0 or avg_seconds <= 0 or tail_shrink < 0:
         return None
     s2 = (vol_per_min ** 2) / 60.0          # variance per second
     x, k = math.log(spot), math.log(strike)
