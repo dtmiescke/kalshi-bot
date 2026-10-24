@@ -457,6 +457,19 @@ class Engine:
             except Exception as e:
                 log.warning("event-specific news collection failed: %s", e)
 
+        # Eight read-only scanner workers inspect the already-fetched event set.
+        # Event IDs are deduplicated before dispatch; the main Engine remains the
+        # only path allowed to generate decisions or orders.
+        if sports and events_by_series:
+            try:
+                from . import agent_fleet
+                fleet_scan = agent_fleet.scan_events(self.store, events_by_series, held=held, now=now)
+                summary["agent_fleet"] = fleet_scan
+                log.info("sports scanner fleet: %s", fleet_scan)
+            except Exception as e:
+                summary["agent_fleet"] = {"status": "degraded", "error": str(e)}
+                log.exception("sports scanner fleet failed; existing Engine path remains authoritative")
+
         for series, sport in (series_map.items() if sports else ()):
             if watch and not watch.wants_series(series) and not any(
                     h.startswith(series) for h in held):
