@@ -28,9 +28,15 @@ def janitor_dedupe(store):
                 cur = db.execute(f"DELETE FROM {table} WHERE NOT ({where})")
                 invalid = max(0, cur.rowcount)
                 group = ", ".join(keys)
+                columns = [row[1] for row in db.execute(f"PRAGMA table_info({table})")]
+                completeness = " + ".join(f"({column} IS NOT NULL)" for column in columns)
+                # Keep the richest record for a natural key; on ties preserve the
+                # earliest row so cleanup never prefers a later partial response.
                 cur = db.execute(
-                    f"DELETE FROM {table} WHERE rowid NOT IN "
-                    f"(SELECT MIN(rowid) FROM {table} GROUP BY {group})")
+                    f"DELETE FROM {table} WHERE rowid IN ("
+                    f"SELECT rowid FROM (SELECT rowid, ROW_NUMBER() OVER "
+                    f"(PARTITION BY {group} ORDER BY ({completeness}) DESC, rowid ASC) AS rn "
+                    f"FROM {table}) WHERE rn > 1)")
                 duplicates = max(0, cur.rowcount)
                 index = "ux_" + table + "_natural_key"
                 db.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS {index} ON {table} ({group})")
