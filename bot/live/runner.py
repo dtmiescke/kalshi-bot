@@ -383,11 +383,12 @@ class LiveRunner:
             # count on other statuses is ambiguous and must not release exposure.
             if status in {"executed", "filled"}:
                 filled = int(requested)
-            elif status in {"canceled", "cancelled", "expired", "rejected"}:
-                filled = 0
             else:
+                # A terminal cancellation/rejection does not prove zero fills if
+                # the exchange omitted cumulative fill_count. Fail closed rather
+                # than silently releasing exposure that may have partially filled.
                 filled = 0
-                status = status or "unknown"
+                status = status or "unknown_fill_count"
                 return filled, status, False
         else:
             try:
