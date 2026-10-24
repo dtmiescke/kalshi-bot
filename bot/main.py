@@ -77,6 +77,9 @@ def run_scheduled(s, store, data):
     if cleanup.get("ok") and not cleanup.get("skipped"):
         print("janitors:", json.dumps(cleanup, default=str))
     health = nerd.inspect_store(store, full_integrity=full_check_due)
+    # Reattach code health after the post-janitor database recheck; otherwise
+    # the second inspect_store result discards the source-structure watchdog.
+    health.setdefault("checks", {})["source_structure"] = code_health
     nerd.record_success(store, health)
     if full_check_due:
         store.set_kv("nerd_last_full_check_ts", time.time())
