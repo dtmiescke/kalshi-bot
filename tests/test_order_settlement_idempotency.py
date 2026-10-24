@@ -54,6 +54,30 @@ class TestOrderAndSettlementIdempotency(unittest.TestCase):
         self.assertEqual(first["pnl"], second["pnl"])
         self.assertEqual(first["graded_ts"], second["graded_ts"])
 
+    def test_account_and_daily_pnl_are_isolated_by_mode(self):
+        paper_id = self.store.add_bet({**bet("paper-order"), "mode": "paper"})
+        demo_id = self.store.add_bet({**bet("demo-order"), "mode": "demo"})
+        self.store.close_bet(paper_id, 0.6, 0.5)
+        self.store.close_bet(demo_id, 0.3, -0.2)
+        paper = self.store.account(100, mode="paper")
+        demo = self.store.account(100, mode="demo")
+        self.assertEqual(paper["realized"], 0.5)
+        self.assertEqual(demo["realized"], -0.2)
+        self.assertEqual(self.store.account(100)["realized"], 0.3)
+        self.assertEqual(self.store.realized_today(0, mode="paper"), 0.5)
+        self.assertEqual(self.store.realized_today(0, mode="demo"), -0.2)
+
+    def test_janitors_preserve_bets_and_audit_history(self):
+        from bot.maintenance import run_janitors
+        self.store.add_bet(bet())
+        self.store.add_decision_audit({
+            "ts": 100, "ticker": "AUDIT", "decision": "rejected",
+            "reason": "test", "signals": {},
+        })
+        run_janitors(self.store, now=200, force=True)
+        self.assertEqual(self.store.q("SELECT COUNT(*) n FROM bets")[0]["n"], 1)
+        self.assertEqual(self.store.q("SELECT COUNT(*) n FROM decision_audit")[0]["n"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
