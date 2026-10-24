@@ -67,6 +67,8 @@ def normalize_events(events_by_series):
         series = series_for[ticker]
         markets = []
         for market in event.get("markets") or []:
+            if not isinstance(market, dict):
+                continue
             mt = str(market.get("ticker") or "").strip()
             if mt and mt not in seen_markets:
                 seen_markets.add(mt)
