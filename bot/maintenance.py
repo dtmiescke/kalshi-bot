@@ -48,13 +48,13 @@ def janitor_dedupe(store):
     return {"janitor": "dedupe", "removed": removed, "ts": int(time.time())}
 
 
-def janitor_retention(store):
+def janitor_retention(store, now=None):
     """Trim only raw time-series data under existing retention policy."""
     # Preserve the Store.compact retention windows, but don't VACUUM every six
     # hours; the existing daily compact owns physical database compaction.
     keep_days = {"market_snapshots": 14, "flow_trades": 7,
                  "signal_readings": 30, "odds_snapshots": 30}
-    now = int(time.time())
+    now = int(time.time() if now is None else now)
     before, after = {}, {}
     with store.lock:
         store.db.execute("BEGIN IMMEDIATE")
@@ -81,7 +81,7 @@ def run_janitors(store, now=None, force=False, every_hours=6):
         return {"ok": True, "skipped": "not_due", "ts": int(now)}
     # Dedupe first so the unique constraints protect subsequent writes.
     a = janitor_dedupe(store)
-    b = janitor_retention(store)
+    b = janitor_retention(store, now=now)
     result = {"ok": True, "janitor_a": a, "janitor_b": b, "ts": int(now)}
     store.set_kv("janitors_last_result", result)
     store.set_kv("janitors_last_run", now)
