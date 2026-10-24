@@ -450,6 +450,10 @@ class Engine:
                 from .sports_fleet import scan_fleet
                 events_by_series, scanner_health, live_watch = scan_fleet(
                     events_by_series, now=now, workers=8)
+                # Keep empty series explicit so the loop never refetches a series
+                # that was already deduplicated by the fleet.
+                for known_series in series_map:
+                    events_by_series.setdefault(known_series, [])
                 self.store.set_kv("sports_scanner_health", scanner_health)
                 self.store.set_kv("sports_live_watch", live_watch[:500])
             except Exception as e:
