@@ -37,6 +37,12 @@ from .llm import LLM
 FULL_SCAN_MINUTES = 60
 
 
+def _attach_code_health(store_health, code_health):
+    """Keep source-structure results alongside the final database health check."""
+    store_health.setdefault("checks", {})["source_structure"] = code_health
+    return store_health
+
+
 def training_due(store, now, every_hours=24.0, retry_hours=6.0):
     """Avoid false 24-hour success cooldowns when training lacks enough data.
 
@@ -72,11 +78,14 @@ def run_scheduled(s, store, data):
     code_health = nerd.inspect_code()
     full_check_due = time.time() - float(store.get_kv("nerd_last_full_check_ts", 0) or 0) >= 24 * 3600
     health = nerd.inspect_store(store, full_integrity=full_check_due)
-    health.setdefault("checks", {})["source_structure"] = code_health
+    health = _attach_code_health(health, code_health)
     cleanup = maintenance.run_janitors(store)
     if cleanup.get("ok") and not cleanup.get("skipped"):
         print("janitors:", json.dumps(cleanup, default=str))
     health = nerd.inspect_store(store, full_integrity=full_check_due)
+    # Reattach code health after the post-janitor database recheck; otherwise
+    # the second inspect_store result discards the source-structure watchdog.
+    health = _attach_code_health(health, code_health)
     nerd.record_success(store, health)
     if full_check_due:
         store.set_kv("nerd_last_full_check_ts", time.time())
