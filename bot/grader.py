@@ -74,10 +74,15 @@ def settle_bets(store, client):
         if close is not None:
             close_side = close if b["side"] == "yes" else 1 - close
             clv = close_side - b["price"]
-        store.x("""UPDATE bets SET status='graded', result=?, pnl=?, closing_price=?,
-                   clv=?, graded_ts=? WHERE id=?""",
+        # Conditional update makes concurrent grading passes idempotent:
+        # only a worker that still owns an open row may finalize its result.
+        with store.lock:
+            cur = store.db.execute("""UPDATE bets SET status='graded', result=?, pnl=?,
+                closing_price=?, clv=?, graded_ts=? WHERE id=? AND status='open'""",
                 (result, round(pnl, 2), close, clv, int(time.time()), b["id"]))
-        done += 1
+            store.db.commit()
+        if cur.rowcount == 1:
+            done += 1
     return done
 
 
