@@ -396,9 +396,13 @@ class Engine:
         series_map = {} if event_budget is not None else dict(SPORTS)
         events_by_series = {}
         selected = self.s.selected_series() if hasattr(self.s, "selected_series") else None
-        if sports and getattr(self.s, "sports_mode", "all") == "all":
+        if sports and getattr(self.s, "sports_mode", "configured") in ("all", "configured"):
             try:
                 catalog = self.data.sports_series()
+                if self.s.sports_mode == "configured":
+                    # Default mode stays within the currently configured leagues;
+                    # switch SPORTS_MODE=all explicitly to discover every Kalshi sport.
+                    catalog = {key: value for key, value in catalog.items() if key in SPORTS}
                 all_events = self.data.sports_events_all()
                 total_events = len(all_events)
                 cursor = str(self.store.get_kv("sports_event_cursor", "") or "")
@@ -413,6 +417,8 @@ class Engine:
                         series = next((known for known in catalog if event_ticker.startswith(known + "-")), None)
                     if not series or series not in catalog:
                         continue
+                    if selected is not None and series not in selected:
+                        continue
                     series_map[series] = _series_sport(series, catalog.get(series))
                     events_by_series.setdefault(series, []).append(ev)
                 self.store.set_kv("sports_catalog_health", {
@@ -422,18 +428,19 @@ class Engine:
                     "event_cursor": cursor,
                     "sports_events_matched": sum(map(len, events_by_series.values())),
                     "coverage_warning": total_events >= 4000 or len(catalog) >= 10000,
-                    "mode": "dynamic_all_rotating" if event_budget is not None else "dynamic_all"})
+                    "mode": (("dynamic_all" if self.s.sports_mode == "all" else "configured")
+                             + ("_rotating" if event_budget is not None else ""))})
             except Exception as e:
                 log.warning("dynamic sports discovery failed; using configured series: %s", e)
                 events_by_series = {}
-        elif sports and getattr(self.s, "sports_mode", "all") == "manual":
+        elif sports and getattr(self.s, "sports_mode", "configured") == "manual":
             selected = selected or set()
             series_map = {series: SPORTS.get(series, _series_sport(series))
                           for series in selected}
             self.store.set_kv("sports_catalog_health", {
                 "ts": now, "series_selected": sorted(selected), "mode": "manual"})
         else:
-            series_map = {}
+            series_map = dict(SPORTS) if getattr(self.s, "sports_mode", "configured") == "configured" else {}
 
         if sports and not events_by_series and series_map:
             for selected_series in series_map:
