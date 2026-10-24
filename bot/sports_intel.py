@@ -76,6 +76,54 @@ SPORT_TERMS = {
 }
 RSS_CATEGORIES = tuple(SPORT_TERMS)
 
+SCOREBOARD_CATEGORIES = {
+    "football": {"nfl", "college_football"},
+    "basketball": {"nba", "wnba", "college_basketball"},
+    "baseball": {"mlb"}, "hockey": {"nhl"},
+    "soccer": {key for key in ESPN_SCOREBOARDS if key.startswith("soccer_")},
+    "tennis": {"tennis_atp", "tennis_wta"},
+    "golf": {"golf_pga", "golf_lpga"}, "mma": {"mma_ufc"},
+    "motorsports": {"motorsports_f1", "motorsports_nascar"},
+    "cricket": {"cricket_ipl"}, "rugby": {"rugby_union"},
+}
+
+
+def categories_for_series(series_tickers, sports_map, mode="configured"):
+    """Map selected Kalshi series to only the matching sports-intelligence feeds."""
+    if str(mode).lower() == "all":
+        return None
+    result = set()
+    for series in (series_tickers or ()):
+        sport = str(sports_map.get(series, "")).lower()
+        ticker = str(series).lower()
+        if sport.startswith("americanfootball") or "ncaaf" in ticker or "nfl" in ticker:
+            result.add("football")
+        elif sport.startswith("basketball") or "nba" in ticker:
+            result.add("basketball")
+        elif sport.startswith("baseball") or "mlb" in ticker:
+            result.add("baseball")
+        elif sport.startswith("icehockey") or "nhl" in ticker:
+            result.add("hockey")
+        elif "soccer" in sport or "soccer" in ticker:
+            result.add("soccer")
+        elif "tennis" in sport or "tennis" in ticker:
+            result.add("tennis")
+        elif "golf" in sport or "golf" in ticker:
+            result.add("golf")
+        elif "mma" in sport or "ufc" in ticker:
+            result.add("mma")
+        elif "boxing" in sport or "boxing" in ticker:
+            result.add("boxing")
+        elif "racing" in sport or "motor" in ticker or "f1" in ticker or "nascar" in ticker:
+            result.add("motorsports")
+        elif "cricket" in sport or "cricket" in ticker:
+            result.add("cricket")
+        elif "rugby" in sport or "rugby" in ticker:
+            result.add("rugby")
+        elif sport in ("volleyball", "chess", "badminton", "cycling", "track_field", "swimming", "olympics"):
+            result.add(sport)
+    return result
+
 def _now() -> int:
     return int(time.time())
 
@@ -426,19 +474,26 @@ def _select_summary_candidates(store, candidates, limit, now):
     return selected
 
 
-def collect(store, force=False, now=None):
+def collect(store, force=False, now=None, categories=None):
     """Collect recent free public sports news and scoreboards into the existing SQLite DB."""
     ensure_schema(store)
     now = int(now or _now())
     ttl = max(120, int(os.environ.get("SPORTS_INTEL_TTL_SECONDS", "1800")))
+    selected_categories = set(SPORT_TERMS) if categories is None else (set(categories) & set(SPORT_TERMS))
+    scoreboard_categories = set()
+    for category in selected_categories:
+        scoreboard_categories.update(SCOREBOARD_CATEGORIES.get(category, {category}))
     timeout_note = []
-    summary = {"ok": True, "news_seen": 0, "scores_seen": 0, "new_items": 0, "sources_ok": 0,
+    summary = {"ok": True, "selected_categories": sorted(selected_categories),
+               "news_seen": 0, "scores_seen": 0, "new_items": 0, "sources_ok": 0,
                "sources_failed": 0, "summaries_seen": 0, "team_stats_profiles": 0,
                "player_stats_profiles": 0, "injury_profiles": 0, "lineup_profiles": 0,
                "football_profiles": 0, "ts": now, "errors": []}
     # Google News RSS gives broad web discovery without an API key. Queries are cached
     # independently and kept deliberately modest for free-tier friendliness.
     for category, terms in SPORT_TERMS.items():
+        if category not in selected_categories:
+            continue
         key = "gnews:" + category
         if not force and not _due(store, key, ttl, now):
             continue
@@ -467,6 +522,8 @@ def collect(store, force=False, now=None):
         "mlb", "nhl", "soccer_mls", "soccer_epl", "soccer_uefa",
     }
     for category, (sport, league) in ESPN_SCOREBOARDS.items():
+        if category not in scoreboard_categories:
+            continue
         key = "espn:" + category
         source_ttl = ttl if category in high_frequency_scoreboards else max(ttl, 3600)
         if not force and not _due(store, key, source_ttl, now):
