@@ -1,0 +1,42 @@
+name: sqlite-recovery-candidate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  salvage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install SQLite recovery CLI
+        run: sudo apt-get update -qq && sudo apt-get install -y sqlite3
+      - name: Read damaged snapshot without changing bot-data
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin bot-data
+          git show origin/bot-data:bot.sqlite.gz > /tmp/bot.sqlite.gz
+          gzip -t /tmp/bot.sqlite.gz
+          gzip -dc /tmp/bot.sqlite.gz > /tmp/original.sqlite
+          cp /tmp/original.sqlite /tmp/backup-original.sqlite
+      - name: Attempt isolated recovery
+        run: |
+          set +e
+          python scripts/recover_sqlite.py /tmp/original.sqlite /tmp/recovered.sqlite > /tmp/recovery-log.txt 2>&1
+          result=$?
+          cat /tmp/recovery-log.txt
+          echo "Recovery exit status: $result"
+          exit 0
+      - name: Package candidate for manual inspection
+        run: |
+          mkdir -p recovery
+          cp /tmp/recovery-log.txt recovery/recovery-log.txt
+          gzip -n -c /tmp/backup-original.sqlite > recovery/original.sqlite.gz
+          if [ -s /tmp/recovered.sqlite ]; then
+            gzip -n -c /tmp/recovered.sqlite > recovery/recovered-candidate.sqlite.gz
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sqlite-recovery-candidates
+          path: recovery/
+          retention-days: 7
