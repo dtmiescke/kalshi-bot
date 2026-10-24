@@ -254,7 +254,7 @@ class Store:
 
     # --- snapshots ---------------------------------------------------------
     def add_market_snapshot(self, m):
-        self.x("""INSERT INTO market_snapshots VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+        self.x("""INSERT OR IGNORE INTO market_snapshots VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
             m["ts"], m["ticker"], m["event_ticker"], m["series"], m["title"],
             m.get("team"), m.get("yes_bid"), m.get("yes_ask"), m.get("last_price"),
             m.get("volume"), m.get("open_interest"), m.get("close_time"), m.get("status")))
@@ -265,7 +265,7 @@ class Store:
                       (ticker, since_ts))
 
     def add_odds(self, row):
-        self.x("""INSERT INTO odds_snapshots VALUES(?,?,?,?,?,?,?,?,?,?)""", (
+        self.x("""INSERT OR IGNORE INTO odds_snapshots VALUES(?,?,?,?,?,?,?,?,?,?)""", (
             row["ts"], row["sport"], row["event_id"], row["commence_time"],
             row["home"], row["away"], row["team"], row["fair_prob"],
             row["n_books"], json.dumps(row.get("raw", {}))))
@@ -290,7 +290,7 @@ class Store:
                          ORDER BY ts""", (ticker, since_ts))
 
     def add_signal(self, ts, ticker, name, prob, conf, detail):
-        self.x("INSERT INTO signal_readings VALUES(?,?,?,?,?,?)",
+        self.x("INSERT OR IGNORE INTO signal_readings VALUES(?,?,?,?,?,?)",
                (ts, ticker, name, prob, conf, json.dumps(detail)))
 
     # --- weights (append-only) ---------------------------------------------
