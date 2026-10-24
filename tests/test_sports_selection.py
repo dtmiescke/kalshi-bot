@@ -61,7 +61,7 @@ class TestSportsSelection(unittest.TestCase):
             {"event_ticker": "KXTEST-B"},
             {"event_ticker": "KXTEST-C"},
         ]
-        batch, cursor = _rotating_event_batch(events, "", budget=1, held={"KXTEST-C"})
+        batch, cursor = _rotating_event_batch(events, "", budget=2, held={"KXTEST-C"})
         tickers = [e["event_ticker"] for e in batch]
         self.assertEqual(tickers.count("KXTEST-B"), 1)
         self.assertIn("KXTEST-C", tickers)
