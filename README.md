@@ -17,6 +17,14 @@ on unseen data** (crypto).
 | weekly | download fresh real Kalshi history |
 | daily | trim raw data so the memory file stays small (learning is never trimmed) |
 
+## Connected agent fleet
+- The eight read-only scanner workers inspect the existing discovered sports events in parallel, with one owner per unique event ID. They only produce market-health/candidate telemetry; the existing Engine remains the single strategy, counsel, risk, and execution path.
+- The currently configured sports and dynamic catalog behavior are preserved. No new leagues are silently enabled by this feature. Use the existing `SPORTS_MODE=manual` + `SPORTS_SELECTED` controls to select current series, or add a series to the existing catalog/configuration when ready.
+- **Janitor 1** removes only exact duplicate raw market/odds/signal observations. It never deduplicates by ticker alone and never deletes distinct timestamps or different prices.
+- **Janitor 2** runs the existing daily raw-data retention policy. Bets, grades, lessons, signal weights, and model history are preserved.
+- **Code Nerd** checks SQLite integrity, required tables, and Python compilation before scheduled work, then checks database integrity again after the cycle. A detected preflight problem blocks the cycle and places a safety hold; transient scanner exceptions get one safe retry.
+- The Nerd can automatically detect and contain known failures, but it does not rewrite or push production source code on its own. Source-code repairs go through tests and a reviewable pull request to avoid an automated patch making trading less safe.
+
 ## Execution safety
 - Scheduled runs default to paper mode. Setting `BOT_MODE=live` alone is not enough to enable real-money orders.
 - The scheduled workflow also requires the repository variable `LIVE_TRADING_OPERATIONAL_APPROVED=yes` and `LIVE_TRADING_CONFIRMED=yes` before it will use live mode.
