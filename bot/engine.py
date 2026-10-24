@@ -505,6 +505,11 @@ class Engine:
             except Exception as e:
                 log.warning("event-specific news collection failed: %s", e)
 
+        market_budget = None
+        if event_budget is not None:
+            market_budget = max(25, min(1000, int(os.environ.get("SPORTS_SCAN_MARKET_BUDGET", "100"))))
+        sports_markets_processed = 0
+        sports_markets_deferred = 0
         for series, sport in (series_map.items() if sports else ()):
             if watch and not watch.wants_series(series) and not any(
                     h.startswith(series) for h in held):
@@ -537,6 +542,15 @@ class Engine:
                     continue
                 markets = [m for m in ev.get("markets", [])
                            if m.get("status") in ("active", "open")]
+                # Bound expensive per-market history/research work. The fast
+                # scanner fleet already inspected all eligible events. Always
+                # revisit events with open positions, even after the budget.
+                event_ticker = str(ev.get("event_ticker") or "")
+                if (market_budget is not None and event_ticker not in held
+                        and sports_markets_processed >= market_budget):
+                    sports_markets_deferred += len(markets)
+                    continue
+                sports_markets_processed += len(markets)
                 teams = [m.get("yes_sub_title") for m in markets if m.get("yes_sub_title")]
                 ktime = next((m.get("expected_expiration_time") or m.get("close_time")
                               for m in markets), None)
@@ -603,6 +617,12 @@ class Engine:
                             f"{best[0]['ticker']} {best[1]['side'].upper()} @ "
                             f"${best[1]['price']:.2f}, edge {best[1]['edge']:+.1%}")
                     self.place(*best, summary=summary, now=now)
+        if market_budget is not None:
+            summary["sports_deep_scan"] = {
+                "market_budget": market_budget, "markets_in_selected_events": sports_markets_processed,
+                "markets_deferred": sports_markets_deferred,
+                "full_event_scan": True, "held_events_prioritized": True}
+            self.store.set_kv("sports_deep_scan_health", {"ts": now, **summary["sports_deep_scan"]})
         if self.s.crypto_enabled:
             self.run_crypto(watch, brain.get_weights(self.store, "crypto"), summary, now)
         log.info("cycle: %s", summary)
