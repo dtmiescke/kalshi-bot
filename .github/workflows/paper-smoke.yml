@@ -1,5 +1,6 @@
 name: paper-only-operational-smoke
 on:
+  workflow_dispatch:
   push:
     branches:
       - verify/paper-smoke-20261024
