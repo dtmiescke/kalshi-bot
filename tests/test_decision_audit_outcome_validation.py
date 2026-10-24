@@ -22,7 +22,7 @@ class TestDecisionAuditOutcomeValidation(unittest.TestCase):
         })
         for outcome in (None, -1, 2, "yes", float("nan"), float("inf")):
             with self.subTest(outcome=outcome):
-                with self.assertRaisesRegex(ValueError, "must be binary"):
+                with self.assertRaisesRegex(ValueError, "must be integer 0 or 1"):
                     self.store.grade_decision_audit("MARKET-1", outcome, settled_ts=200)
                 row = self.store.q(
                     "SELECT outcome, brier, settled_ts FROM decision_audit WHERE ticker=?",
