@@ -1,0 +1,80 @@
+name: restore-validated-sqlite-memory
+on:
+  push:
+    branches:
+      - recover/publish-sqlite-candidate
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: kalshi-bot
+  cancel-in-progress: false
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Download the successful recovery candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: sqlite-recovery-output
+          path: recovery-output
+          repository: ${{ github.repository }}
+          run-id: 40111253724
+          github-token: ${{ github.token }}
+      - name: Validate candidate before any write
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s recovery-output/recovered-candidate.sqlite.gz
+          gzip -t recovery-output/recovered-candidate.sqlite.gz
+          gzip -dc recovery-output/recovered-candidate.sqlite.gz > /tmp/candidate.sqlite
+          python - <<'PY'
+          import sqlite3
+          p = "/tmp/candidate.sqlite"
+          with sqlite3.connect(p) as db:
+              integrity = db.execute("PRAGMA integrity_check").fetchall()
+              if integrity != [("ok",)]:
+                  raise SystemExit(f"Integrity check failed: {integrity[:10]}")
+              tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+              required = {"bets", "market_snapshots", "signal_readings", "kv", "decision_audit"}
+              if not required.issubset(tables):
+                  raise SystemExit(f"Missing required tables: {sorted(required - tables)}")
+              counts = {t: db.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0] for t in required}
+              print("Validated recovered row counts:", counts)
+              if counts["market_snapshots"] < 100 or counts["signal_readings"] < 100 or counts["kv"] < 100 or counts["decision_audit"] < 1:
+                  raise SystemExit("Candidate does not meet minimum data-retention thresholds")
+          PY
+      - name: Confirm original snapshot backup exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin bot-data
+          current="$(git rev-parse origin/bot-data)"
+          backup="$(git ls-remote --heads origin refs/heads/bot-data-corrupt-backup-20261024 | cut -f1)"
+          test -n "$backup"
+          test "$backup" = "$current"
+          echo "Original snapshot preserved at bot-data-corrupt-backup-20261024 ($backup)"
+      - name: Restore validated candidate without force-pushing
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree add /tmp/bot-data-worktree origin/bot-data
+          cp recovery-output/recovered-candidate.sqlite.gz /tmp/bot-data-worktree/bot.sqlite.gz
+          gzip -t /tmp/bot-data-worktree/bot.sqlite.gz
+          gzip -dc /tmp/bot-data-worktree/bot.sqlite.gz > /tmp/restore-check.sqlite
+          python - <<'PY'
+          import sqlite3
+          with sqlite3.connect("/tmp/restore-check.sqlite") as db:
+              if db.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+                  raise SystemExit("Refusing to publish: restored copy failed integrity_check")
+          print("Restored gzip snapshot passed integrity_check")
+          PY
+          git -C /tmp/bot-data-worktree config user.name "kalshi-bot-recovery"
+          git -C /tmp/bot-data-worktree config user.email "bot@users.noreply.github.com"
+          git -C /tmp/bot-data-worktree add bot.sqlite.gz
+          git -C /tmp/bot-data-worktree commit -m "Restore integrity-checked SQLite memory recovery candidate"
+          git -C /tmp/bot-data-worktree push origin HEAD:refs/heads/bot-data
+      - name: Report restoration
+        run: echo "Validated SQLite candidate published as a new fast-forward commit; original snapshot remains on bot-data-corrupt-backup-20261024."
