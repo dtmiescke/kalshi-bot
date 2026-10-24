@@ -442,6 +442,23 @@ class Engine:
                 except Exception as e:
                     log.warning("events %s: %s", selected_series, e)
                     events_by_series[selected_series] = []
+        if sports and events_by_series:
+            # Eight read-only scanners inspect one canonical, deduplicated event
+            # stream. They never create orders; the existing Engine remains the
+            # only model/risk/execution authority.
+            try:
+                from .sports_fleet import scan_fleet
+                events_by_series, scanner_health, live_watch = scan_fleet(
+                    events_by_series, now=now, workers=8)
+                # Keep empty series explicit so the loop never refetches a series
+                # that was already deduplicated by the fleet.
+                for known_series in series_map:
+                    events_by_series.setdefault(known_series, [])
+                self.store.set_kv("sports_scanner_health", scanner_health)
+                self.store.set_kv("sports_live_watch", live_watch[:500])
+            except Exception as e:
+                log.exception("sports scanner fleet failed: %s", e)
+                summary["scanner_fleet_error"] = type(e).__name__
         if sports and events_by_series and os.environ.get("SPORTS_INTEL_EVENT_SEARCH", "no").lower() in ("yes", "true", "1"):
             try:
                 from . import sports_intel
@@ -531,6 +548,25 @@ class Engine:
                         candidates.append(c)
                 if candidates:
                     best = max(candidates, key=lambda c: c[1]["edge"])
+                    # Sport-specific counsel is a veto/wait layer only; it cannot
+                    # create candidates, alter sizing, or bypass the existing risk gate.
+                    from . import sports_counsel
+                    counsel = sports_counsel.review(
+                        self.llm, self.store, ev, best[0], best[1], best[2],
+                        best[3], best[4], now=now)
+                    self.store.set_kv("sports_counsel_last_decision", {
+                        "ts": now, "ticker": best[0]["ticker"], **counsel})
+                    summary.setdefault("sports_counsel", {})
+                    choice = counsel.get("decision", "wait")
+                    summary["sports_counsel"][choice] = summary["sports_counsel"].get(choice, 0) + 1
+                    if choice != "approve":
+                        reason = "sports counsel " + choice + ": " + str(counsel.get("reason", "no reason supplied"))
+                        self._record_decision(
+                            best[0], best[2], "rejected", reason, best[3], best[4],
+                            side=best[1].get("side"), market_price=best[1].get("price"),
+                            edge=best[1].get("edge"), now=now)
+                        self._skip(summary, reason)
+                        continue
                     if watch:
                         summary["alerts"].append(
                             f"{best[0]['ticker']} {best[1]['side'].upper()} @ "
