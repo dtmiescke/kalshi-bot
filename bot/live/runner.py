@@ -71,12 +71,25 @@ class LiveRunner:
         # A prior process may have died after Kalshi accepted a resting order.
         # Do not resume trading until that exchange state is reconciled manually.
         prior_maker = self.store.get_kv("maker_recovery")
-        if prior_maker and self.s.mode in ("demo", "live"):
-            reason = "unresolved maker order from prior run; reconcile Kalshi open orders/positions before resuming"
+        prior_reconciliation = self.store.get_kv("execution_reconciliation_required")
+        reason = self._startup_reconciliation_reason(
+            self.s.mode, prior_maker, prior_reconciliation
+        )
+        if reason:
             self.store.set_kv("execution_reconciliation_required", reason)
             self.betting_ok, self.betting_why = False, reason
         self.vol_samples, self.vol_done = {}, {}
         self.ctx_cache = {}       # series -> market context, refreshed off the hot loop
+
+    @staticmethod
+    def _startup_reconciliation_reason(mode, prior_maker, prior_reconciliation):
+        if mode not in ("demo", "live"):
+            return None
+        if prior_reconciliation:
+            return str(prior_reconciliation)
+        if prior_maker:
+            return "unresolved maker order from prior run; reconcile Kalshi open orders/positions before resuming"
+        return None
 
     # --- setup -------------------------------------------------------------------
     def seed_history(self):
@@ -363,28 +376,24 @@ class LiveRunner:
         if raw_filled in (None, ""):
             raw_filled = order.get("fill_count")
         if raw_filled in (None, ""):
-            # Some terminal statuses imply a full execution, but a missing fill
-            # count on other statuses is ambiguous and must not release exposure.
+            # Only an explicit executed/filled status proves full execution.
+            # Cancellation without cumulative fills is ambiguous, not zero.
             if status in {"executed", "filled"}:
                 filled = int(requested)
-            elif status in {"canceled", "cancelled", "expired", "rejected"}:
-                filled = 0
             else:
-                filled = 0
-                status = status or "unknown"
-                return filled, status, False
+                return 0, status or "unknown_fill_count", False
         else:
             try:
                 numeric = float(raw_filled)
-                if not math.isfinite(numeric) or numeric < 0:
-                    raise ValueError("invalid fill count")
+                if (not math.isfinite(numeric) or numeric < 0
+                        or not numeric.is_integer() or numeric > int(requested)):
+                    raise ValueError("invalid cumulative fill count")
                 filled = int(numeric)
             except (TypeError, ValueError, OverflowError):
-                # Malformed exchange fill data is not a zero-fill confirmation.
                 return 0, status or "unknown_fill_count", False
         terminal = status in {"canceled", "cancelled", "executed", "filled", "expired", "rejected"} \
             or filled >= requested
-        return max(0, min(int(requested), filled)), status, terminal
+        return filled, status, terminal
 
     def _cancel_and_reconcile_maker(self, order_id, requested):
         """Cancel any remainder and verify final cumulative fills before ledgering."""
