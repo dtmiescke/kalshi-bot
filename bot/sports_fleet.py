@@ -27,6 +27,8 @@ def _merge_event(target, incoming):
             merged[key] = value
     markets = {}
     for market in (target.get("markets") or []) + (incoming.get("markets") or []):
+        if not isinstance(market, dict):
+            continue
         ticker = str(market.get("ticker") or "").strip()
         if not ticker:
             continue
@@ -44,6 +46,8 @@ def normalize_events(events_by_series):
     series_for = {}
     for series in sorted(events_by_series):
         for event in events_by_series.get(series) or []:
+            if not isinstance(event, dict):
+                continue
             ticker = _ticker(event)
             if not ticker:
                 continue
