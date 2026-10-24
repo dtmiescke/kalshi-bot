@@ -36,6 +36,22 @@ class TestOrderAndSettlementIdempotency(unittest.TestCase):
         self.assertEqual(rows[0]["contracts"], 3)
         self.assertEqual(rows[0]["stake"], 1.2)
 
+    def test_unwind_residual_is_distinct_from_original_order_but_idempotent(self):
+        original = self.store.add_bet(bet("same-exchange-order"))
+        residual_payload = {
+            **bet("same-exchange-order"),
+            "signals": {"arbitrage": {"unwind_residual": True}},
+            "contracts": 1, "stake": 0.4,
+        }
+        residual = self.store.add_bet(residual_payload)
+        repeated_residual = self.store.add_bet({**residual_payload, "contracts": 2, "stake": 0.8})
+        self.assertNotEqual(original, residual)
+        self.assertEqual(residual, repeated_residual)
+        rows = self.store.q("SELECT id, contracts, signals_json FROM bets ORDER BY id")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["contracts"], 3)
+        self.assertEqual(rows[1]["contracts"], 1)
+
     def test_distinct_orders_remain_distinct(self):
         first = self.store.add_bet(bet("order-a"))
         second = self.store.add_bet(bet("order-b"))
