@@ -17,6 +17,11 @@ on unseen data** (crypto).
 | weekly | download fresh real Kalshi history |
 | daily | trim raw data so the memory file stays small (learning is never trimmed) |
 
+## Execution safety
+- Scheduled runs default to paper mode. Setting `BOT_MODE=live` alone is not enough to enable real-money orders.
+- The scheduled workflow also requires the repository variable `LIVE_TRADING_OPERATIONAL_APPROVED=yes` and `LIVE_TRADING_CONFIRMED=yes` before it will use live mode.
+- Keep the approval variable unset until restored memory, market discovery, price freshness, risk checks, persistence, and repeated paper cycles have all passed. Paper mode uses real public market prices but does not send real orders.
+
 ## Smart research
 **Crypto (`crypto_brain.py`, used by snapshot AND live modes):**
 - Exact contract model: strike, seconds left, settlement averaging window from the rules
