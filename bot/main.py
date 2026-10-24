@@ -65,6 +65,19 @@ def run_scheduled(s, store, data):
     # demo/live this also enforces confirmation and credentials; in paper it
     # still prevents invalid risk limits and unsupported execution settings.
     s.validate()
+    # The Nerd watchdog runs before market work and fails closed on schema/database
+    # damage. Two janitors run on a six-hour cadence; only raw observations are
+    # deduplicated/trimmed. Bets, model weights, grades and audit history are kept.
+    from . import nerd, maintenance
+    full_check_due = time.time() - float(store.get_kv("nerd_last_full_check_ts", 0) or 0) >= 24 * 3600
+    health = nerd.inspect_store(store, full_integrity=full_check_due)
+    cleanup = maintenance.run_janitors(store)
+    if cleanup.get("ok") and not cleanup.get("skipped"):
+        print("janitors:", json.dumps(cleanup, default=str))
+    health = nerd.inspect_store(store, full_integrity=full_check_due)
+    nerd.record_success(store, health)
+    if full_check_due:
+        store.set_kv("nerd_last_full_check_ts", time.time())
     # Free-first public sports intelligence collection; data only, never order authority.
     if os.environ.get("SPORTS_INTEL_ENABLED", "yes").lower() in ("yes", "true", "1"):
         try:
@@ -235,7 +248,21 @@ def main(argv=None):
         print("latest evidence:", json.dumps(sports_intel.recent(store, limit=10), indent=2, default=str))
         return
     if cmd == "scheduled":
-        run_scheduled(s, store, data)
+        try:
+            run_scheduled(s, store, data)
+        except Exception as exc:
+            incident = {"ts": int(time.time()), "command": "scheduled",
+                        "error_type": type(exc).__name__, "error": str(exc)[:2000]}
+            try:
+                store.set_kv("nerd_last_incident", incident)
+            except Exception:
+                logging.exception("could not persist scheduled-cycle incident")
+            try:
+                alerts.send("ATI/Kalshi bot scheduled cycle failed",
+                            json.dumps(incident), priority="urgent", tags=["warning", "nerd"])
+            except Exception:
+                logging.exception("could not send scheduled-cycle incident alert")
+            raise
         return
     if cmd == "train":
         from . import ml
