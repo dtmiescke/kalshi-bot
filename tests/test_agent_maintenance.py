@@ -6,7 +6,7 @@ import unittest
 
 from bot.storage import Store
 from bot.maintenance import janitor_dedupe, run_janitors
-from bot.nerd import inspect_store
+from bot.nerd import inspect_code, inspect_store
 
 
 class TestAgentMaintenance(unittest.TestCase):
@@ -60,6 +60,17 @@ class TestAgentMaintenance(unittest.TestCase):
         self.assertEqual(self.store.q("SELECT COUNT(*) AS n FROM market_snapshots")[0]["n"], 0)
         self.assertEqual(self.store.q("SELECT COUNT(*) AS n FROM lessons")[0]["n"], 1)
         self.assertEqual(self.store.q("SELECT COUNT(*) AS n FROM bets")[0]["n"], 1)
+
+    def test_nerd_checks_required_source_structure(self):
+        report = inspect_code()
+        self.assertTrue(report["ok"])
+        self.assertGreaterEqual(report["required_paths"], 10)
+        self.assertEqual(report["missing_paths"], [])
+
+    def test_nerd_blocks_when_critical_source_file_is_missing(self):
+        with tempfile.TemporaryDirectory() as empty:
+            with self.assertRaisesRegex(RuntimeError, "required source structure missing"):
+                inspect_code(root=empty)
 
     def test_nerd_watchdog_reports_healthy_database(self):
         report = inspect_store(self.store)
