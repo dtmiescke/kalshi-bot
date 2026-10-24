@@ -101,6 +101,19 @@ class TestTrainingSafety(unittest.TestCase):
         settings.mode = "paper"
         settings.validate()
 
+    def test_invalid_runtime_intervals_are_rejected(self):
+        for field, value, message in (
+            ("odds_refresh_minutes", 0, "ODDS_REFRESH_MINUTES"),
+            ("odds_refresh_minutes", -1, "ODDS_REFRESH_MINUTES"),
+            ("maker_wait_s", 0, "MAKER_WAIT_SECONDS"),
+            ("maker_wait_s", -1, "MAKER_WAIT_SECONDS"),
+        ):
+            with self.subTest(field=field, value=value):
+                settings = Settings(mode="paper")
+                setattr(settings, field, value)
+                with self.assertRaisesRegex(ValueError, message):
+                    settings.validate()
+
     def test_execution_boundary_blocks_new_order_when_circuit_breaker_trips(self):
         obj = engine.Engine.__new__(engine.Engine)
         obj.s = SimpleNamespace(mode="live", bankroll=1000.0, taker_fee_rate=0.07)
