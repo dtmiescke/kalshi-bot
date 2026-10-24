@@ -9,34 +9,73 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
-      - name: Install SQLite recovery CLI
-        run: sudo apt-get update -qq && sudo apt-get install -y sqlite3
-      - name: Read damaged snapshot without changing bot-data
+      - name: Build pinned SQLite CLI with recovery support
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential curl
+          curl -fsSL https://www.sqlite.org/2025/sqlite-autoconf-3500400.tar.gz -o /tmp/sqlite.tar.gz
+          tar -xzf /tmp/sqlite.tar.gz -C /tmp
+          cd /tmp/sqlite-autoconf-3500400
+          CFLAGS="-DSQLITE_ENABLE_DBPAGE_VTAB -DSQLITE_ENABLE_DBSTAT_VTAB" ./configure --disable-shared
+          make -j2 sqlite3
+          /tmp/sqlite-autoconf-3500400/sqlite3 :memory: "SELECT sqlite_compileoption_used('ENABLE_DBPAGE_VTAB');" | grep -qx 1
+          echo "/tmp/sqlite-autoconf-3500400" >> "$GITHUB_PATH"
+      - name: Fetch source snapshot without modifying bot-data
+        shell: bash
         run: |
           set -euo pipefail
           git fetch --depth=1 origin bot-data
-          git show origin/bot-data:bot.sqlite.gz > /tmp/bot.sqlite.gz
-          gzip -t /tmp/bot.sqlite.gz
-          gzip -dc /tmp/bot.sqlite.gz > /tmp/original.sqlite
-          cp /tmp/original.sqlite /tmp/backup-original.sqlite
-      - name: Attempt isolated recovery
+          git show origin/bot-data:bot.sqlite.gz > /tmp/source.sqlite.gz
+          gzip -t /tmp/source.sqlite.gz
+          gzip -dc /tmp/source.sqlite.gz > /tmp/source.sqlite
+          sha256sum /tmp/source.sqlite > /tmp/source-sha256.txt
+      - name: Attempt recovery and validate isolated candidate
+        id: recover
+        shell: bash
         run: |
-          set +e
-          python scripts/recover_sqlite.py /tmp/original.sqlite /tmp/recovered.sqlite > /tmp/recovery-log.txt 2>&1
-          result=$?
+          set -uo pipefail
+          python scripts/recover_sqlite.py /tmp/source.sqlite /tmp/recovered.sqlite > /tmp/recovery-log.txt 2>&1
+          status=$?
           cat /tmp/recovery-log.txt
-          echo "Recovery exit status: $result"
-          exit 0
-      - name: Package candidate for manual inspection
+          echo "Recovery utility exit status: $status"
+          ready=false
+          if [ "$status" -eq 0 ] && [ -s /tmp/recovered.sqlite ]; then
+            if python - <<'PY'
+          import sqlite3
+          p = "/tmp/recovered.sqlite"
+          with sqlite3.connect(p) as db:
+              if db.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+                  raise SystemExit("integrity_check failed")
+              tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+              required = {"bets", "market_snapshots", "signal_readings", "kv", "decision_audit"}
+              if not required.issubset(tables):
+                  raise SystemExit(f"missing tables: {sorted(required - tables)}")
+              counts = {t: db.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0] for t in required}
+              print("Validated row counts:", counts)
+              if counts["market_snapshots"] < 100 or counts["signal_readings"] < 100 or counts["kv"] < 100 or counts["decision_audit"] < 1:
+                  raise SystemExit("candidate failed minimum data-retention thresholds")
+          PY
+            then
+              ready=true
+            fi
+          fi
+          echo "candidate_ready=$ready" >> "$GITHUB_OUTPUT"
+          echo "candidate_ready=$ready" >> /tmp/recovery-log.txt
+      - name: Package logs and validated candidate only
+        if: always()
+        shell: bash
         run: |
-          mkdir -p recovery
-          cp /tmp/recovery-log.txt recovery/recovery-log.txt
-          gzip -n -c /tmp/backup-original.sqlite > recovery/original.sqlite.gz
-          if [ -s /tmp/recovered.sqlite ]; then
-            gzip -n -c /tmp/recovered.sqlite > recovery/recovered-candidate.sqlite.gz
+          mkdir -p recovery-output
+          [ ! -f /tmp/recovery-log.txt ] || cp /tmp/recovery-log.txt recovery-output/recovery-log.txt
+          [ ! -f /tmp/source-sha256.txt ] || cp /tmp/source-sha256.txt recovery-output/source-sha256.txt
+          if [ "${{ steps.recover.outputs.candidate_ready }}" = "true" ]; then
+            gzip -n -c /tmp/recovered.sqlite > recovery-output/recovered-candidate.sqlite.gz
           fi
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: sqlite-recovery-candidates
-          path: recovery/
+          path: recovery-output/
           retention-days: 7
