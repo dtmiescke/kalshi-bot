@@ -430,7 +430,7 @@ def collect(store, force=False, now=None):
     """Collect recent free public sports news and scoreboards into the existing SQLite DB."""
     ensure_schema(store)
     now = int(now or _now())
-    ttl = max(120, int(os.environ.get("SPORTS_INTEL_TTL_SECONDS", "600")))
+    ttl = max(120, int(os.environ.get("SPORTS_INTEL_TTL_SECONDS", "1800")))
     timeout_note = []
     summary = {"ok": True, "news_seen": 0, "scores_seen": 0, "new_items": 0, "sources_ok": 0,
                "sources_failed": 0, "summaries_seen": 0, "team_stats_profiles": 0,
