@@ -21,7 +21,7 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -54,7 +54,7 @@ jobs:
           SPORTS_INTEL_EVENT_SEARCH: ${{ vars.SPORTS_INTEL_EVENT_SEARCH || 'yes' }}
           SPORTS_INTEL_EVENT_BUDGET: ${{ vars.SPORTS_INTEL_EVENT_BUDGET || '6' }}
           SPORTS_INTEL_MAX_BOX_SCORES: ${{ vars.SPORTS_INTEL_MAX_BOX_SCORES || '6' }}
-          SPORTS_INTEL_TTL_SECONDS: ${{ vars.SPORTS_INTEL_TTL_SECONDS || '600' }}
+          SPORTS_INTEL_TTL_SECONDS: ${{ vars.SPORTS_INTEL_TTL_SECONDS || '1800' }}
           SPORTS_AI_NEWS_REFRESH_MINUTES: ${{ vars.SPORTS_AI_NEWS_REFRESH_MINUTES || '30' }}
           COMBO_RESEARCH_ENABLED: ${{ vars.COMBO_RESEARCH_ENABLED || 'no' }}
           COMBOS_ENABLED: ${{ vars.COMBOS_ENABLED || 'no' }}
