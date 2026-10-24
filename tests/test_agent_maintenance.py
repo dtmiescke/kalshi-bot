@@ -42,6 +42,20 @@ class TestAgentMaintenance(unittest.TestCase):
             self.store.db.execute(
                 "INSERT INTO market_snapshots (ts,ticker) VALUES (?,?)", (now, "KXTEST"))
 
+    def test_janitor_dedupe_is_idempotent(self):
+        now = int(time.time())
+        self.store.db.executemany(
+            "INSERT INTO market_snapshots (ts,ticker) VALUES (?,?)",
+            [(now, "IDEMPOTENT"), (now, "IDEMPOTENT")])
+        self.store.db.commit()
+        first = janitor_dedupe(self.store, now=now)
+        second = janitor_dedupe(self.store, now=now)
+        self.assertEqual(first["removed"]["market_snapshots"]["duplicates"], 1)
+        self.assertEqual(second["removed"]["market_snapshots"]["duplicates"], 0)
+        self.assertEqual(self.store.q(
+            "SELECT COUNT(*) n FROM market_snapshots WHERE ticker=?",
+            ("IDEMPOTENT",))[0]["n"], 1)
+
     def test_raw_writers_ignore_duplicate_keys_after_janitor_indexes_exist(self):
         now = int(time.time())
         market = {"ts": now, "ticker": "KXTEST", "event_ticker": "EVT",
