@@ -21,6 +21,12 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
+      - name: Verify deterministic candidate audit and paper ledger path
+        timeout-minutes: 2
+        env:
+          BOT_MODE: paper
+          LIVE_TRADING_CONFIRMED: no
+        run: python -m unittest tests.test_paper_pipeline
       - name: Restore and validate persistent memory
         run: bash .github/load.sh
       - name: Verify credentials and market connectivity (no trades)
