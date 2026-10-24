@@ -1,0 +1,73 @@
+name: sqlite-recovery-candidate-run
+on:
+  push:
+    branches:
+      - recover/run-sqlite-recovery
+permissions:
+  contents: read
+  actions: read
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install SQLite recovery CLI
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y sqlite3
+      - name: Fetch and preserve source snapshot outside artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin bot-data
+          git show origin/bot-data:bot.sqlite.gz > /tmp/source.sqlite.gz
+          gzip -t /tmp/source.sqlite.gz
+          gzip -dc /tmp/source.sqlite.gz > /tmp/source.sqlite
+          cp /tmp/source.sqlite /tmp/source-original-backup.sqlite
+          sha256sum /tmp/source-original-backup.sqlite | tee /tmp/source.sha256
+      - name: Recover into isolated candidate and validate schema/data
+        shell: bash
+        run: |
+          set -uo pipefail
+          python scripts/recover_sqlite.py /tmp/source.sqlite /tmp/recovered.sqlite > /tmp/recovery-log.txt 2>&1
+          recovery_status=$?
+          cat /tmp/recovery-log.txt
+          if [ "$recovery_status" -ne 0 ] || [ ! -s /tmp/recovered.sqlite ]; then
+            echo "Recovery candidate failed initial integrity validation (status=$recovery_status)." | tee -a /tmp/recovery-log.txt
+            exit 1
+          fi
+          python - <<'PY' | tee -a /tmp/recovery-log.txt
+          import sqlite3
+          p = "/tmp/recovered.sqlite"
+          with sqlite3.connect(p) as db:
+              result = db.execute("PRAGMA integrity_check").fetchall()
+              if result != [("ok",)]:
+                  raise SystemExit(f"integrity_check failed: {result[:10]}")
+              tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+              required = {"bets", "market_snapshots", "signal_readings"}
+              missing = required - tables
+              if missing:
+                  raise SystemExit(f"required tables missing: {sorted(missing)}")
+              print("VALIDATED_SCHEMA_TABLES", len(tables))
+              for table in sorted(required):
+                  count = db.execute('SELECT COUNT(*) FROM "' + table + '"').fetchone()[0]
+                  print("ROW_COUNT", table, count)
+              print("INTEGRITY_CHECK ok")
+          PY
+      - name: Package only validated candidate and non-sensitive recovery log
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p recovery-output
+          [ ! -f /tmp/recovery-log.txt ] || cp /tmp/recovery-log.txt recovery-output/recovery-log.txt
+          [ ! -f /tmp/source.sha256 ] || cp /tmp/source.sha256 recovery-output/source-sha256.txt
+          if [ -s /tmp/recovered.sqlite ] && grep -q 'INTEGRITY_CHECK ok' /tmp/recovery-log.txt 2>/dev/null; then
+            gzip -n -c /tmp/recovered.sqlite > recovery-output/recovered-candidate.sqlite.gz
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sqlite-recovery-output
+          path: recovery-output/
+          retention-days: 7
