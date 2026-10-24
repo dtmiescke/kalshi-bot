@@ -547,7 +547,22 @@ class LiveRunner:
             bet_id = b["id"] if n == b["contracts"] else self.store.split_bet(b["id"], n)
             entry_fee = b["fee"] * n / b["contracts"]
             pnl = n * (bid - b["price"]) - entry_fee - exit_fee
-            self.store.close_bet(bet_id, bid, pnl)
+            if not self.store.close_bet(bet_id, bid, pnl):
+                message = (
+                    f"Exchange confirmed an exit for {t}, but ledger row {bet_id} "
+                    "was not open when the close was recorded; reconcile exchange orders "
+                    "and positions before resuming."
+                )
+                log.error(message)
+                self._skip("exit ledger reconciliation required")
+                self.betting_ok, self.betting_why = False, message
+                self.store.set_kv("execution_reconciliation_required", message)
+                try:
+                    alerts.send("URGENT: exit ledger reconciliation required", message,
+                                priority="urgent", tags=["warning"])
+                except Exception:
+                    log.exception("could not send exit ledger reconciliation alert")
+                continue
             msg = f"SOLD {t} {b['side'].upper()} x{n} @ ${bid:.2f} (P&L ${pnl:+.2f})"
             self.summary["alerts"].append(msg)
             alerts.send("Early exit", msg)

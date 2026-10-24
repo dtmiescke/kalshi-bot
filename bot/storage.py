@@ -318,22 +318,40 @@ class Store:
         return cur.lastrowid
 
     def split_bet(self, bet_id, sold):
-        """Partial sale: shrink the open bet to the unsold part and return the id
-        of a new row holding the sold part (which is then closed)."""
-        b = self.q("SELECT * FROM bets WHERE id=?", (bet_id,))[0]
-        keep = b["contracts"] - sold
-        frac = sold / b["contracts"]
-        self.x("UPDATE bets SET contracts=?, stake=?, fee=? WHERE id=?",
-               (keep, round(b["stake"] * (1 - frac), 2), round(b["fee"] * (1 - frac), 2), bet_id))
-        cols = [c for c in b if c not in ("id",)]
-        vals = [b[c] for c in cols]
-        row = dict(zip(cols, vals), contracts=sold, stake=round(b["stake"] * frac, 2),
-                   fee=round(b["fee"] * frac, 2))
+        """Atomically split a valid partial sale from an open bet."""
+        if isinstance(sold, bool) or not isinstance(sold, int) or sold < 1:
+            raise ValueError("sold contracts must be a positive integer")
         with self.lock:
-            cur = self.db.execute(f"INSERT INTO bets({','.join(row)}) VALUES({','.join('?' * len(row))})",
-                                  list(row.values()))
-            self.db.commit()
-        return cur.lastrowid
+            try:
+                b = self.db.execute("SELECT * FROM bets WHERE id=?", (bet_id,)).fetchone()
+                if b is None:
+                    raise KeyError(f"bet {bet_id} does not exist")
+                if b["status"] != "open":
+                    raise ValueError(f"bet {bet_id} is not open")
+                contracts = b["contracts"]
+                if not isinstance(contracts, int) or contracts <= 1 or sold >= contracts:
+                    raise ValueError("partial sale must be smaller than the open contract count")
+                keep = contracts - sold
+                frac = sold / contracts
+                cur = self.db.execute(
+                    """UPDATE bets SET contracts=?, stake=?, fee=?
+                       WHERE id=? AND status='open' AND contracts=?""",
+                    (keep, round(b["stake"] * (1 - frac), 2),
+                     round(b["fee"] * (1 - frac), 2), bet_id, contracts))
+                if cur.rowcount != 1:
+                    raise RuntimeError("bet changed while attempting partial-sale split")
+                cols = [c for c in b.keys() if c != "id"]
+                row = {c: b[c] for c in cols}
+                row.update(contracts=sold, stake=round(b["stake"] * frac, 2),
+                           fee=round(b["fee"] * frac, 2))
+                cur = self.db.execute(
+                    f"INSERT INTO bets({','.join(row)}) VALUES({','.join('?' * len(row))})",
+                    list(row.values()))
+                self.db.commit()
+                return cur.lastrowid
+            except Exception:
+                self.db.rollback()
+                raise
 
     def log_maker(self, ticker, filled, outcome, wait_s):
         self.x("INSERT INTO maker_attempts VALUES(?,?,?,?,?)",
@@ -344,10 +362,15 @@ class Store:
         return (sum(r["filled"] for r in rows) / len(rows), len(rows)) if rows else (None, 0)
 
     def close_bet(self, bet_id, exit_price, pnl):
-        """Sold before settlement: realised P&L, no longer open."""
-        self.x("""UPDATE bets SET status='graded', result='sold', exit_price=?, exit_ts=?,
-                  pnl=?, graded_ts=? WHERE id=?""",
-               (exit_price, int(time.time()), round(pnl, 2), int(time.time()), bet_id))
+        """Close an open bet exactly once; return False if it was already closed/missing."""
+        now = int(time.time())
+        with self.lock:
+            cur = self.db.execute("""UPDATE bets SET status='graded', result='sold',
+                exit_price=?, exit_ts=?, pnl=?, graded_ts=?
+                WHERE id=? AND status='open'""",
+                (exit_price, now, round(pnl, 2), now, bet_id))
+            self.db.commit()
+            return cur.rowcount == 1
 
     def open_bets(self, mode=None):
         return self.q("""SELECT * FROM bets WHERE status='open'
