@@ -52,6 +52,7 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           SPORTS_EVERY_HOURS: ${{ vars.SPORTS_EVERY_HOURS || '5.5' }}
           SPORTS_SCAN_EVENT_BUDGET: ${{ vars.SPORTS_SCAN_EVENT_BUDGET || '150' }}
+          SPORTS_SCAN_MARKET_BUDGET: ${{ vars.SPORTS_SCAN_MARKET_BUDGET || '100' }}
           SPORTS_MODE: ${{ vars.SPORTS_MODE || 'configured' }}
           SPORTS_SELECTED: ${{ vars.SPORTS_SELECTED || 'KXNFLGAME,KXNBAGAME,KXMLBGAME,KXNHLGAME,KXNCAAFGAME' }}
           SPORTS_INTEL_ENABLED: ${{ vars.SPORTS_INTEL_ENABLED || 'yes' }}
