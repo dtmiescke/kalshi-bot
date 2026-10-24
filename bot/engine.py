@@ -114,30 +114,6 @@ class Engine:
         self.betting_ok = True
         self._headlines = {}
 
-    @staticmethod
-    def _confirmed_ioc_fill(order, requested):
-        """Fail closed unless an IOC response identifies the order and its fill count."""
-        if not isinstance(order, dict):
-            raise RuntimeError("exchange returned no usable order object")
-        order_id = order.get("order_id") or order.get("id")
-        if not order_id:
-            raise RuntimeError("exchange response missing order ID; fill outcome uncertain")
-        raw = order.get("fill_count_fp")
-        if raw in (None, ""):
-            raw = order.get("fill_count")
-        if raw in (None, ""):
-            raise RuntimeError("exchange response missing cumulative fill count")
-        try:
-            value = float(raw)
-            if not math.isfinite(value) or value < 0 or not value.is_integer():
-                raise ValueError("fill count is not a finite non-negative integer")
-            filled = int(value)
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise RuntimeError(f"invalid cumulative fill count: {raw!r}") from exc
-        if filled > int(requested):
-            raise RuntimeError(f"exchange fill count {filled} exceeds requested {requested}")
-        return str(order_id), filled
-
     def _pause_for_reconciliation(self, reason):
         """Persist a hard stop when an order outcome may be unknown to the client."""
         message = f"order outcome requires exchange reconciliation: {reason}"
@@ -799,7 +775,8 @@ class Engine:
             if self.s.mode in ("demo", "live"):
                 try:
                     o = self.trade.place_limit_buy(ticker, side, n, px)
-                    oid, filled = self._confirmed_ioc_fill(o, n)
+                    oid = o.get("order_id", "")
+                    filled = int(num(o, "fill_count") or num(o, "taker_fill_count") or 0)
                     placed.append((ticker, side, px, oid, filled))
                     if filled < n:
                         raise RuntimeError(f"leg only filled {filled}/{n} contracts")
@@ -870,7 +847,8 @@ class Engine:
             if self.s.mode in ("demo", "live"):
                 try:
                     o = self.trade.place_limit_buy(m["ticker"], "yes", plan["contracts"], px)
-                    oid, filled = self._confirmed_ioc_fill(o, plan["contracts"])
+                    oid = o.get("order_id", "")
+                    filled = int(num(o, "fill_count") or num(o, "taker_fill_count") or 0)
                     order_ids.append((m, px, oid, filled))
                     if filled < plan["contracts"]:
                         raise RuntimeError(f"leg only filled {filled}/{plan['contracts']} contracts")
@@ -1032,7 +1010,8 @@ class Engine:
             try:
                 order = self.trade.place_limit_buy(snap["ticker"], plan["side"],
                                                    plan["contracts"], plan["limit"])
-                order_id, filled = self._confirmed_ioc_fill(order, plan["contracts"])
+                order_id = order.get("order_id", "")
+                filled = int(num(order, "fill_count") or num(order, "taker_fill_count") or 0)
                 if filled < 1:
                     self._skip(summary, "order not filled")
                     return

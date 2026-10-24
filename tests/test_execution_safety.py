@@ -42,3 +42,21 @@ class TestExecutionMathSafety(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestConfirmedIOCResponse(unittest.TestCase):
+    def test_accepts_explicit_zero_and_partial_fills_with_order_id(self):
+        from bot.engine import Engine
+        self.assertEqual(Engine._confirmed_ioc_fill(
+            {"order_id": "ord-1", "fill_count_fp": "0"}, 5), ("ord-1", 0))
+        self.assertEqual(Engine._confirmed_ioc_fill(
+            {"id": "ord-2", "fill_count": 3}, 5), ("ord-2", 3))
+
+    def test_rejects_missing_order_id_or_fill_count(self):
+        from bot.engine import Engine
+        for order in ({"fill_count_fp": "0"}, {"order_id": "ord-1"},
+                      {"order_id": "ord-2", "fill_count_fp": "nan"},
+                      {"order_id": "ord-3", "fill_count_fp": "6"}):
+            with self.subTest(order=order):
+                with self.assertRaises(RuntimeError):
+                    Engine._confirmed_ioc_fill(order, 5)
