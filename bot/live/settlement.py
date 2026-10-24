@@ -18,6 +18,22 @@ def _norm_cdf(x):
     return 0.5 * (1 + math.erf(x / math.sqrt(2)))
 
 
+def _positive_env_int(name, default):
+    try:
+        value = int(os.environ.get(name, default))
+        return value if value > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _nonnegative_env_float(name, default):
+    try:
+        value = float(os.environ.get(name, default))
+        return value if math.isfinite(value) and value >= 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
 def contract_terms(mkt):
     """Extract strike, deadline and averaging window from a Kalshi market."""
     rules = " ".join(str(mkt.get(k, "")) for k in ("rules_primary", "rules_secondary"))
@@ -28,13 +44,19 @@ def contract_terms(mkt):
         avg_s = int(m.group(1)) * (60 if m.group(2).lower().startswith("minute") else 1)
         source = "rules"
     if avg_s is None:
-        avg_s = int(os.environ.get("SETTLE_AVG_SECONDS", 60))
+        avg_s = _positive_env_int("SETTLE_AVG_SECONDS", 60)
     benchmark = "CF Benchmarks" if "cf benchmarks" in rules.lower() else "unstated"
     strike = None
     for k in ("floor_strike", "cap_strike"):
         if mkt.get(k) not in (None, ""):
-            strike = float(mkt[k])
-            break
+            try:
+                candidate = float(mkt[k])
+                if math.isfinite(candidate) and candidate > 0:
+                    strike = candidate
+            except (TypeError, ValueError):
+                pass
+            if strike is not None:
+                break
     close = mkt.get("close_time")
     close_ts = None
     if close:
@@ -76,7 +98,13 @@ def prob_above(spot, strike, vol_per_min, seconds_left, avg_seconds=60,
     # That gap is extra uncertainty that matters most right at the strike, so
     # it's added as variance: it stops the model calling a coin-flip a sure thing.
     if proxy_bps is None:
-        proxy_bps = float(os.environ.get("SETTLE_PROXY_BPS", 3))
+        proxy_bps = _nonnegative_env_float("SETTLE_PROXY_BPS", 3)
+    try:
+        proxy_bps = float(proxy_bps)
+    except (TypeError, ValueError):
+        proxy_bps = 3.0
+    if not math.isfinite(proxy_bps) or proxy_bps < 0:
+        proxy_bps = 3.0
     var += (proxy_bps / 1e4) ** 2
     if var <= 1e-14:
         return 1.0 if mean > k else 0.0
