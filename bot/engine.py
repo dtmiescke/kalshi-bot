@@ -731,6 +731,11 @@ class Engine:
                 failure = f"{failure or 'unwind incomplete'}; residual ledger failed: {ledger_error}"
             message = (f"{ticker}: {residual} contract(s) remain after arbitrage unwind "
                        f"(original order {order_id}). {failure or ''} Check position manually.")
+            # Residual exposure is a hard stop, even if the sell call returned
+            # normally: partial IOC fills are not a completed unwind. Persist
+            # the pause so a restart cannot resume trading against stale ledger
+            # state while this position is still open.
+            self._pause_for_reconciliation(message)
             log.error(message)
             alerts.send("URGENT: arbitrage unwind incomplete", message,
                         priority="urgent", tags=["warning"])
