@@ -192,6 +192,39 @@ class Settings:
         return _env("KALSHI_DATA_URL", KALSHI_URLS["production"]).rstrip("/")
 
     def validate(self):
+        # Validate scheduler environment before any market work or execution.
+        # BURST_MINUTES=0 is intentional snapshot-only mode.
+        float_settings = {
+            "SPORTS_EVERY_HOURS": (5.5, False),
+            "BURST_MINUTES": (8.0, True),
+            "TRAIN_EVERY_HOURS": (24.0, False),
+            "TRAIN_RETRY_HOURS": (6.0, False),
+        }
+        for name, (default, allow_zero) in float_settings.items():
+            raw = os.environ.get(name, str(default))
+            try:
+                value = float(raw)
+            except (TypeError, ValueError) as exc:
+                requirement = "non-negative" if allow_zero else "positive"
+                raise ValueError(f"{name} must be a finite {requirement} number") from exc
+            if not math.isfinite(value) or value < 0 or (not allow_zero and value == 0):
+                requirement = "non-negative" if allow_zero else "positive"
+                raise ValueError(f"{name} must be a finite {requirement} number")
+        integer_settings = {
+            "ML_MIN_WINDOWS": 300,
+            "SPORTS_SCAN_EVENT_BUDGET": 150,
+            "SPORTS_INTEL_EVENT_BUDGET": 6,
+            "SPORTS_AI_NEWS_REFRESH_MINUTES": 30,
+        }
+        for name, default in integer_settings.items():
+            raw = os.environ.get(name, str(default))
+            try:
+                value = int(raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{name} must be a positive integer") from exc
+            if value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+
         if self.sports_mode not in ("configured", "all", "manual"):
             raise ValueError("SPORTS_MODE must be configured/all/manual")
         if self.sports_mode == "manual" and not self.selected_series():
