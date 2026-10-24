@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from bot.config import Settings
-from bot.engine import _series_sport, _sports_excluded
+from bot.engine import _rotating_event_batch, _series_sport, _sports_excluded
 
 
 class TestSportsSelection(unittest.TestCase):
@@ -43,6 +43,29 @@ class TestSportsSelection(unittest.TestCase):
         selected = settings.selected_series()
         series_map = {series: _series_sport(series) for series in selected}
         self.assertEqual(set(series_map), {"KXATPMATCH", "KXF1RACE", "KXESPORTS"})
+
+    def test_rotating_event_batch_covers_all_events_without_starvation(self):
+        events = [{"event_ticker": f"KXTEST-{n:03d}", "markets": []} for n in range(7)]
+        batch1, cursor1 = _rotating_event_batch(events, "", budget=3)
+        batch2, cursor2 = _rotating_event_batch(events, cursor1, budget=3)
+        batch3, cursor3 = _rotating_event_batch(events, cursor2, budget=3)
+        seen = {e["event_ticker"] for e in batch1 + batch2 + batch3}
+        self.assertEqual(seen, {e["event_ticker"] for e in events})
+        self.assertNotEqual(cursor1, cursor2)
+        self.assertNotEqual(cursor2, cursor3)
+
+    def test_rotating_event_batch_always_includes_held_events_and_deduplicates(self):
+        events = [
+            {"event_ticker": "KXTEST-A"},
+            {"event_ticker": "KXTEST-B"},
+            {"event_ticker": "KXTEST-B"},
+            {"event_ticker": "KXTEST-C"},
+        ]
+        batch, cursor = _rotating_event_batch(events, "", budget=1, held={"KXTEST-C"})
+        tickers = [e["event_ticker"] for e in batch]
+        self.assertEqual(tickers.count("KXTEST-B"), 1)
+        self.assertIn("KXTEST-C", tickers)
+        self.assertEqual(cursor, "KXTEST-B")
 
     def test_manual_mode_requires_at_least_one_series(self):
         with patch.dict(os.environ, {"SPORTS_MODE": "manual", "SPORTS_SELECTED": ""}):
