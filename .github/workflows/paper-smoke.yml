@@ -27,6 +27,12 @@ jobs:
           BOT_MODE: paper
           LIVE_TRADING_CONFIRMED: no
         run: python -m unittest tests.test_paper_pipeline
+      - name: Exercise full sports discovery-to-paper-bet pipeline with deterministic fakes
+        timeout-minutes: 3
+        env:
+          BOT_MODE: paper
+          LIVE_TRADING_CONFIRMED: no
+        run: python -m unittest tests.test_bot.TestWatchlist tests.test_bot.TestCrypto
       - name: Restore and validate persistent memory
         run: bash .github/load.sh
       - name: Verify credentials and market connectivity (no trades)
