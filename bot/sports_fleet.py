@@ -27,6 +27,8 @@ def _merge_event(target, incoming):
             merged[key] = value
     markets = {}
     for market in (target.get("markets") or []) + (incoming.get("markets") or []):
+        if not isinstance(market, dict):
+            continue
         ticker = str(market.get("ticker") or "").strip()
         if not ticker:
             continue
@@ -44,6 +46,8 @@ def normalize_events(events_by_series):
     series_for = {}
     for series in sorted(events_by_series):
         for event in events_by_series.get(series) or []:
+            if not isinstance(event, dict):
+                continue
             ticker = _ticker(event)
             if not ticker:
                 continue
@@ -63,6 +67,8 @@ def normalize_events(events_by_series):
         series = series_for[ticker]
         markets = []
         for market in event.get("markets") or []:
+            if not isinstance(market, dict):
+                continue
             mt = str(market.get("ticker") or "").strip()
             if mt and mt not in seen_markets:
                 seen_markets.add(mt)
@@ -72,41 +78,64 @@ def normalize_events(events_by_series):
     return result
 
 
+def _scan_event(event, now):
+    """Inspect one event without mutating the upstream payload."""
+    stats = {"events": 1, "active_markets": 0, "priced_markets": 0,
+             "missing_tickers": 0, "missing_quotes": 0, "live_events": 0,
+             "live_watch_markets": []}
+    status = str(event.get("status") or event.get("event_status") or
+                 event.get("state") or "").strip().lower().replace("-", "_")
+    live = status in {"live", "in_progress", "inplay", "in_play", "playing"}
+    if live:
+        stats["live_events"] += 1
+    for market in event.get("markets") or []:
+        if str(market.get("status") or "").lower() not in ("active", "open"):
+            continue
+        ticker = str(market.get("ticker") or "").strip()
+        if not ticker:
+            stats["missing_tickers"] += 1
+            continue
+        stats["active_markets"] += 1
+        bid, ask = market.get("yes_bid"), market.get("yes_ask")
+        if bid is not None and ask is not None:
+            stats["priced_markets"] += 1
+        else:
+            stats["missing_quotes"] += 1
+        if live:
+            stats["live_watch_markets"].append({
+                "ticker": ticker, "event_ticker": _ticker(event),
+                "series": event.get("series_ticker"), "status": status,
+                "yes_bid": bid, "yes_ask": ask, "observed_ts": int(now),
+                "execution_eligible": False,
+                "reason": "live scanner observation only; existing live-sports model is not validated",
+            })
+    return stats
+
+
 def _scan_partition(scanner_id, role, events, now):
     stats = {"scanner": scanner_id, "role": role, "events": 0, "active_markets": 0,
              "priced_markets": 0, "missing_tickers": 0, "missing_quotes": 0,
-             "live_events": 0, "live_watch_markets": []}
+             "live_events": 0, "live_watch_markets": [], "scan_errors": 0,
+             "error_samples": []}
     for event in events:
-        stats["events"] += 1
-        status = str(event.get("status") or event.get("event_status") or
-                     event.get("state") or "").strip().lower().replace("-", "_")
-        live = status in {"live", "in_progress", "inplay", "in_play", "playing"}
-        if live:
-            stats["live_events"] += 1
-        for market in event.get("markets") or []:
-            if str(market.get("status") or "").lower() not in ("active", "open"):
+        try:
+            row = _scan_event(event, now)
+        except Exception:
+            # One bounded retry for malformed/transient payloads. Isolate a
+            # persistently bad event so the other seven scanners still finish.
+            try:
+                row = _scan_event(dict(event), now)
+            except Exception as exc:
+                stats["scan_errors"] += 1
+                if len(stats["error_samples"]) < 5:
+                    stats["error_samples"].append(
+                        {"event_ticker": _ticker(event), "error": type(exc).__name__})
                 continue
-            ticker = str(market.get("ticker") or "").strip()
-            if not ticker:
-                stats["missing_tickers"] += 1
-                continue
-            stats["active_markets"] += 1
-            bid = market.get("yes_bid")
-            ask = market.get("yes_ask")
-            if bid is not None and ask is not None:
-                stats["priced_markets"] += 1
-            else:
-                stats["missing_quotes"] += 1
-            if live:
-                stats["live_watch_markets"].append({
-                    "ticker": ticker, "event_ticker": _ticker(event),
-                    "series": event.get("series_ticker"), "status": status,
-                    "yes_bid": bid, "yes_ask": ask, "observed_ts": int(now),
-                    "execution_eligible": False,
-                    "reason": "live scanner observation only; existing live-sports model is not validated",
-                })
+        for key in ("events", "active_markets", "priced_markets", "missing_tickers",
+                    "missing_quotes", "live_events"):
+            stats[key] += row[key]
+        stats["live_watch_markets"].extend(row["live_watch_markets"])
     return stats
-
 
 def scan_fleet(events_by_series, now=None, workers=8):
     """Deduplicate once, then fan the canonical event list across eight scanners."""
@@ -129,10 +158,12 @@ def scan_fleet(events_by_series, now=None, workers=8):
         for row in result["live_watch_markets"]:
             live.setdefault(row["ticker"], row)
     summary = {
-        "ts": now, "ok": True, "scanner_count": workers,
+        "ts": now, "ok": sum(r.get("scan_errors", 0) for r in results) == 0, "scanner_count": workers,
         "events_unique": len(events),
         "markets_unique": sum(len(e.get("markets") or []) for e in events),
         "live_events_seen": sum(r["live_events"] for r in results),
+        "scan_errors": sum(r.get("scan_errors", 0) for r in results),
+        "error_samples": [sample for r in results for sample in r.get("error_samples", [])][:10],
         "live_markets_observed": len(live),
         "scanners": [{k: v for k, v in r.items() if k != "live_watch_markets"}
                      for r in results],

@@ -69,8 +69,10 @@ def run_scheduled(s, store, data):
     # damage. Two janitors run on a six-hour cadence; only raw observations are
     # deduplicated/trimmed. Bets, model weights, grades and audit history are kept.
     from . import nerd, maintenance
+    code_health = nerd.inspect_code()
     full_check_due = time.time() - float(store.get_kv("nerd_last_full_check_ts", 0) or 0) >= 24 * 3600
     health = nerd.inspect_store(store, full_integrity=full_check_due)
+    health.setdefault("checks", {})["source_structure"] = code_health
     cleanup = maintenance.run_janitors(store)
     if cleanup.get("ok") and not cleanup.get("skipped"):
         print("janitors:", json.dumps(cleanup, default=str))

@@ -34,6 +34,18 @@ class TestSportsFleet(unittest.TestCase):
         self.assertTrue(all(row["execution_eligible"] is False for row in live))
         self.assertEqual(len({row["ticker"] for row in live}), len(live))
 
+    def test_malformed_records_are_skipped_without_crashing_other_scanners(self):
+        normalized = normalize_events({"KXNFLGAME": [
+            None,
+            {"event_ticker": "EVT", "markets": [
+                None, {"ticker": "OK", "status": "active", "yes_bid": 40, "yes_ask": 45}]},
+        ]})
+        self.assertEqual(len(normalized["KXNFLGAME"]), 1)
+        self.assertEqual([m["ticker"] for m in normalized["KXNFLGAME"][0]["markets"]], ["OK"])
+        normalized, summary, live = scan_fleet(normalized, now=126, workers=8)
+        self.assertEqual(summary["events_unique"], 1)
+        self.assertTrue(summary["ok"])
+
     def test_empty_or_missing_tickers_are_not_duplicate_market_records(self):
         normalized = normalize_events({"KXNBAGAME": [
             {"event_ticker": "", "markets": [{"ticker": "BAD"}]},
