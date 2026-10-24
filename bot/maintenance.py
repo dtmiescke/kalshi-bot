@@ -71,7 +71,7 @@ def janitor_retention(store, now=None):
             store.db.rollback()
             raise
     return {"janitor": "retention", "before": before, "after": after,
-            "ts": int(time.time())}
+            "ts": now}
 
 
 def run_janitors(store, now=None, force=False, every_hours=6):
