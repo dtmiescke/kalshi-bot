@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - verify/paper-smoke-20261024
+      - reconcile/paper-safety-main-20261024
 permissions:
   contents: read
 concurrency:
