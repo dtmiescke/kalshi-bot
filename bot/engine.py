@@ -417,6 +417,7 @@ class Engine:
                         continue
                     if selected is not None and series not in selected:
                         continue
+                    ev.setdefault("series_ticker", series)
                     series_map[series] = _series_sport(series, catalog.get(series))
                     events_by_series.setdefault(series, []).append(ev)
                 self.store.set_kv("sports_catalog_health", {
