@@ -406,10 +406,8 @@ class Engine:
                 all_events = self.data.sports_events_all()
                 total_events = len(all_events)
                 cursor = str(self.store.get_kv("sports_event_cursor", "") or "")
-                if event_budget is not None:
-                    all_events, cursor = _rotating_event_batch(
-                        all_events, cursor, event_budget, held=held)
-                    self.store.set_kv("sports_event_cursor", cursor)
+                # Keep the full eligible event set for the read-only fleet. The
+                # rotating budget is applied only after the fleet has scanned it.
                 for ev in all_events:
                     series = ev.get("series_ticker")
                     if not series:
@@ -419,6 +417,7 @@ class Engine:
                         continue
                     if selected is not None and series not in selected:
                         continue
+                    ev.setdefault("series_ticker", series)
                     series_map[series] = _series_sport(series, catalog.get(series))
                     events_by_series.setdefault(series, []).append(ev)
                 self.store.set_kv("sports_catalog_health", {
@@ -453,11 +452,6 @@ class Engine:
                     fallback_events.extend(found)
                 except Exception as e:
                     log.warning("events %s: %s", selected_series, e)
-            if event_budget is not None and fallback_events:
-                cursor = str(self.store.get_kv("sports_event_cursor", "") or "")
-                fallback_events, cursor = _rotating_event_batch(
-                    fallback_events, cursor, event_budget, held=held)
-                self.store.set_kv("sports_event_cursor", cursor)
             for ev in fallback_events:
                 selected_series = ev.get("series_ticker")
                 if selected_series:
@@ -465,22 +459,38 @@ class Engine:
             for selected_series in series_map:
                 events_by_series.setdefault(selected_series, [])
         if sports and events_by_series:
-            # Eight read-only scanners inspect one canonical, deduplicated event
-            # stream. They never create orders; the existing Engine remains the
-            # only model/risk/execution authority.
+            # Eight read-only specialist workers inspect every eligible event before
+            # the deep-analysis budget is applied. Only the existing Engine can trade.
             try:
                 from .sports_fleet import scan_fleet
                 events_by_series, scanner_health, live_watch = scan_fleet(
                     events_by_series, now=now, workers=8)
-                # Keep empty series explicit so the loop never refetches a series
-                # that was already deduplicated by the fleet.
-                for known_series in series_map:
-                    events_by_series.setdefault(known_series, [])
                 self.store.set_kv("sports_scanner_health", scanner_health)
                 self.store.set_kv("sports_live_watch", live_watch[:500])
             except Exception as e:
                 log.exception("sports scanner fleet failed: %s", e)
                 summary["scanner_fleet_error"] = type(e).__name__
+            if event_budget is not None:
+                cursor = str(self.store.get_kv("sports_event_cursor", "") or "")
+                all_unique = [ev for series in sorted(events_by_series)
+                              for ev in events_by_series.get(series, [])]
+                selected_events, cursor = _rotating_event_batch(
+                    all_unique, cursor, event_budget, held=held)
+                selected_by_series = {}
+                for ev in selected_events:
+                    series = ev.get("series_ticker")
+                    if series:
+                        selected_by_series.setdefault(series, []).append(ev)
+                for known_series in series_map:
+                    selected_by_series.setdefault(known_series, [])
+                events_by_series = selected_by_series
+                self.store.set_kv("sports_event_cursor", cursor)
+                self.store.set_kv("sports_deep_scan_budget", {
+                    "ts": now, "events_available": len(all_unique),
+                    "events_selected": len(selected_events), "event_budget": event_budget,
+                    "event_cursor": cursor})
+            for known_series in series_map:
+                events_by_series.setdefault(known_series, [])
         if sports and events_by_series and os.environ.get("SPORTS_INTEL_EVENT_SEARCH", "no").lower() in ("yes", "true", "1"):
             try:
                 from . import sports_intel
@@ -496,6 +506,11 @@ class Engine:
             except Exception as e:
                 log.warning("event-specific news collection failed: %s", e)
 
+        market_budget = None
+        if event_budget is not None:
+            market_budget = max(25, min(1000, int(os.environ.get("SPORTS_SCAN_MARKET_BUDGET", "100"))))
+        sports_markets_processed = 0
+        sports_markets_deferred = 0
         for series, sport in (series_map.items() if sports else ()):
             if watch and not watch.wants_series(series) and not any(
                     h.startswith(series) for h in held):
@@ -528,6 +543,15 @@ class Engine:
                     continue
                 markets = [m for m in ev.get("markets", [])
                            if m.get("status") in ("active", "open")]
+                # Bound expensive per-market history/research work. The fast
+                # scanner fleet already inspected all eligible events. Always
+                # revisit events with open positions, even after the budget.
+                event_ticker = str(ev.get("event_ticker") or "")
+                if (market_budget is not None and event_ticker not in held
+                        and sports_markets_processed >= market_budget):
+                    sports_markets_deferred += len(markets)
+                    continue
+                sports_markets_processed += len(markets)
                 teams = [m.get("yes_sub_title") for m in markets if m.get("yes_sub_title")]
                 ktime = next((m.get("expected_expiration_time") or m.get("close_time")
                               for m in markets), None)
@@ -594,6 +618,12 @@ class Engine:
                             f"{best[0]['ticker']} {best[1]['side'].upper()} @ "
                             f"${best[1]['price']:.2f}, edge {best[1]['edge']:+.1%}")
                     self.place(*best, summary=summary, now=now)
+        if market_budget is not None:
+            summary["sports_deep_scan"] = {
+                "market_budget": market_budget, "markets_in_selected_events": sports_markets_processed,
+                "markets_deferred": sports_markets_deferred,
+                "full_event_scan": True, "held_events_prioritized": True}
+            self.store.set_kv("sports_deep_scan_health", {"ts": now, **summary["sports_deep_scan"]})
         if self.s.crypto_enabled:
             self.run_crypto(watch, brain.get_weights(self.store, "crypto"), summary, now)
         log.info("cycle: %s", summary)
