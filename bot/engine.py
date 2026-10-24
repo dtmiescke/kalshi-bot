@@ -68,7 +68,11 @@ def _series_sport(series, metadata=None):
         (("motorsport", "formula 1", "formula-one", "f1", "nascar", "indycar", "racing"), "motorsports"),
         (("golf", "pga", "lpga", "liv golf"), "golf"),
         (("esports", "e-sports", "league of legends", "counter-strike", "dota", "valorant"), "esports"),
-        (("nfl", "college football", "football"), "football"),
+        # Keep pro NFL and college football as distinct research domains. Exact
+        # configured series still take precedence via SPORTS above this fallback.
+        (("nfl", "national football league"), "americanfootball_nfl"),
+        (("college football", "ncaa football", "ncaaf", "cfb"), "americanfootball_ncaaf"),
+        (("football",), "football"),
         (("basketball", "wnba", "nba", "ncaab"), "basketball"),
         (("baseball", "mlb"), "baseball"),
         (("hockey", "nhl"), "hockey"),
