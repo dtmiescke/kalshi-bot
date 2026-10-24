@@ -43,6 +43,14 @@ class TestSportsSelection(unittest.TestCase):
                 self.assertEqual(_series_sport(series, metadata), category)
                 self.assertFalse(_sports_excluded(series, metadata))
 
+    def test_fallback_routing_separates_nfl_and_college_football(self):
+        self.assertEqual(_series_sport("UNKNOWN", {"title": "NFL matchup"}),
+                         "americanfootball_nfl")
+        self.assertEqual(_series_sport("UNKNOWN", {"title": "NCAA football matchup"}),
+                         "americanfootball_ncaaf")
+        self.assertEqual(_series_sport("UNKNOWN", {"title": "football championship"}),
+                         "football")
+
     def test_manual_selection_keeps_nontraditional_sports(self):
         with patch.dict(os.environ, {"SPORTS_MODE": "manual",
                                     "SPORTS_SELECTED": "KXATPMATCH,KXF1RACE,KXESPORTS"}):
