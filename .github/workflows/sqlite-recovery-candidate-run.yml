@@ -12,10 +12,19 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
-      - name: Install SQLite recovery CLI
+      - name: Build pinned SQLite CLI with recovery support
+        shell: bash
         run: |
+          set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y sqlite3
+          sudo apt-get install -y build-essential curl
+          curl -fsSL https://www.sqlite.org/2025/sqlite-autoconf-3500400.tar.gz -o /tmp/sqlite.tar.gz
+          tar -xzf /tmp/sqlite.tar.gz -C /tmp
+          cd /tmp/sqlite-autoconf-3500400
+          CFLAGS="-DSQLITE_ENABLE_DBPAGE_VTAB -DSQLITE_ENABLE_DBSTAT_VTAB" ./configure --disable-shared
+          make -j2 sqlite3
+          /tmp/sqlite-autoconf-3500400/sqlite3 :memory: "SELECT sqlite_compileoption_used('ENABLE_DBPAGE_VTAB');" | grep -qx 1
+          echo "/tmp/sqlite-autoconf-3500400" >> "$GITHUB_PATH"
       - name: Fetch and preserve source snapshot outside artifacts
         shell: bash
         run: |
