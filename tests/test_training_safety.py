@@ -277,7 +277,14 @@ class TestTrainingSafety(unittest.TestCase):
                 self.assertEqual(calls["buy"], 1)
                 self.assertEqual(calls["sells"], [("A" if method == "try_arb" else "LOW",
                                                    "yes", 1, 0.25)])
-                obj.store.add_bet.assert_not_called()
+                # The sell response lacks an order ID, so the unwind is unconfirmed.
+                # The remaining exposure must be recorded, not hidden from risk checks.
+                obj.store.add_bet.assert_called_once()
+                residual = obj.store.add_bet.call_args.args[0]
+                self.assertEqual(residual["ticker"], "A" if method == "try_arb" else "LOW")
+                self.assertEqual(residual["contracts"], 1)
+                self.assertTrue(residual["signals"]["arbitrage"]["unwind_residual"])
+                self.assertEqual(residual["signals"]["arbitrage"]["unwound"], 0)
 
     def test_train_command_exits_nonzero_when_data_is_insufficient(self):
         settings = SimpleNamespace(
