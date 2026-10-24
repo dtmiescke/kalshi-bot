@@ -2,7 +2,6 @@
 import os
 import time
 import unittest
-from unittest.mock import patch
 
 from bot.live import settlement
 
@@ -34,6 +33,33 @@ class TestSettlementTimestampSafety(unittest.TestCase):
     def test_malformed_deadline_fails_closed(self):
         terms = settlement.contract_terms({"floor_strike": 100000, "close_time": "not-a-time"})
         self.assertIsNone(terms["close_ts"])
+
+    def test_malformed_strike_and_settlement_window_do_not_crash_discovery(self):
+        original = os.environ.get("SETTLE_AVG_SECONDS")
+        try:
+            os.environ["SETTLE_AVG_SECONDS"] = "not-a-number"
+            terms = settlement.contract_terms({"floor_strike": "bad", "close_time": "2026-10-19T18:30:00Z"})
+            self.assertIsNone(terms["strike"])
+            self.assertEqual(terms["avg_seconds"], 60)
+        finally:
+            if original is None:
+                os.environ.pop("SETTLE_AVG_SECONDS", None)
+            else:
+                os.environ["SETTLE_AVG_SECONDS"] = original
+
+    def test_invalid_proxy_uncertainty_config_uses_safe_default(self):
+        original = os.environ.get("SETTLE_PROXY_BPS")
+        try:
+            os.environ["SETTLE_PROXY_BPS"] = "nan"
+            result = settlement.prob_above(100, 100, 0.01, 30)
+            self.assertIsNotNone(result)
+            self.assertGreaterEqual(result, 0.0)
+            self.assertLessEqual(result, 1.0)
+        finally:
+            if original is None:
+                os.environ.pop("SETTLE_PROXY_BPS", None)
+            else:
+                os.environ["SETTLE_PROXY_BPS"] = original
 
 
 if __name__ == "__main__":
