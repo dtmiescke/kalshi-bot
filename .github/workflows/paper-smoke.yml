@@ -7,10 +7,10 @@ on:
 permissions:
   contents: read
 concurrency:
-  # This is an isolated paper-only CI workflow; newer commits should supersede stale
-  # smoke runs instead of waiting behind a slow or stuck prior run.
-  group: kalshi-bot-paper-smoke
-  cancel-in-progress: true
+  # Keep smoke runs isolated per branch and do not cancel a run mid-scheduled-cycle.
+  # The offline regression workflow has its own concurrency group.
+  group: kalshi-bot-paper-smoke-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   smoke:
     runs-on: ubuntu-latest
