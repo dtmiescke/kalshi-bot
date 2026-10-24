@@ -524,11 +524,28 @@ class LiveRunner:
             if bid - exit_fee / n <= p_side + self.s.exit_margin:
                 continue
             if self.s.mode in ("demo", "live"):
+                # IOC submissions can partially fill, and a timeout/malformed response
+                # does not prove that nothing traded. Require an exchange order ID and
+                # a follow-up order read before changing the local position ledger.
                 try:
-                    o = self.engine.trade.place_limit_sell(t, b["side"], n, bid)
-                    n = int(float(o.get("fill_count_fp") or o.get("fill_count") or 0))
+                    submitted = self.engine.trade.place_limit_sell(t, b["side"], n, bid)
+                    order_id = submitted.get("order_id") or submitted.get("id")
+                    if not order_id:
+                        raise RuntimeError("sell submission returned no order ID; fill outcome is ambiguous")
+                    order = self.engine.trade.order(str(order_id))
+                    filled, status, terminal = self._maker_order_state(order, n)
+                    if not terminal:
+                        raise RuntimeError(
+                            f"sell order {order_id} is not confirmed terminal (status={status or 'unknown'})"
+                        )
+                    n = filled
                 except Exception as e:
-                    log.error("exit failed %s: %s", t, e)
+                    message = f"exit order outcome uncertain for {t}: {e}; reconcile exchange orders and positions"
+                    log.error(message)
+                    self._skip("exit outcome uncertain; execution paused")
+                    self.betting_ok, self.betting_why = False, message
+                    self.store.set_kv("execution_reconciliation_required", message)
+                    alerts.send("URGENT: exit reconciliation required", message)
                     continue
                 if n < 1:
                     continue

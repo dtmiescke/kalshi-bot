@@ -3,6 +3,7 @@ import os
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 
 from bot.config import Settings
@@ -341,6 +342,60 @@ class TestRunnerExecution(unittest.TestCase):
         self.r.check_makers(time.time() + self.s.maker_wait_s + 1)
         self.assertNotIn(ticker, self.r.makers)
         self.assertEqual(self.store.open_bets(), [])
+
+    def _add_demo_exit_position(self, contracts=10):
+        ticker = next(iter(self.r.markets))
+        self.s.mode = "demo"
+        self.store.add_bet({"ts": 1, "mode": "demo", "ticker": ticker,
+                            "event_ticker": "KXBTC15M-E", "series": "KXBTC15M",
+                            "team": "UP", "side": "yes", "price": 0.40,
+                            "contracts": contracts, "stake": contracts * 0.40,
+                            "fee": 0.17, "model_prob": .6, "edge": .1,
+                            "confidence": .8, "signals": {}})
+        self.r.books[ticker].yes = {0.90: 50}
+        self.r.books[ticker].no = {0.08: 50}
+        self.r.readings_for = lambda t, now: ([object()], None)
+        return ticker
+
+    def test_demo_exit_uses_verified_partial_fill_and_keeps_residual_open(self):
+        ticker = self._add_demo_exit_position(10)
+
+        class Trade:
+            def place_limit_sell(self, *args):
+                return {"order_id": "sell-1", "fill_count_fp": "10"}
+
+            def order(self, order_id):
+                return {"order_id": order_id, "status": "canceled", "fill_count_fp": "4"}
+
+        self.r.engine.trade = Trade()
+        with patch("bot.live.runner.brain.blend", return_value=(0.1, 0.8)):
+            self.r.check_exits(time.time())
+        rows = self.store.q("SELECT * FROM bets ORDER BY id")
+        self.assertEqual(len(rows), 2)
+        closed = [b for b in rows if b["result"] == "sold"]
+        opened = [b for b in rows if b["result"] is None]
+        self.assertEqual((len(closed), closed[0]["contracts"]), (1, 4))
+        self.assertEqual((len(opened), opened[0]["contracts"]), (1, 6))
+        self.assertIsNone(self.store.get_kv("execution_reconciliation_required"))
+
+    def test_demo_exit_without_order_id_pauses_for_reconciliation(self):
+        ticker = self._add_demo_exit_position(10)
+
+        class Trade:
+            def place_limit_sell(self, *args):
+                return {"fill_count_fp": "0"}
+
+            def order(self, order_id):
+                raise AssertionError("must not query without a confirmed order ID")
+
+        self.r.engine.trade = Trade()
+        with patch("bot.live.runner.brain.blend", return_value=(0.1, 0.8)):
+            self.r.check_exits(time.time())
+        rows = self.store.q("SELECT * FROM bets")
+        self.assertEqual(len(rows), 1)
+        self.assertIsNone(rows[0]["result"])
+        self.assertFalse(self.r.betting_ok)
+        self.assertIn("uncertain", self.store.get_kv("execution_reconciliation_required"))
 
     def test_early_exit_when_bid_beats_holding(self):
         t = next(iter(self.r.markets))
