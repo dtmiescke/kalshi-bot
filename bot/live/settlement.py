@@ -11,7 +11,7 @@ Check a few contracts' rules in the Kalshi app and set it correctly.
 import math
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def _norm_cdf(x):
@@ -39,7 +39,12 @@ def contract_terms(mkt):
     close_ts = None
     if close:
         try:
-            close_ts = datetime.fromisoformat(close.replace("Z", "+00:00")).timestamp()
+            parsed = datetime.fromisoformat(close.replace("Z", "+00:00"))
+            # Market timestamps without an explicit offset must not depend on
+            # the host machine timezone (e.g. laptop vs UTC GitHub runner).
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            close_ts = parsed.timestamp()
         except ValueError:
             pass
     return {"strike": strike, "close_ts": close_ts, "avg_seconds": avg_s,
