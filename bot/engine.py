@@ -30,6 +30,28 @@ log = logging.getLogger("bot")
 _EXECUTION_LOCK = threading.RLock()
 
 
+def _rotating_event_batch(events, cursor="", budget=150, held=()):
+    """Select a deterministic rotating batch while always retaining held events."""
+    unique = {}
+    for event in events:
+        ticker = str(event.get("event_ticker") or event.get("ticker") or "")
+        if ticker:
+            unique.setdefault(ticker, event)
+    ordered = sorted(unique.items())
+    held_set = {str(x) for x in held if x}
+    held_rows = [(ticker, event) for ticker, event in ordered if ticker in held_set]
+    eligible = [(ticker, event) for ticker, event in ordered if ticker not in held_set]
+    limit = max(0, int(budget))
+    if not eligible or limit == 0:
+        return [event for _, event in held_rows], str(cursor or "")
+    cursor = str(cursor or "")
+    after = [(ticker, event) for ticker, event in eligible if ticker > cursor]
+    before = [(ticker, event) for ticker, event in eligible if ticker <= cursor]
+    selected = (after + before)[:limit]
+    next_cursor = selected[-1][0] if selected else cursor
+    return [event for _, event in held_rows + selected], next_cursor
+
+
 def _series_sport(series, metadata=None):
     """Map a discovered Kalshi series to a known odds key or a research category."""
     if series in SPORTS:
@@ -347,15 +369,17 @@ class Engine:
         return intel.Reading(**cached) if cached else None
 
     # --- the cycle ---------------------------------------------------------------
-    def run(self, watch=None, sports=True):
+    def run(self, watch=None, sports=True, event_budget=None):
         """watch: optional Watchlist. When given, only watched games (plus games
         the bot already holds) are researched — a fast spot check."""
         self.s.validate()
         now = int(time.time())
-        summary = {"mode": "watch" if watch else "full", "markets": 0,
-                   "matched": 0, "bets": 0, "skipped": {}, "alerts": []}
+        summary = {"mode": "batch" if event_budget is not None else ("watch" if watch else "full"),
+                   "markets": 0, "matched": 0, "bets": 0, "skipped": {}, "alerts": []}
+        if event_budget is not None:
+            summary["event_budget"] = int(event_budget)
         held = {b["event_ticker"] for b in self.store.open_bets(mode=self.s.mode)}
-        if sports and getattr(self.s, "combo_research_enabled", True):
+        if sports and event_budget is None and getattr(self.s, "combo_research_enabled", True):
             from . import combo_research
             summary["combos"] = combo_research.scan(self.data, self.store, settings=self.s)
         weights = brain.get_weights(self.store, "sports")
@@ -369,13 +393,19 @@ class Engine:
         else:
             self.store.set_kv("pause_alerted", None)
 
-        series_map = dict(SPORTS)
+        series_map = {} if event_budget is not None else dict(SPORTS)
         events_by_series = {}
         selected = self.s.selected_series() if hasattr(self.s, "selected_series") else None
         if sports and getattr(self.s, "sports_mode", "all") == "all":
             try:
                 catalog = self.data.sports_series()
                 all_events = self.data.sports_events_all()
+                total_events = len(all_events)
+                cursor = str(self.store.get_kv("sports_event_cursor", "") or "")
+                if event_budget is not None:
+                    all_events, cursor = _rotating_event_batch(
+                        all_events, cursor, event_budget, held=held)
+                    self.store.set_kv("sports_event_cursor", cursor)
                 for ev in all_events:
                     series = ev.get("series_ticker")
                     if not series:
@@ -387,9 +417,12 @@ class Engine:
                     events_by_series.setdefault(series, []).append(ev)
                 self.store.set_kv("sports_catalog_health", {
                     "ts": now, "series_discovered": len(catalog),
-                    "open_events_seen": len(all_events), "sports_events_matched": sum(map(len, events_by_series.values())),
-                    "coverage_warning": len(all_events) >= 4000 or len(catalog) >= 10000,
-                    "mode": "dynamic_all"})
+                    "open_events_seen": total_events,
+                    "events_scanned": len(all_events), "event_budget": event_budget,
+                    "event_cursor": cursor,
+                    "sports_events_matched": sum(map(len, events_by_series.values())),
+                    "coverage_warning": total_events >= 4000 or len(catalog) >= 10000,
+                    "mode": "dynamic_all_rotating" if event_budget is not None else "dynamic_all"})
             except Exception as e:
                 log.warning("dynamic sports discovery failed; using configured series: %s", e)
                 events_by_series = {}

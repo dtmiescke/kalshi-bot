@@ -12,7 +12,7 @@ on unseen data** (crypto).
 | Every | What |
 |---|---|
 | 12 min | 8-minute **live streaming burst** on BTC/ETH/SOL 15-minute markets, grading, learning, AI briefing |
-| 5.5 h | full **sports** scan (inside one 12-minute run) |
+| 12 min | rotating batch of **sports** events across all discovered leagues; open positions are always revisited |
 | daily | **retrain** the model on all history + live decisions; promote only if it wins on unseen data |
 | weekly | download fresh real Kalshi history |
 | daily | trim raw data so the memory file stays small (learning is never trimmed) |
