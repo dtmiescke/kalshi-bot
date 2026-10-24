@@ -23,6 +23,7 @@ jobs:
       - name: Restore and validate persistent memory
         run: bash .github/load.sh
       - name: Verify credentials and market connectivity (no trades)
+        timeout-minutes: 3
         env:
           BOT_MODE: paper
           LIVE_TRADING_CONFIRMED: no
@@ -34,6 +35,7 @@ jobs:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: python -m bot.main check
       - name: Run one scheduled cycle in forced paper mode
+        timeout-minutes: 10
         env:
           BOT_MODE: paper
           LIVE_TRADING_CONFIRMED: no
@@ -43,20 +45,20 @@ jobs:
           KALSHI_DATA_KEY_ID: ${{ secrets.KALSHI_DATA_KEY_ID }}
           KALSHI_DATA_PRIVATE_KEY: ${{ secrets.KALSHI_DATA_PRIVATE_KEY }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          OPENROUTER_MODELS: ${{ vars.OPENROUTER_MODELS }}
-          OMNIROUTE_URL: ${{ secrets.OMNIROUTE_URL }}
-          OMNIROUTE_API_KEY: ${{ secrets.OMNIROUTE_API_KEY }}
-          OMNIROUTE_MODELS: ${{ vars.OMNIROUTE_MODELS }}
-          SPORTS_EVERY_HOURS: "5.5"
-          SPORTS_MODE: all
-          SPORTS_INTEL_ENABLED: "yes"
-          SPORTS_INTEL_EVENT_SEARCH: "yes"
+          # Keep this smoke run bounded: validate the scheduler's core DB/report
+          # path without optional external intelligence scans, crypto streaming,
+          # ladders, combo research, or paid LLM calls dominating the runtime.
+          SPORTS_INTEL_ENABLED: "no"
+          SPORTS_INTEL_EVENT_SEARCH: "no"
+          SPORTS_EVERY_HOURS: "999999"
+          CRYPTO_ENABLED: "no"
+          BURST_MINUTES: "0"
+          LADDERS_ENABLED: "no"
           COMBOS_ENABLED: "no"
           COMBO_RESEARCH_ENABLED: "no"
-          BURST_MINUTES: "1"
-          BRIEFING_EVERY_MINUTES: "12"
-          LLM_DAILY_LIMIT: "5"
+          BRIEFING_EVERY_MINUTES: "999999"
+          LLM_DAILY_LIMIT: "0"
+          SPORTS_MODE: all
           BANKROLL: "1000"
           MAX_PER_BET: "25"
           MAX_PER_DAY: "150"
@@ -65,10 +67,10 @@ jobs:
           MAX_OPEN_COST: "200"
           MIN_EDGE: "3"
           CRYPTO_MIN_EDGE: "5"
-          LADDERS_ENABLED: "yes"
           COUNCIL_MODE: advisory
         run: python -m bot.main scheduled
       - name: Verify database integrity and reporting
+        timeout-minutes: 3
         env:
           BOT_MODE: paper
           LIVE_TRADING_CONFIRMED: no
