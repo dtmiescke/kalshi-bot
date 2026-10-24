@@ -12,7 +12,7 @@ on unseen data** (crypto).
 | Every | What |
 |---|---|
 | 12 min | 8-minute **live streaming burst** on BTC/ETH/SOL 15-minute markets, grading, learning, AI briefing |
-| 12 min | rotating batch of **sports** events across all discovered leagues; open positions are always revisited |
+| 12 min | rotating batch of the five **currently configured sports**; open positions are always revisited |
 | daily | **retrain** the model on all history + live decisions; promote only if it wins on unseen data |
 | weekly | download fresh real Kalshi history |
 | daily | trim raw data so the memory file stays small (learning is never trimmed) |
@@ -28,6 +28,11 @@ on unseen data** (crypto).
 - **Nerd watchdog:** checks the required database structure and SQLite health before a scheduled cycle, runs a full integrity check daily, records health, and saves an incident when a scheduled run fails. The GitHub workflow also compiles bot modules before execution and checks the database afterward.
 - **Safe recovery policy:** automatic repair is limited to deterministic data cleanup and bounded runtime checks. If SQLite integrity fails, the bot fails closed and reports the incident instead of rewriting source code or risking learned history. Source-code fixes must pass tests and a reviewed PR; self-modifying production code could create a larger failure.
 - **Sports selection is preserved:** `SPORTS_MODE=all` discovers supported open Kalshi sports series; `SPORTS_MODE=manual` uses `SPORTS_SELECTED`. Add more sports through the existing series/catalog configuration. These reliability agents do not replace the engine, sports list, dashboard, or trading strategy.
+
+## Sports selection
+- Default `SPORTS_MODE=configured` keeps the bot on its five existing leagues: NFL, college football, NBA, MLB, and NHL.
+- Set `SPORTS_MODE=manual` and `SPORTS_SELECTED=...` to choose any specific Kalshi sports series, including additional leagues you intentionally add.
+- Set `SPORTS_MODE=all` only when you explicitly want the bot to discover every sports series in Kalshi's catalog. No new leagues are silently enabled by default.
 
 ## Smart research
 **Crypto (`crypto_brain.py`, used by snapshot AND live modes):**
