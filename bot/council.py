@@ -57,15 +57,15 @@ that has ALREADY passed deterministic pricing and risk checks. You may only appr
 reject, or wait; never increase stake or override hard risk limits. Check whether the
 sport/event/team, evidence freshness, probability, market price, edge after fees,
 and signal agreement are coherent. Missing evidence or unsupported claims should lead
-to wait/reject, not confidence. Return JSON: {"decision":"approve|reject|wait",
-"reason":"short evidence-based explanation"}.
+to wait/reject, not confidence. Return JSON: {{"decision":"approve|reject|wait",
+"reason":"short evidence-based explanation"}}.
 Candidate: {summary}"""
 
 SPORTS_SKEPTIC_PROMPT = """You are the independent skeptic reviewing a proposed sports
 market candidate. Look for stale/incomplete data, mismatched event/team, lineup/injury
 uncertainty, price/probability inconsistency, overconfident estimates, and hidden costs.
 Do not invent facts. Reply ONLY JSON:
-{"severe_issue":true|false,"issues":["short, concrete issue",...]}
+{{"severe_issue":true|false,"issues":["short, concrete issue",...]}}
 Candidate: {summary}"""
 
 
