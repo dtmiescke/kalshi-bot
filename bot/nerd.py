@@ -14,6 +14,16 @@ REQUIRED_TABLES = {
     "decision_audit", "combo_prediction_audit",
 }
 
+# Critical columns whose absence would make order reconciliation, settlement, or
+# honest performance reporting unreliable even if the table itself still exists.
+REQUIRED_COLUMNS = {
+    "bets": {"id", "mode", "ticker", "order_id", "contracts", "stake", "fee",
+             "status", "pnl", "graded_ts"},
+    "decision_audit": {"ticker", "decision", "outcome", "brier"},
+    "combo_prediction_audit": {"ticker", "leg_count", "outcome", "brier"},
+    "kv": {"k", "v"},
+}
+
 
 REQUIRED_SOURCE_PATHS = (
     "bot/main.py", "bot/engine.py", "bot/config.py", "bot/storage.py",
@@ -54,6 +64,19 @@ def inspect_store(store, full_integrity=False):
             report["checks"]["missing_tables"] = missing
             if missing:
                 raise RuntimeError("required SQLite tables missing: " + ", ".join(missing))
+            missing_columns = {}
+            for table, required in REQUIRED_COLUMNS.items():
+                present = {row[1] for row in db.execute(
+                    f"PRAGMA table_info({table})").fetchall()}
+                absent = sorted(required - present)
+                if absent:
+                    missing_columns[table] = absent
+            report["checks"]["missing_columns"] = missing_columns
+            if missing_columns:
+                detail = "; ".join(
+                    f"{table}: {', '.join(columns)}"
+                    for table, columns in sorted(missing_columns.items()))
+                raise RuntimeError("required SQLite columns missing: " + detail)
             pragma = "integrity_check" if full_integrity else "quick_check"
             rows = [row[0] for row in db.execute(f"PRAGMA {pragma}").fetchall()]
             report["checks"][pragma] = rows[:20]

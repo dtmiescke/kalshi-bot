@@ -18,5 +18,25 @@ class TestNerdHealthAggregation(unittest.TestCase):
         self.assertEqual(result["checks"]["source_structure"]["ok"], False)
 
 
+
+    def test_watchdog_detects_missing_critical_ledger_column(self):
+        import os
+        import tempfile
+        from bot.nerd import inspect_store
+        from bot.storage import Store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(os.path.join(tmp, "health.db"))
+            try:
+                store.db.execute("ALTER TABLE bets DROP COLUMN order_id")
+                store.db.commit()
+                with self.assertRaisesRegex(RuntimeError, "required SQLite columns missing"):
+                    inspect_store(store)
+                incident = store.get_kv("nerd_last_incident", {})
+                self.assertIn("missing_columns", incident["checks"])
+            finally:
+                store.db.close()
+
+
 if __name__ == "__main__":
     unittest.main()
