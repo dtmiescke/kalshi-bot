@@ -207,6 +207,13 @@ class Settings:
             raise RuntimeError(
                 "Live mode refused: set LIVE_TRADING_CONFIRMED=yes only after demo "
                 "results prove a real edge.")
+        # Independent operational approval is a second hard gate. Confirmation
+        # alone must never enable real-money execution; keep this unset until the
+        # full readiness checklist is evidenced and explicitly approved.
+        if self.mode == "live" and _env("LIVE_TRADING_OPERATIONAL_APPROVED", "no") != "yes":
+            raise RuntimeError(
+                "Live mode refused: operational readiness has not been approved. "
+                "Keep BOT_MODE=paper until all live-readiness checks pass.")
         if self.mode in ("demo", "live") and not (self.kalshi_key_id and self.kalshi_private_key):
             raise RuntimeError("Demo/live mode needs KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY.")
 
