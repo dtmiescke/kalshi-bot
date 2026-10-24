@@ -374,8 +374,10 @@ class Engine:
         the bot already holds) are researched — a fast spot check."""
         self.s.validate()
         now = int(time.time())
-        summary = {"mode": "watch" if watch else "full", "markets": 0,
-                   "matched": 0, "bets": 0, "skipped": {}, "alerts": []}
+        summary = {"mode": "batch" if event_budget is not None else ("watch" if watch else "full"),
+                   "markets": 0, "matched": 0, "bets": 0, "skipped": {}, "alerts": []}
+        if event_budget is not None:
+            summary["event_budget"] = int(event_budget)
         held = {b["event_ticker"] for b in self.store.open_bets(mode=self.s.mode)}
         if sports and event_budget is None and getattr(self.s, "combo_research_enabled", True):
             from . import combo_research
