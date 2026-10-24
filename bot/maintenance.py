@@ -44,20 +44,25 @@ def janitor_dedupe(store):
 
 def janitor_retention(store):
     """Trim only raw time-series data under existing retention policy."""
-    # Existing Store.compact retains learned weights, grades, bets and lessons.
-    before = {}
-    for table in ("market_snapshots", "flow_trades", "signal_readings", "odds_snapshots"):
+    # Preserve the Store.compact retention windows, but don't VACUUM every six
+    # hours; the existing daily compact owns physical database compaction.
+    keep_days = {"market_snapshots": 14, "flow_trades": 7,
+                 "signal_readings": 30, "odds_snapshots": 30}
+    now = int(time.time())
+    before, after = {}, {}
+    with store.lock:
+        store.db.execute("BEGIN IMMEDIATE")
         try:
-            before[table] = store.q(f"SELECT COUNT(*) AS n FROM {table}")[0]["n"]
+            for table, days in keep_days.items():
+                before[table] = store.db.execute(
+                    f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                store.db.execute(f"DELETE FROM {table} WHERE ts < ?", (now - days * 86400,))
+                after[table] = store.db.execute(
+                    f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            store.db.commit()
         except Exception:
-            before[table] = None
-    store.compact()
-    after = {}
-    for table in before:
-        try:
-            after[table] = store.q(f"SELECT COUNT(*) AS n FROM {table}")[0]["n"]
-        except Exception:
-            after[table] = None
+            store.db.rollback()
+            raise
     return {"janitor": "retention", "before": before, "after": after,
             "ts": int(time.time())}
 
