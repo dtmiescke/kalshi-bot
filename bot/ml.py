@@ -51,8 +51,11 @@ def add_row(store, ticker, ts, coin, feats, y=None, source="live"):
 
 
 def label(store, ticker, y):
+    """Attach only a verified binary outcome; never coerce malformed labels."""
+    if type(y) is not int or y not in (0, 1):
+        raise ValueError("training label must be integer 0 or 1")
     ensure_table(store)
-    store.x("UPDATE ml_rows SET y=? WHERE ticker=? AND y IS NULL", (int(y), ticker))
+    store.x("UPDATE ml_rows SET y=? WHERE ticker=? AND y IS NULL", (y, ticker))
 
 
 def coin_of(ticker):
