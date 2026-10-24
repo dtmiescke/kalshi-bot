@@ -344,10 +344,15 @@ class Store:
         return (sum(r["filled"] for r in rows) / len(rows), len(rows)) if rows else (None, 0)
 
     def close_bet(self, bet_id, exit_price, pnl):
-        """Sold before settlement: realised P&L, no longer open."""
-        self.x("""UPDATE bets SET status='graded', result='sold', exit_price=?, exit_ts=?,
-                  pnl=?, graded_ts=? WHERE id=?""",
-               (exit_price, int(time.time()), round(pnl, 2), int(time.time()), bet_id))
+        """Close an open bet exactly once; return False if it was already closed/missing."""
+        now = int(time.time())
+        with self.lock:
+            cur = self.db.execute("""UPDATE bets SET status='graded', result='sold',
+                exit_price=?, exit_ts=?, pnl=?, graded_ts=?
+                WHERE id=? AND status='open'""",
+                (exit_price, now, round(pnl, 2), now, bet_id))
+            self.db.commit()
+            return cur.rowcount == 1
 
     def open_bets(self, mode=None):
         return self.q("""SELECT * FROM bets WHERE status='open'
