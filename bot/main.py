@@ -225,6 +225,12 @@ def main(argv=None):
         with open("data/DIAGNOSE.txt", "w") as f:
             f.write(text)
         return
+    if cmd == "nerd-check":
+        from . import nerd
+        report = nerd.inspect_store(store, full_integrity="--full" in argv)
+        nerd.record_success(store, report)
+        print(json.dumps(report, indent=2, default=str))
+        return
     if cmd == "check":
         s.validate()
         print("mode:", s.mode)
