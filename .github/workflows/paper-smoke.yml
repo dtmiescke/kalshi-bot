@@ -51,6 +51,9 @@ jobs:
           SPORTS_INTEL_ENABLED: "no"
           SPORTS_INTEL_EVENT_SEARCH: "no"
           SPORTS_EVERY_HOURS: "999999"
+          # Skip model retraining in this operational smoke test; ML training is tested separately.
+          TRAIN_EVERY_HOURS: "999999"
+          TRAIN_RETRY_HOURS: "999999"
           CRYPTO_ENABLED: "no"
           BURST_MINUTES: "0"
           LADDERS_ENABLED: "no"
