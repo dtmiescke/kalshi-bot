@@ -29,7 +29,10 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
+      - name: Nerd preflight - compile all bot modules
+        run: python -m compileall -q bot
       - name: Load memory
+        id: load-memory
         run: bash .github/load.sh
       - name: Run
         env:
@@ -81,6 +84,11 @@ jobs:
           LADDERS_ENABLED: ${{ vars.LADDERS_ENABLED || 'yes' }}
           COUNCIL_MODE: ${{ vars.COUNCIL_MODE || 'advisory' }}
         run: python -m bot.main scheduled
+      - name: Nerd postflight - verify persistent database
+        if: always() && steps.load-memory.outcome == 'success'
+        env:
+          BOT_DB: data/bot.sqlite
+        run: python -m bot.main nerd-check
       - name: Save memory
         if: always()
         env:
