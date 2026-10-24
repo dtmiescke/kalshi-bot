@@ -560,7 +560,12 @@ class Engine:
                     choice = counsel.get("decision", "wait")
                     summary["sports_counsel"][choice] = summary["sports_counsel"].get(choice, 0) + 1
                     if choice != "approve":
-                        self._skip(summary, "sports counsel " + choice)
+                        reason = "sports counsel " + choice + ": " + str(counsel.get("reason", "no reason supplied"))
+                        self._record_decision(
+                            best[0], best[2], "rejected", reason, best[3], best[4],
+                            side=best[1].get("side"), market_price=best[1].get("price"),
+                            edge=best[1].get("edge"), now=now)
+                        self._skip(summary, reason)
                         continue
                     if watch:
                         summary["alerts"].append(
