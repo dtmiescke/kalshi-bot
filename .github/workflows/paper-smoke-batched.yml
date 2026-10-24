@@ -1,0 +1,94 @@
+name: paper-only-operational-smoke-batched
+on:
+  push:
+    branches:
+      - verify/paper-smoke-batched-20261024
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Restore and validate persistent memory
+        run: bash .github/load.sh
+      - name: Verify credentials and market connectivity (no trades)
+        env:
+          BOT_MODE: paper
+          LIVE_TRADING_CONFIRMED: no
+          KALSHI_API_KEY_ID: ${{ secrets.KALSHI_API_KEY_ID }}
+          KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
+          KALSHI_DATA_URL: ${{ vars.KALSHI_DATA_URL }}
+          KALSHI_DATA_KEY_ID: ${{ secrets.KALSHI_DATA_KEY_ID }}
+          KALSHI_DATA_PRIVATE_KEY: ${{ secrets.KALSHI_DATA_PRIVATE_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: python -m bot.main check
+      - name: Run bounded scheduled cycle in forced paper mode
+        env:
+          BOT_MODE: paper
+          LIVE_TRADING_CONFIRMED: no
+          KALSHI_API_KEY_ID: ${{ secrets.KALSHI_API_KEY_ID }}
+          KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
+          KALSHI_DATA_URL: ${{ vars.KALSHI_DATA_URL }}
+          KALSHI_DATA_KEY_ID: ${{ secrets.KALSHI_DATA_KEY_ID }}
+          KALSHI_DATA_PRIVATE_KEY: ${{ secrets.KALSHI_DATA_PRIVATE_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODELS: ${{ vars.OPENROUTER_MODELS }}
+          OMNIROUTE_URL: ${{ secrets.OMNIROUTE_URL }}
+          OMNIROUTE_API_KEY: ${{ secrets.OMNIROUTE_API_KEY }}
+          OMNIROUTE_MODELS: ${{ vars.OMNIROUTE_MODELS }}
+          SPORTS_EVERY_HOURS: "5.5"
+          SPORTS_SCAN_EVENT_BUDGET: "150"
+          SPORTS_INTEL_TTL_SECONDS: "1800"
+          SPORTS_MODE: all
+          SPORTS_INTEL_ENABLED: "yes"
+          SPORTS_INTEL_EVENT_SEARCH: "yes"
+          COMBOS_ENABLED: "no"
+          COMBO_RESEARCH_ENABLED: "no"
+          BURST_MINUTES: "1"
+          BRIEFING_EVERY_MINUTES: "12"
+          LLM_DAILY_LIMIT: "5"
+          BANKROLL: "1000"
+          MAX_PER_BET: "25"
+          MAX_PER_DAY: "150"
+          DAILY_LOSS_LIMIT: "30"
+          MAX_OPEN_POSITIONS: "5"
+          MAX_OPEN_COST: "200"
+          MIN_EDGE: "3"
+          CRYPTO_MIN_EDGE: "5"
+          LADDERS_ENABLED: "yes"
+          COUNCIL_MODE: advisory
+        run: python -m bot.main scheduled
+      - name: Verify database integrity and reporting
+        env:
+          BOT_MODE: paper
+          LIVE_TRADING_CONFIRMED: no
+          BANKROLL: "1000"
+          DAILY_LOSS_LIMIT: "30"
+          BOT_TIMEZONE: America/Chicago
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import sqlite3
+          with sqlite3.connect("data/bot.sqlite") as db:
+              result = db.execute("PRAGMA integrity_check").fetchall()
+              if result != [("ok",)]:
+                  raise SystemExit(f"SQLite integrity_check failed: {result[:10]}")
+              tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+              for required in ("bets", "market_snapshots", "signal_readings", "kv", "decision_audit"):
+                  if required not in tables:
+                      raise SystemExit(f"Missing table after scheduled cycle: {required}")
+              print("SQLite integrity_check: ok")
+              print("Post-cycle market snapshots:", db.execute("SELECT COUNT(*) FROM market_snapshots").fetchone()[0])
+              print("Post-cycle signal readings:", db.execute("SELECT COUNT(*) FROM signal_readings").fetchone()[0])
+              health = db.execute("SELECT v FROM kv WHERE k='sports_catalog_health'").fetchone()
+              print("Sports scan health:", health[0] if health else "missing")
+          PY
+          python -m bot.main report
