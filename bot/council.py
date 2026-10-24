@@ -51,6 +51,66 @@ def mode():
     return os.environ.get("COUNCIL_MODE", "advisory")
 
 
+
+SPORTS_COUNCIL_PROMPT = """You are the risk-focused sports betting counsel reviewing a candidate
+that has ALREADY passed deterministic pricing and risk checks. You may only approve,
+reject, or wait; never increase stake or override hard risk limits. Check whether the
+sport/event/team, evidence freshness, probability, market price, edge after fees,
+and signal agreement are coherent. Missing evidence or unsupported claims should lead
+to wait/reject, not confidence. Return JSON: {"decision":"approve|reject|wait",
+"reason":"short evidence-based explanation"}.
+Candidate: {summary}"""
+
+SPORTS_SKEPTIC_PROMPT = """You are the independent skeptic reviewing a proposed sports
+market candidate. Look for stale/incomplete data, mismatched event/team, lineup/injury
+uncertainty, price/probability inconsistency, overconfident estimates, and hidden costs.
+Do not invent facts. Reply ONLY JSON:
+{"severe_issue":true|false,"issues":["short, concrete issue",...]}
+Candidate: {summary}"""
+
+
+def review_sports(llm, store, ticker, summary, cooldown_s=180):
+    """Sports counsel handoff after deterministic risk checks; never changes sizing."""
+    current_mode = mode()
+    if current_mode == "off":
+        return {"decision": "approve", "by": "numbers", "reason": "council off"}
+    cached = store.get_kv(f"sports_council_{ticker}")
+    if cached and time.time() - cached.get("ts", 0) < cooldown_s:
+        return cached.get("result", {"decision": "wait", "by": "rules", "reason": "invalid cached review"})
+    if llm is None or llm.budget_left() < 2:
+        result = ({"decision": "wait", "by": "rules", "reason": "sports counsel required but unavailable"}
+                  if current_mode == "required" else
+                  {"decision": "approve", "by": "numbers", "reason": "counsel unavailable; deterministic checks only"})
+        store.set_kv(f"sports_council_{ticker}", {"ts": time.time(), "result": result})
+        return result
+    text = json.dumps(summary, default=str)[:5000]
+    models = [m for m in llm.models if m not in llm.dead]
+    chair_model = models[0] if models else None
+    skeptic_model = models[1] if len(models) > 1 else chair_model
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        chair_future = pool.submit(llm.ask_json, SPORTS_COUNCIL_PROMPT.format(summary=text), chair_model)
+        skeptic_future = pool.submit(llm.ask_json, SPORTS_SKEPTIC_PROMPT.format(summary=text), skeptic_model)
+        chair, chair_used = chair_future.result()
+        skeptic, skeptic_used = skeptic_future.result()
+    decision = "wait"
+    reasons = []
+    if chair and isinstance(chair, dict):
+        value = str(chair.get("decision", "")).lower()
+        if value in ("approve", "reject", "wait"):
+            decision = value
+        reasons.append(str(chair.get("reason", ""))[:200])
+    elif current_mode != "required":
+        decision = "approve"
+        reasons.append("counsel response unavailable; deterministic checks only")
+    if skeptic and skeptic.get("severe_issue") is True:
+        decision = "reject"
+        reasons.extend(str(x)[:160] for x in skeptic.get("issues", [])[:3])
+    result = {"decision": decision, "by": "council", "reason": " | ".join(x for x in reasons if x),
+              "models": [m for m in (chair_used, skeptic_used) if m],
+              "roles": chair or {}, "skeptic": skeptic or {}}
+    store.set_kv(f"sports_council_{ticker}", {"ts": time.time(), "result": result})
+    return result
+
 def review(llm, store, ticker, summary, cooldown_s=180):
     """Return {"decision": approve|reject|wait, "by": council|rules|numbers, ...}."""
     dq = summary.get("spot", {}).get("data_quality", {})
