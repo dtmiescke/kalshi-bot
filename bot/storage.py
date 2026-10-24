@@ -126,6 +126,8 @@ class Store:
         receives Brier/P&L metrics. Later scans are retained as settled audit
         history but left unscored so one market cannot inflate the sample.
         """
+        if outcome not in (0, 1):
+            raise ValueError("decision-audit outcome must be binary (0 or 1)")
         settled_ts = int(settled_ts or time.time())
         with self.lock:
             rows = self.db.execute(
