@@ -71,6 +71,10 @@ def load_dataset(store):
     names = features.names()
     X, y, groups, ts, coins = [], [], [], [], []
     for r in rows:
+        # Legacy/corrupt database rows must never enter fitting or evaluation.
+        # The write path validates labels, but old databases can predate that guard.
+        if type(r["y"]) is not int or r["y"] not in (0, 1):
+            continue
         f = json.loads(r["features"])
         if "kalshi_logit" not in f:
             continue
