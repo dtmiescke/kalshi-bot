@@ -15,6 +15,8 @@ class TestMaintenanceTime(unittest.TestCase):
                 result = run_janitors(store, now=0, force=True)
                 self.assertTrue(result["ok"])
                 self.assertEqual(result["ts"], 0)
+                self.assertEqual(result["janitor_a"]["ts"], 0)
+                self.assertEqual(result["janitor_b"]["ts"], 0)
                 self.assertEqual(store.get_kv("janitors_last_run"), 0)
             finally:
                 store.db.close()
