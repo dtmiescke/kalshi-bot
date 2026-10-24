@@ -125,8 +125,7 @@ class Engine:
             self.trade = KalshiClient(settings.base_url(), settings.kalshi_key_id,
                                       settings.kalshi_private_key)
         self.odds = odds_client or OddsClient(settings.odds_api_key)
-        import os as _os
-        self.odds_max_age = float(_os.environ.get("ODDS_MAX_AGE_MINUTES", 60))
+        self.odds_max_age = settings.odds_max_age_minutes
         self.price_feed = price_feed or crypto_sig.fetch_candles
         self.spot_feed = spot_feed or crypto_sig.fetch_spot
         self.llm = llm if llm is not None else (

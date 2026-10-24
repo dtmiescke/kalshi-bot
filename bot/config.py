@@ -121,6 +121,8 @@ class Settings:
     odds_regions: str = field(default_factory=lambda: _env("ODDS_REGIONS", "us"))
     odds_refresh_minutes: int = field(
         default_factory=lambda: _env_int("ODDS_REFRESH_MINUTES", 360))
+    odds_max_age_minutes: float = field(
+        default_factory=lambda: _env_float("ODDS_MAX_AGE_MINUTES", 60))
 
     # --- decision rules -----------------------------------------------------
     min_edge: float = field(default_factory=lambda: _env_pct("MIN_EDGE", 3))
@@ -200,6 +202,8 @@ class Settings:
         # a nonpositive maker wait can bypass the intended order reconciliation window.
         if self.odds_refresh_minutes <= 0:
             raise ValueError("ODDS_REFRESH_MINUTES must be positive")
+        if not math.isfinite(self.odds_max_age_minutes) or self.odds_max_age_minutes <= 0:
+            raise ValueError("ODDS_MAX_AGE_MINUTES must be a finite positive number")
         if self.maker_wait_s <= 0:
             raise ValueError("MAKER_WAIT_SECONDS must be positive")
         if self.combos_enabled:

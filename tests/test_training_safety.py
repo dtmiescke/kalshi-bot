@@ -101,6 +101,17 @@ class TestTrainingSafety(unittest.TestCase):
         settings.mode = "paper"
         settings.validate()
 
+    def test_invalid_odds_max_age_setting_is_rejected(self):
+        for value in ("nan", "inf", "0", "-1"):
+            with self.subTest(value=value), mock.patch.dict(
+                "os.environ", {"ODDS_MAX_AGE_MINUTES": value}
+            ):
+                with self.assertRaisesRegex(ValueError, "ODDS_MAX_AGE_MINUTES"):
+                    Settings(mode="paper").validate()
+        with mock.patch.dict("os.environ", {"ODDS_MAX_AGE_MINUTES": "not-a-number"}):
+            with self.assertRaises(ValueError):
+                Settings(mode="paper")
+
     def test_invalid_runtime_intervals_are_rejected(self):
         for field, value, message in (
             ("odds_refresh_minutes", 0, "ODDS_REFRESH_MINUTES"),
