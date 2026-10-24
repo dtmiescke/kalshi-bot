@@ -81,6 +81,8 @@ class LiveRunner:
             # was cleared by a later code path or a restart.
             self.store.set_kv("execution_reconciliation_required", reason)
             self.betting_ok, self.betting_why = False, reason
+        self.vol_samples, self.vol_done = {}, {}
+        self.ctx_cache = {}       # series -> market context, refreshed off the hot loop
 
     @staticmethod
     def _startup_reconciliation_reason(mode, prior_maker, prior_reconciliation):
@@ -91,8 +93,6 @@ class LiveRunner:
         if prior_maker:
             return "unresolved maker order from prior run; reconcile Kalshi open orders/positions before resuming"
         return None
-        self.vol_samples, self.vol_done = {}, {}
-        self.ctx_cache = {}       # series -> market context, refreshed off the hot loop
 
     # --- setup -------------------------------------------------------------------
     def seed_history(self):
