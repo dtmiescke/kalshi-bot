@@ -35,6 +35,7 @@ jobs:
         id: load-memory
         run: bash .github/load.sh
       - name: Run
+        id: run
         env:
           BOT_MODE: ${{ vars.BOT_MODE == 'live' && vars.LIVE_TRADING_OPERATIONAL_APPROVED != 'yes' && 'paper' || vars.BOT_MODE || 'paper' }}
           LIVE_TRADING_CONFIRMED: ${{ vars.LIVE_TRADING_OPERATIONAL_APPROVED == 'yes' && vars.LIVE_TRADING_CONFIRMED == 'yes' && 'yes' || 'no' }}
@@ -86,12 +87,14 @@ jobs:
           COUNCIL_MODE: ${{ vars.COUNCIL_MODE || 'advisory' }}
         run: python -m bot.main scheduled
       - name: Nerd postflight - verify persistent database
+        id: nerd-postflight
         if: always() && steps.load-memory.outcome == 'success'
         env:
           BOT_DB: data/bot.sqlite
         run: python -m bot.main nerd-check
       - name: Save memory
-        if: always()
+        # Never overwrite the last known-good persistent snapshot after a failed cycle or failed postflight.
+        if: steps.run.outcome == 'success' && steps.nerd-postflight.outcome == 'success'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           # The save step rebuilds the dashboard + bets.csv, so it needs the same
