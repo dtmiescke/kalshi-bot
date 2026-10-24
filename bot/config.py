@@ -52,7 +52,8 @@ CRYPTO_15M = {
 }
 
 # Sports selection is environment/config driven; it does not require UI changes.
-# SPORTS_MODE=all discovers the Kalshi sports catalog; manual uses comma-separated tickers.
+# configured (default) = the five currently configured leagues; manual = explicit tickers;
+# all = discover every sports series available in Kalshi's catalog.
 # COMBOS_ENABLED stays OFF until a separate supported-combo execution path is validated.
 
 # Sharper books get more weight in the consensus. Unknown books get weight 1.0.
@@ -92,8 +93,9 @@ class Settings:
     db_path: str = field(default_factory=lambda: _env("BOT_DB", "data/bot.sqlite"))
 
     # --- sports intelligence and selection ---------------------------------
-    sports_mode: str = field(default_factory=lambda: _env("SPORTS_MODE", "all").strip().lower())
-    sports_selected: str = field(default_factory=lambda: _env("SPORTS_SELECTED", "").strip())
+    sports_mode: str = field(default_factory=lambda: _env("SPORTS_MODE", "configured").strip().lower())
+    sports_selected: str = field(default_factory=lambda: _env(
+        "SPORTS_SELECTED", ",".join(SPORTS.keys())).strip())
     # Research is on by default; order execution remains a separate, disabled capability.
     combo_research_enabled: bool = field(default_factory=lambda: _env("COMBO_RESEARCH_ENABLED", "yes").strip().lower() in ("yes", "true", "1"))
     combos_enabled: bool = field(default_factory=lambda: _env("COMBOS_ENABLED", "no").strip().lower() in ("yes", "true", "1"))
@@ -105,8 +107,10 @@ class Settings:
     def selected_series(self):
         if self.sports_mode == "all":
             return None
+        if self.sports_mode == "configured":
+            return set(SPORTS)
         if self.sports_mode != "manual":
-            raise ValueError("SPORTS_MODE must be all or manual")
+            raise ValueError("SPORTS_MODE must be configured, manual, or all")
         return {item.strip().upper() for item in self.sports_selected.split(",") if item.strip()}
 
     # --- data budget --------------------------------------------------------
@@ -185,8 +189,8 @@ class Settings:
         return _env("KALSHI_DATA_URL", KALSHI_URLS["production"]).rstrip("/")
 
     def validate(self):
-        if self.sports_mode not in ("all", "manual"):
-            raise ValueError("SPORTS_MODE must be all/manual")
+        if self.sports_mode not in ("configured", "all", "manual"):
+            raise ValueError("SPORTS_MODE must be configured/all/manual")
         if self.sports_mode == "manual" and not self.selected_series():
             raise ValueError("SPORTS_MODE=manual requires at least one SPORTS_SELECTED series ticker")
         if self.combo_audit_lead_seconds < 0:
