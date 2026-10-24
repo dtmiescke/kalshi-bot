@@ -36,6 +36,7 @@ jobs:
       - name: Load memory
         run: bash .github/load.sh
       - name: Download history + train
+        id: train-cycle
         env:
           DAYS: ${{ github.event.inputs.days || '7' }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
@@ -56,7 +57,8 @@ jobs:
           python -m bot.main history "$DAYS"
           python -m bot.main train
       - name: Save memory
-        if: always()
+        # Keep the last known-good snapshot if history download or training fails.
+        if: steps.train-cycle.outcome == 'success'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           # The save step rebuilds the dashboard + bets.csv, so it needs the same
