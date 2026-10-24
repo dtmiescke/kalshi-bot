@@ -23,7 +23,24 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 # Store a compressed SQLite snapshot on bot-data to keep Git objects below
 # GitHub's 50 MB recommended file size. load.sh still reads legacy bot.sqlite.
-gzip -n -c data/bot.sqlite > "$WORK/bot.sqlite.gz"
+# SQLite's online backup API creates a transactionally consistent snapshot even
+# if the application uses WAL mode. Never gzip the potentially live DB file.
+python - "$WORK/bot.snapshot.sqlite" <<'PY'
+import sqlite3
+import sys
+
+source = sqlite3.connect("file:data/bot.sqlite?mode=ro", uri=True)
+try:
+    with sqlite3.connect(sys.argv[1]) as target:
+        source.backup(target)
+        result = target.execute("PRAGMA integrity_check").fetchall()
+        if result != [("ok",)]:
+            raise RuntimeError(f"Snapshot integrity check failed: {result[:5]}")
+finally:
+    source.close()
+PY
+gzip -n -c "$WORK/bot.snapshot.sqlite" > "$WORK/bot.sqlite.gz"
+rm -f "$WORK/bot.snapshot.sqlite"
 cp /tmp/REPORT.txt "$WORK/REPORT.txt"
 [ ! -f data/BRIEFING.txt ] || cp data/BRIEFING.txt "$WORK/BRIEFING.txt"
 [ ! -f data/live_summary.json ] || cp data/live_summary.json "$WORK/LIVE.json"
