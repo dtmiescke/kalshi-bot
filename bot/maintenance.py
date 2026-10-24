@@ -75,7 +75,7 @@ def janitor_retention(store):
 
 def run_janitors(store, now=None, force=False, every_hours=6):
     """Run both janitors at a bounded cadence; never hide cleanup exceptions."""
-    now = float(now or time.time())
+    now = float(time.time() if now is None else now)
     last = float(store.get_kv("janitors_last_run", 0) or 0)
     if not force and now - last < max(1, float(every_hours)) * 3600:
         return {"ok": True, "skipped": "not_due", "ts": int(now)}
