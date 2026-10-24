@@ -396,9 +396,13 @@ class Engine:
         series_map = {} if event_budget is not None else dict(SPORTS)
         events_by_series = {}
         selected = self.s.selected_series() if hasattr(self.s, "selected_series") else None
-        if sports and getattr(self.s, "sports_mode", "all") == "all":
+        if sports and getattr(self.s, "sports_mode", "configured") in ("all", "configured"):
             try:
                 catalog = self.data.sports_series()
+                if self.s.sports_mode == "configured":
+                    # Default mode stays within the currently configured leagues;
+                    # switch SPORTS_MODE=all explicitly to discover every Kalshi sport.
+                    catalog = {key: value for key, value in catalog.items() if key in SPORTS}
                 all_events = self.data.sports_events_all()
                 total_events = len(all_events)
                 cursor = str(self.store.get_kv("sports_event_cursor", "") or "")
@@ -413,6 +417,8 @@ class Engine:
                         series = next((known for known in catalog if event_ticker.startswith(known + "-")), None)
                     if not series or series not in catalog:
                         continue
+                    if selected is not None and series not in selected:
+                        continue
                     series_map[series] = _series_sport(series, catalog.get(series))
                     events_by_series.setdefault(series, []).append(ev)
                 self.store.set_kv("sports_catalog_health", {
@@ -422,26 +428,42 @@ class Engine:
                     "event_cursor": cursor,
                     "sports_events_matched": sum(map(len, events_by_series.values())),
                     "coverage_warning": total_events >= 4000 or len(catalog) >= 10000,
-                    "mode": "dynamic_all_rotating" if event_budget is not None else "dynamic_all"})
+                    "mode": (("dynamic_all" if self.s.sports_mode == "all" else "configured")
+                             + ("_rotating" if event_budget is not None else ""))})
             except Exception as e:
                 log.warning("dynamic sports discovery failed; using configured series: %s", e)
                 events_by_series = {}
-        elif sports and getattr(self.s, "sports_mode", "all") == "manual":
+                series_map = dict(SPORTS)
+        elif sports and getattr(self.s, "sports_mode", "configured") == "manual":
             selected = selected or set()
             series_map = {series: SPORTS.get(series, _series_sport(series))
                           for series in selected}
             self.store.set_kv("sports_catalog_health", {
                 "ts": now, "series_selected": sorted(selected), "mode": "manual"})
         else:
-            series_map = {}
+            series_map = dict(SPORTS) if getattr(self.s, "sports_mode", "configured") == "configured" else {}
 
         if sports and not events_by_series and series_map:
+            fallback_events = []
             for selected_series in series_map:
                 try:
-                    events_by_series[selected_series] = self.data.sports_events(selected_series)
+                    found = self.data.sports_events(selected_series)
+                    for ev in found:
+                        ev.setdefault("series_ticker", selected_series)
+                    fallback_events.extend(found)
                 except Exception as e:
                     log.warning("events %s: %s", selected_series, e)
-                    events_by_series[selected_series] = []
+            if event_budget is not None and fallback_events:
+                cursor = str(self.store.get_kv("sports_event_cursor", "") or "")
+                fallback_events, cursor = _rotating_event_batch(
+                    fallback_events, cursor, event_budget, held=held)
+                self.store.set_kv("sports_event_cursor", cursor)
+            for ev in fallback_events:
+                selected_series = ev.get("series_ticker")
+                if selected_series:
+                    events_by_series.setdefault(selected_series, []).append(ev)
+            for selected_series in series_map:
+                events_by_series.setdefault(selected_series, [])
         if sports and events_by_series:
             # Eight read-only scanners inspect one canonical, deduplicated event
             # stream. They never create orders; the existing Engine remains the
