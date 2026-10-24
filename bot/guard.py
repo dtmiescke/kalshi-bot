@@ -110,6 +110,9 @@ def status(store, bankroll, daily_loss_limit=None, mode=None):
     incident = store.get_kv("execution_reconciliation_required")
     if incident:
         return False, str(incident)
+    fleet_hold = store.get_kv("fleet_safety_hold")
+    if fleet_hold:
+        return False, "Code Nerd safety hold: " + str(fleet_hold)
     lost = store.realized_today(day_start_ts(), mode=mode)
     if lost <= -limit:
         return False, f"daily loss limit hit (${-lost:.2f} lost today; resets at midnight in {os.environ.get('BOT_TIMEZONE', 'America/Chicago')})"
