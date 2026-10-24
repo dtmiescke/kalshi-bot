@@ -14,8 +14,9 @@ RAW_KEYS = {
 }
 
 
-def janitor_dedupe(store):
+def janitor_dedupe(store, now=None):
     """Remove duplicate raw observations by natural key, preserving oldest rowid."""
+    now = int(time.time() if now is None else now)
     removed = {}
     with store.lock:
         db = store.db
@@ -45,7 +46,7 @@ def janitor_dedupe(store):
         except Exception:
             db.rollback()
             raise
-    return {"janitor": "dedupe", "removed": removed, "ts": int(time.time())}
+    return {"janitor": "dedupe", "removed": removed, "ts": now}
 
 
 def janitor_retention(store, now=None):
@@ -80,7 +81,7 @@ def run_janitors(store, now=None, force=False, every_hours=6):
     if not force and now - last < max(1, float(every_hours)) * 3600:
         return {"ok": True, "skipped": "not_due", "ts": int(now)}
     # Dedupe first so the unique constraints protect subsequent writes.
-    a = janitor_dedupe(store)
+    a = janitor_dedupe(store, now=now)
     b = janitor_retention(store, now=now)
     result = {"ok": True, "janitor_a": a, "janitor_b": b, "ts": int(now)}
     store.set_kv("janitors_last_result", result)
