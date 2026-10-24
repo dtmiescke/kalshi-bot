@@ -25,8 +25,8 @@ class TestExecutionMathSafety(unittest.TestCase):
 
     def test_fill_plan_never_exceeds_limit_or_budget(self):
         contracts, avg = fill_plan([(0.40, 3), (0.42, 5), (0.50, 20)], 2.05, 0.42)
-        self.assertEqual(contracts, 4)
-        self.assertAlmostEqual(avg, 0.405)
+        self.assertEqual(contracts, 5)
+        self.assertAlmostEqual(avg, 0.408)
         self.assertLessEqual(contracts * avg, 2.05)
         self.assertLessEqual(avg, 0.42)
 
