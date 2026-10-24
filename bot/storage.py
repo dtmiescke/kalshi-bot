@@ -307,15 +307,31 @@ class Store:
 
     # --- bets ----------------------------------------------------------------
     def add_bet(self, b):
-        cur = self.x("""INSERT INTO bets(ts, mode, ticker, event_ticker, series, team,
+        """Record a fill once per exchange order, market, and mode.
+
+        Exchange order IDs are stable across retries. Returning the original row
+        prevents a repeated callback from duplicating exposure. Null IDs remain
+        supported for legacy imports.
+        """
+        order_id = b.get("order_id")
+        with self.lock:
+            if order_id:
+                existing = self.db.execute(
+                    "SELECT id FROM bets WHERE mode=? AND ticker=? AND order_id=? "
+                    "ORDER BY id LIMIT 1",
+                    (b["mode"], b["ticker"], str(order_id))).fetchone()
+                if existing:
+                    return existing["id"]
+            cur = self.db.execute("""INSERT INTO bets(ts, mode, ticker, event_ticker, series, team,
                         side, price, contracts, stake, fee, model_prob, edge,
                         confidence, signals_json, order_id, style)
                         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
-            b["ts"], b["mode"], b["ticker"], b["event_ticker"], b["series"], b["team"],
-            b["side"], b["price"], b["contracts"], b["stake"], b["fee"],
-            b["model_prob"], b["edge"], b["confidence"], json.dumps(b["signals"]),
-            b.get("order_id"), b.get("style")))
-        return cur.lastrowid
+                b["ts"], b["mode"], b["ticker"], b["event_ticker"], b["series"], b["team"],
+                b["side"], b["price"], b["contracts"], b["stake"], b["fee"],
+                b["model_prob"], b["edge"], b["confidence"], json.dumps(b["signals"]),
+                order_id, b.get("style")))
+            self.db.commit()
+            return cur.lastrowid
 
     def split_bet(self, bet_id, sold):
         """Atomically split a valid partial sale from an open bet."""
