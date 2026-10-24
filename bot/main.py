@@ -94,13 +94,20 @@ def run_scheduled(s, store, data):
     burst = float(os.environ.get("BURST_MINUTES", 8))
     do_sports = time.time() - store.get_kv("last_sports_scan", 0) >= hours * 3600 - 300
     crypto_snapshot = s.crypto_enabled and burst <= 0
+    # In all-sports mode, process a rotating bounded event batch each scheduled
+    # cycle. A single unbounded scan can issue thousands of per-market requests,
+    # exceed the job timeout, and prevent memory from being saved.
+    sports_batch = s.sports_mode == "all" and burst > 0
+    event_budget = max(25, min(1000, int(os.environ.get("SPORTS_SCAN_EVENT_BUDGET", "150"))))
     keep = s.crypto_enabled
     s.crypto_enabled = crypto_snapshot
     try:
-        if do_sports or crypto_snapshot:
-            out = Engine(s, store, data_client=data).run(sports=do_sports)
+        if do_sports or crypto_snapshot or sports_batch:
+            out = Engine(s, store, data_client=data).run(
+                sports=(do_sports or sports_batch),
+                event_budget=event_budget if sports_batch else None)
             print("snapshot run:", out)
-            if do_sports:
+            if do_sports or sports_batch:
                 store.set_kv("last_sports_scan", time.time())
     finally:
         s.crypto_enabled = keep
