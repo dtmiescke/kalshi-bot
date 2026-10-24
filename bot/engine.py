@@ -845,7 +845,10 @@ class Engine:
             if not bid:
                 raise RuntimeError("no bid available to unwind")
             close = self.trade.place_limit_sell(ticker, side, filled, bid)
-            unwound = int(num(close, "fill_count") or num(close, "taker_fill_count") or 0)
+            # A successful HTTP response is not proof of a confirmed sell fill.
+            # Require the exchange order ID and a bounded cumulative fill count;
+            # otherwise stop and reconcile rather than silently guessing.
+            _, unwound = self._confirmed_ioc_fill(close, filled)
             if unwound < filled:
                 failure = f"unwind only filled {unwound}/{filled}"
         except Exception as exc:
