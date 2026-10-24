@@ -7,7 +7,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: kalshi-bot
+  # Keep isolated from the production scheduler so smoke runs cannot delay/replace a tick.
+  group: kalshi-bot-paper-smoke
   cancel-in-progress: false
 jobs:
   smoke:
