@@ -433,6 +433,7 @@ class Engine:
             except Exception as e:
                 log.warning("dynamic sports discovery failed; using configured series: %s", e)
                 events_by_series = {}
+                series_map = dict(SPORTS)
         elif sports and getattr(self.s, "sports_mode", "configured") == "manual":
             selected = selected or set()
             series_map = {series: SPORTS.get(series, _series_sport(series))
@@ -443,12 +444,26 @@ class Engine:
             series_map = dict(SPORTS) if getattr(self.s, "sports_mode", "configured") == "configured" else {}
 
         if sports and not events_by_series and series_map:
+            fallback_events = []
             for selected_series in series_map:
                 try:
-                    events_by_series[selected_series] = self.data.sports_events(selected_series)
+                    found = self.data.sports_events(selected_series)
+                    for ev in found:
+                        ev.setdefault("series_ticker", selected_series)
+                    fallback_events.extend(found)
                 except Exception as e:
                     log.warning("events %s: %s", selected_series, e)
-                    events_by_series[selected_series] = []
+            if event_budget is not None and fallback_events:
+                cursor = str(self.store.get_kv("sports_event_cursor", "") or "")
+                fallback_events, cursor = _rotating_event_batch(
+                    fallback_events, cursor, event_budget, held=held)
+                self.store.set_kv("sports_event_cursor", cursor)
+            for ev in fallback_events:
+                selected_series = ev.get("series_ticker")
+                if selected_series:
+                    events_by_series.setdefault(selected_series, []).append(ev)
+            for selected_series in series_map:
+                events_by_series.setdefault(selected_series, [])
         if sports and events_by_series:
             # Eight read-only scanners inspect one canonical, deduplicated event
             # stream. They never create orders; the existing Engine remains the
