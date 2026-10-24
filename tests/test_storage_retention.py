@@ -1,0 +1,95 @@
+"""Storage trim: raw data stays small enough for GitHub; learned data is never trimmed."""
+import os
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+from bot import sports_intel
+from bot.maintenance import janitor_retention
+from bot.storage import RAW_RETENTION, Store, trim_raw
+
+ROOT = Path(__file__).resolve().parents[1]
+DAY = 86400
+
+
+class TestStorageRetention(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = Store(os.path.join(self.tmp.name, "bot.sqlite"))
+        self.now = int(time.time())
+
+    def tearDown(self):
+        self.store.db.close()
+        self.tmp.cleanup()
+
+    def _flow(self, trade_id, age_s):
+        self.store.add_flow_trades([{"trade_id": trade_id, "ticker": "KXNBAGAME-X-BOS",
+                                     "ts": self.now - age_s, "count": 1, "yes_price": .5,
+                                     "taker_side": "yes"}])
+
+    def _count(self, table):
+        return self.store.q(f"SELECT COUNT(*) AS n FROM {table}")[0]["n"]
+
+    def test_flow_trades_kept_about_two_days_and_reads_still_work(self):
+        self._flow("recent", 3 * 3600)          # inside the longest read window (3 h)
+        self._flow("yesterday", DAY)
+        self._flow("old", 3 * DAY)
+        result = janitor_retention(self.store, now=self.now)
+        self.assertEqual(result["before"]["flow_trades"], 3)
+        self.assertEqual(result["after"]["flow_trades"], 2)
+        ids = {r["trade_id"] for r in self.store.flow("KXNBAGAME-X-BOS", self.now - 4 * 3600)}
+        self.assertEqual(ids, {"recent"})
+
+    def test_sports_intel_items_trimmed_by_observed_time(self):
+        sports_intel.ensure_schema(self.store)
+        for i, age in enumerate((DAY, 20 * DAY)):
+            self.store.x("INSERT INTO sports_intel_items (id, kind, category, source, title, "
+                         "observed_ts, payload_json) VALUES (?,?,?,?,?,?,?)",
+                         (f"n{i}", "news", "basketball", "rss", "t", self.now - age, "{}"))
+        janitor_retention(self.store, now=self.now)
+        self.assertEqual(self._count("sports_intel_items"), 1)
+
+    def test_missing_optional_table_is_skipped(self):
+        # sports_intel_items is created lazily; the janitor must not fail without it.
+        result = janitor_retention(self.store, now=self.now)
+        self.assertNotIn("sports_intel_items", result["before"])
+        self.assertIn("flow_trades", result["after"])
+
+    def test_compact_uses_the_same_windows_and_keeps_learning(self):
+        self._flow("old", 3 * DAY)
+        with self.store.lock:
+            self.store.db.execute("INSERT INTO lessons (ts,model,text) VALUES (?,?,?)",
+                                  (self.now - 400 * DAY, "m", "keep"))
+            self.store.db.execute(
+                "INSERT INTO bets (ts,mode,ticker,side,price,contracts,stake,fee) "
+                "VALUES (?,?,?,?,?,?,?,?)", (self.now - 400 * DAY, "paper", "T", "yes", .5, 1, .5, 0))
+            self.store.db.commit()
+        self.store.compact()
+        self.assertEqual(self._count("flow_trades"), 0)
+        self.assertEqual(self._count("lessons"), 1)
+        self.assertEqual(self._count("bets"), 1)
+
+    def test_retention_only_names_raw_tables(self):
+        learned = {"bets", "lessons", "weight_history", "graded_markets", "signal_grades",
+                   "decision_audit", "model_runs", "kv", "combo_prediction_audit"}
+        self.assertFalse(learned & set(RAW_RETENTION))
+        self.assertEqual(RAW_RETENTION["flow_trades"], ("ts", 2))
+
+    def test_trim_raw_reports_deleted_rows(self):
+        self._flow("old", 3 * DAY)
+        with self.store.lock:
+            deleted = trim_raw(self.store.db, self.now)
+            self.store.db.commit()
+        self.assertEqual(deleted["flow_trades"], 1)
+
+    def test_save_script_alerts_before_github_file_limit(self):
+        script = (ROOT / ".github" / "save.sh").read_text(encoding="utf-8")
+        self.assertIn("80000000", script)
+        self.assertIn("95000000", script)
+        # the size check runs before anything is pushed
+        self.assertLess(script.index("95000000"), script.index("git push"))
+
+
+if __name__ == "__main__":
+    unittest.main()
