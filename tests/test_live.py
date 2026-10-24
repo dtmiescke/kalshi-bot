@@ -249,6 +249,13 @@ class TestRunnerExecution(unittest.TestCase):
     def test_maker_missing_fill_count_on_open_order_is_not_terminal(self):
         self.assertEqual(self.r._maker_order_state({"status": "resting"}, 7), (0, "resting", False))
 
+    def test_maker_terminal_cancel_without_fill_count_is_ambiguous(self):
+        for status in ("canceled", "cancelled", "expired", "rejected"):
+            with self.subTest(status=status):
+                self.assertEqual(
+                    self.r._maker_order_state({"status": status}, 7),
+                    (0, status, False))
+
     def test_maker_malformed_fill_count_is_not_zero_fill_confirmation(self):
         for raw in ("bad", "1.5", "8", "-1", "nan", "inf"):
             with self.subTest(raw=raw):
