@@ -22,6 +22,13 @@ on unseen data** (crypto).
 - The scheduled workflow also requires the repository variable `LIVE_TRADING_OPERATIONAL_APPROVED=yes` and `LIVE_TRADING_CONFIRMED=yes` before it will use live mode.
 - Keep the approval variable unset until restored memory, market discovery, price freshness, risk checks, persistence, and repeated paper cycles have all passed. Paper mode uses real public market prices but does not send real orders.
 
+## Reliability agents (existing project, no UI replacement)
+- **Janitor A — deduplication:** deduplicates raw market, sportsbook-odds, and signal observations by natural key, then adds SQLite unique indexes so later cycles cannot insert the same observation twice. The append-only bet ledger, model weights, lessons, grades, and decision audit are never deduplicated or deleted.
+- **Janitor B — retention:** trims only old raw snapshots using the existing retention windows; the normal daily compaction remains responsible for VACUUM.
+- **Nerd watchdog:** checks the required database structure and SQLite health before a scheduled cycle, runs a full integrity check daily, records health, and saves an incident when a scheduled run fails. The GitHub workflow also compiles bot modules before execution and checks the database afterward.
+- **Safe recovery policy:** automatic repair is limited to deterministic data cleanup and bounded runtime checks. If SQLite integrity fails, the bot fails closed and reports the incident instead of rewriting source code or risking learned history. Source-code fixes must pass tests and a reviewed PR; self-modifying production code could create a larger failure.
+- **Sports selection is preserved:** `SPORTS_MODE=all` discovers supported open Kalshi sports series; `SPORTS_MODE=manual` uses `SPORTS_SELECTED`. Add more sports through the existing series/catalog configuration. These reliability agents do not replace the engine, sports list, dashboard, or trading strategy.
+
 ## Smart research
 **Crypto (`crypto_brain.py`, used by snapshot AND live modes):**
 - Exact contract model: strike, seconds left, settlement averaging window from the rules
