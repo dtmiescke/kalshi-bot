@@ -21,6 +21,13 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
+      - name: Run complete offline regression suite
+        timeout-minutes: 8
+        env:
+          BOT_MODE: paper
+          LIVE_TRADING_CONFIRMED: no
+          LIVE_TRADING_OPERATIONAL_APPROVED: no
+        run: python -m unittest discover -s tests
       - name: Verify live mode fails closed without operational approval
         timeout-minutes: 2
         env:
