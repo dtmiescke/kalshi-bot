@@ -1,0 +1,127 @@
+name: paper-only-operational-smoke
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - verify/paper-smoke-20261024
+permissions:
+  contents: read
+concurrency:
+  # This is an isolated paper-only CI workflow; newer commits should supersede stale
+  # smoke runs instead of waiting behind a slow or stuck prior run.
+  group: kalshi-bot-paper-smoke
+  cancel-in-progress: true
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run complete offline regression suite
+        timeout-minutes: 8
+        env:
+          BOT_MODE: paper
+          LIVE_TRADING_CONFIRMED: no
+          LIVE_TRADING_OPERATIONAL_APPROVED: no
+        run: python -m unittest discover -s tests
+      - name: Verify live mode fails closed without operational approval
+        timeout-minutes: 2
+        env:
+          BOT_MODE: paper
+          LIVE_TRADING_CONFIRMED: no
+          LIVE_TRADING_OPERATIONAL_APPROVED: no
+        run: python -m unittest tests.test_live_readiness_gate
+      - name: Verify deterministic candidate audit and paper ledger path
+        timeout-minutes: 2
+        env:
+          BOT_MODE: paper
+          LIVE_TRADING_CONFIRMED: no
+        run: python -m unittest tests.test_paper_pipeline
+      - name: Exercise full sports discovery-to-paper-bet pipeline with deterministic fakes
+        timeout-minutes: 3
+        env:
+          BOT_MODE: paper
+          LIVE_TRADING_CONFIRMED: no
+        run: python -m unittest tests.test_bot.TestWatchlist tests.test_bot.TestCrypto
+      - name: Restore and validate persistent memory
+        run: bash .github/load.sh
+      - name: Verify credentials and market connectivity (no trades)
+        timeout-minutes: 3
+        env:
+          BOT_MODE: paper
+          LIVE_TRADING_CONFIRMED: no
+          KALSHI_API_KEY_ID: ${{ secrets.KALSHI_API_KEY_ID }}
+          KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
+          KALSHI_DATA_URL: ${{ vars.KALSHI_DATA_URL }}
+          KALSHI_DATA_KEY_ID: ${{ secrets.KALSHI_DATA_KEY_ID }}
+          KALSHI_DATA_PRIVATE_KEY: ${{ secrets.KALSHI_DATA_PRIVATE_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: python -m bot.main check
+      - name: Run one scheduled cycle in forced paper mode
+        timeout-minutes: 10
+        env:
+          BOT_MODE: paper
+          LIVE_TRADING_CONFIRMED: no
+          KALSHI_API_KEY_ID: ${{ secrets.KALSHI_API_KEY_ID }}
+          KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
+          KALSHI_DATA_URL: ${{ vars.KALSHI_DATA_URL }}
+          KALSHI_DATA_KEY_ID: ${{ secrets.KALSHI_DATA_KEY_ID }}
+          KALSHI_DATA_PRIVATE_KEY: ${{ secrets.KALSHI_DATA_PRIVATE_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          # Keep this smoke run bounded: validate the scheduler's core DB/report
+          # path without optional external intelligence scans, crypto streaming,
+          # ladders, combo research, or paid LLM calls dominating the runtime.
+          SPORTS_INTEL_ENABLED: "no"
+          SPORTS_INTEL_EVENT_SEARCH: "no"
+          SPORTS_EVERY_HOURS: "999999"
+          # Skip model retraining in this operational smoke test; ML training is tested separately.
+          TRAIN_EVERY_HOURS: "999999"
+          TRAIN_RETRY_HOURS: "999999"
+          CRYPTO_ENABLED: "no"
+          BURST_MINUTES: "0"
+          LADDERS_ENABLED: "no"
+          COMBOS_ENABLED: "no"
+          COMBO_RESEARCH_ENABLED: "no"
+          BRIEFING_EVERY_MINUTES: "999999"
+          LLM_DAILY_LIMIT: "0"
+          SPORTS_MODE: all
+          BANKROLL: "1000"
+          MAX_PER_BET: "25"
+          MAX_PER_DAY: "150"
+          DAILY_LOSS_LIMIT: "30"
+          MAX_OPEN_POSITIONS: "5"
+          MAX_OPEN_COST: "200"
+          MIN_EDGE: "3"
+          CRYPTO_MIN_EDGE: "5"
+          COUNCIL_MODE: advisory
+        run: python -m bot.main scheduled
+      - name: Verify database integrity and reporting
+        timeout-minutes: 3
+        env:
+          BOT_MODE: paper
+          LIVE_TRADING_CONFIRMED: no
+          BANKROLL: "1000"
+          DAILY_LOSS_LIMIT: "30"
+          BOT_TIMEZONE: America/Chicago
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import sqlite3
+          with sqlite3.connect("data/bot.sqlite") as db:
+              result = db.execute("PRAGMA integrity_check").fetchall()
+              if result != [("ok",)]:
+                  raise SystemExit(f"SQLite integrity_check failed: {result[:10]}")
+              tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+              for required in ("bets", "market_snapshots", "signal_readings", "kv", "decision_audit"):
+                  if required not in tables:
+                      raise SystemExit(f"Missing table after scheduled cycle: {required}")
+              print("SQLite integrity_check: ok")
+              print("Post-cycle market snapshots:", db.execute("SELECT COUNT(*) FROM market_snapshots").fetchone()[0])
+              print("Post-cycle signal readings:", db.execute("SELECT COUNT(*) FROM signal_readings").fetchone()[0])
+          PY
+          python -m bot.main report
