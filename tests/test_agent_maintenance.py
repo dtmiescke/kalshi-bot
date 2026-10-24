@@ -42,6 +42,27 @@ class TestAgentMaintenance(unittest.TestCase):
             self.store.db.execute(
                 "INSERT INTO market_snapshots (ts,ticker) VALUES (?,?)", (now, "KXTEST"))
 
+    def test_raw_writers_ignore_duplicate_keys_after_janitor_indexes_exist(self):
+        now = int(time.time())
+        market = {"ts": now, "ticker": "KXTEST", "event_ticker": "EVT",
+                  "series": "KXNFLGAME", "title": "Test", "team": "A",
+                  "yes_bid": .4, "yes_ask": .5, "last_price": .45,
+                  "volume": 10, "open_interest": 2, "close_time": "2030-01-01",
+                  "status": "active"}
+        odds = {"ts": now, "sport": "americanfootball_nfl", "event_id": "EVT",
+                "commence_time": "2030-01-01", "home": "A", "away": "B",
+                "team": "A", "fair_prob": .6, "n_books": 4, "raw": {}}
+        janitor_dedupe(self.store)
+        self.store.add_market_snapshot(market)
+        self.store.add_market_snapshot(dict(market, yes_bid=.41))
+        self.store.add_odds(odds)
+        self.store.add_odds(dict(odds, fair_prob=.61))
+        self.store.add_signal(now, "KXTEST", "book_consensus", .6, .8, {})
+        self.store.add_signal(now, "KXTEST", "book_consensus", .61, .8, {})
+        self.assertEqual(self.store.q("SELECT COUNT(*) n FROM market_snapshots")[0]["n"], 1)
+        self.assertEqual(self.store.q("SELECT COUNT(*) n FROM odds_snapshots")[0]["n"], 1)
+        self.assertEqual(self.store.q("SELECT COUNT(*) n FROM signal_readings")[0]["n"], 1)
+
     def test_retention_janitor_preserves_bets_and_learnings(self):
         now = int(time.time())
         with self.store.lock:

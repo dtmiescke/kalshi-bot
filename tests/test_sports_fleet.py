@@ -31,6 +31,12 @@ class TestSportsFleet(unittest.TestCase):
         self.assertEqual(summary["events_unique"], 24)
         self.assertEqual(summary["markets_unique"], 24)
         self.assertEqual(summary["live_markets_observed"], 12)
+        # Each specialist independently reviews the full canonical event universe.
+        self.assertTrue(all(scanner["events"] == 24 for scanner in summary["scanners"]))
+        self.assertEqual(len({scanner["role"] for scanner in summary["scanners"]}), 8)
+        roles = {scanner["role"]: scanner for scanner in summary["scanners"]}
+        self.assertEqual(roles["quote_quality"]["priced_markets"], 24)
+        self.assertEqual(roles["schedule_and_status"]["missing_start_times"], 24)
         self.assertTrue(all(row["execution_eligible"] is False for row in live))
         self.assertEqual(len({row["ticker"] for row in live}), len(live))
 

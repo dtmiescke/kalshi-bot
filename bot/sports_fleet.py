@@ -3,7 +3,6 @@
 Scanners are read-only observers. They never place orders or duplicate market writes;
 the existing Engine remains the single strategy/risk/execution authority.
 """
-import hashlib
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -78,61 +77,102 @@ def normalize_events(events_by_series):
     return result
 
 
-def _scan_event(event, now):
-    """Inspect one event without mutating the upstream payload."""
+def _scan_event(event, now, role):
+    """Role-specific read-only inspection of one canonical event."""
     stats = {"events": 1, "active_markets": 0, "priced_markets": 0,
              "missing_tickers": 0, "missing_quotes": 0, "live_events": 0,
+             "missing_start_times": 0, "crossed_quotes": 0, "invalid_quotes": 0,
+             "wide_spreads": 0, "markets_with_volume": 0,
+             "markets_with_open_interest": 0, "missing_event_titles": 0,
+             "missing_team_labels": 0, "duplicate_market_tickers": 0,
              "live_watch_markets": []}
     status = str(event.get("status") or event.get("event_status") or
                  event.get("state") or "").strip().lower().replace("-", "_")
     live = status in {"live", "in_progress", "inplay", "in_play", "playing"}
-    if live:
-        stats["live_events"] += 1
+    start = event.get("start_time") or event.get("commence_time") or event.get("date")
+    if role in ("schedule_and_status", "live_state_watch") and live:
+        stats["live_events"] = 1
+    if role == "schedule_and_status" and not start:
+        stats["missing_start_times"] = 1
+    if role == "matchup_evidence_watch" and not (event.get("title") or event.get("subtitle")):
+        stats["missing_event_titles"] = 1
+    seen = set()
     for market in event.get("markets") or []:
+        if not isinstance(market, dict):
+            continue
         if str(market.get("status") or "").lower() not in ("active", "open"):
             continue
         ticker = str(market.get("ticker") or "").strip()
         if not ticker:
-            stats["missing_tickers"] += 1
+            if role in ("market_coverage", "independent_sanity_check"):
+                stats["missing_tickers"] += 1
             continue
+        if ticker in seen and role == "independent_sanity_check":
+            stats["duplicate_market_tickers"] += 1
+        seen.add(ticker)
         stats["active_markets"] += 1
         bid, ask = market.get("yes_bid"), market.get("yes_ask")
-        if bid is not None and ask is not None:
-            stats["priced_markets"] += 1
+        if role == "liquidity_watch":
+            stats["markets_with_volume"] += int(market.get("volume") is not None)
+            stats["markets_with_open_interest"] += int(market.get("open_interest") is not None)
+        if role == "matchup_evidence_watch" and not (
+                market.get("yes_sub_title") or market.get("subtitle") or market.get("title")):
+            stats["missing_team_labels"] += 1
+        if bid is None or ask is None:
+            if role == "quote_quality":
+                stats["missing_quotes"] += 1
         else:
-            stats["missing_quotes"] += 1
-        if live:
+            try:
+                b, a = float(bid), float(ask)
+                if b > 1: b /= 100.0
+                if a > 1: a /= 100.0
+                if role == "quote_quality":
+                    stats["priced_markets"] += 1
+                    if not (0 <= b <= 1 and 0 <= a <= 1):
+                        stats["invalid_quotes"] += 1
+                    elif b > a:
+                        stats["crossed_quotes"] += 1
+                if role == "price_dislocation_watch" and 0 <= b <= a <= 1 and a - b >= 0.20:
+                    stats["wide_spreads"] += 1
+                if role == "independent_sanity_check" and not (0 <= b <= a <= 1):
+                    stats["invalid_quotes"] += 1
+            except (TypeError, ValueError):
+                if role in ("quote_quality", "independent_sanity_check"):
+                    stats["invalid_quotes"] += 1
+        if role == "live_state_watch" and live:
             stats["live_watch_markets"].append({
                 "ticker": ticker, "event_ticker": _ticker(event),
                 "series": event.get("series_ticker"), "status": status,
                 "yes_bid": bid, "yes_ask": ask, "observed_ts": int(now),
                 "execution_eligible": False,
-                "reason": "live scanner observation only; existing live-sports model is not validated",
+                "reason": "observation only; live-sports execution remains disabled pending validation",
             })
     return stats
 
 
 def _scan_partition(scanner_id, role, events, now):
-    stats = {"scanner": scanner_id, "role": role, "events": 0, "active_markets": 0,
-             "priced_markets": 0, "missing_tickers": 0, "missing_quotes": 0,
-             "live_events": 0, "live_watch_markets": [], "scan_errors": 0,
-             "error_samples": []}
+    keys = ("events", "active_markets", "priced_markets", "missing_tickers",
+            "missing_quotes", "live_events", "missing_start_times", "crossed_quotes",
+            "invalid_quotes", "wide_spreads", "markets_with_volume",
+            "markets_with_open_interest", "missing_event_titles", "missing_team_labels",
+            "duplicate_market_tickers")
+    stats = {"scanner": scanner_id, "role": role, **{key: 0 for key in keys},
+             "live_watch_markets": [], "scan_errors": 0, "error_samples": []}
     for event in events:
         try:
-            row = _scan_event(event, now)
+            row = _scan_event(event, now, role)
         except Exception:
-            # One bounded retry for malformed/transient payloads. Isolate a
-            # persistently bad event so the other seven scanners still finish.
+            # One bounded retry for malformed/transient payloads; isolate a bad
+            # event so it cannot stop the other specialist scanners.
             try:
-                row = _scan_event(dict(event), now)
+                row = _scan_event(dict(event), now, role)
             except Exception as exc:
                 stats["scan_errors"] += 1
                 if len(stats["error_samples"]) < 5:
                     stats["error_samples"].append(
                         {"event_ticker": _ticker(event), "error": type(exc).__name__})
                 continue
-        for key in ("events", "active_markets", "priced_markets", "missing_tickers",
-                    "missing_quotes", "live_events"):
+        for key in keys:
             stats[key] += row[key]
         stats["live_watch_markets"].extend(row["live_watch_markets"])
     return stats
@@ -143,16 +183,13 @@ def scan_fleet(events_by_series, now=None, workers=8):
     workers = max(1, min(8, int(workers)))
     normalized = normalize_events(events_by_series)
     events = [event for series in sorted(normalized) for event in normalized[series]]
-    lanes = [[] for _ in range(workers)]
-    for event in events:
-        key = _ticker(event)
-        slot = int(hashlib.sha256(key.encode("utf-8")).hexdigest()[:8], 16) % workers
-        lanes[slot].append(event)
+    # Every specialist sees the same canonical event universe; this is deliberate
+    # analysis fan-out, not duplicated storage or duplicate execution authority.
     with ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(
             lambda args: _scan_partition(*args),
-            [(i + 1, SCANNER_ROLES[i % len(SCANNER_ROLES)], lane, now)
-             for i, lane in enumerate(lanes)]))
+            [(i + 1, SCANNER_ROLES[i % len(SCANNER_ROLES)], events, now)
+             for i in range(workers)]))
     live = {}
     for result in results:
         for row in result["live_watch_markets"]:
@@ -161,7 +198,7 @@ def scan_fleet(events_by_series, now=None, workers=8):
         "ts": now, "ok": sum(r.get("scan_errors", 0) for r in results) == 0, "scanner_count": workers,
         "events_unique": len(events),
         "markets_unique": sum(len(e.get("markets") or []) for e in events),
-        "live_events_seen": sum(r["live_events"] for r in results),
+        "live_events_seen": sum(r["live_events"] for r in results if r["role"] == "live_state_watch"),
         "scan_errors": sum(r.get("scan_errors", 0) for r in results),
         "error_samples": [sample for r in results for sample in r.get("error_samples", [])][:10],
         "live_markets_observed": len(live),
