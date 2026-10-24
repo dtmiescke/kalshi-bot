@@ -392,15 +392,19 @@ class LiveRunner:
         else:
             try:
                 numeric = float(raw_filled)
-                if not math.isfinite(numeric) or numeric < 0:
-                    raise ValueError("invalid fill count")
+                # Exchange cumulative contract counts must be whole, finite,
+                # non-negative numbers. Never truncate fractional counts or
+                # silently clamp an impossible overfill into a plausible fill.
+                if (not math.isfinite(numeric) or numeric < 0
+                        or not numeric.is_integer() or numeric > int(requested)):
+                    raise ValueError("invalid cumulative fill count")
                 filled = int(numeric)
             except (TypeError, ValueError, OverflowError):
                 # Malformed exchange fill data is not a zero-fill confirmation.
                 return 0, status or "unknown_fill_count", False
         terminal = status in {"canceled", "cancelled", "executed", "filled", "expired", "rejected"} \
             or filled >= requested
-        return max(0, min(int(requested), filled)), status, terminal
+        return filled, status, terminal
 
     def _cancel_and_reconcile_maker(self, order_id, requested):
         """Cancel any remainder and verify final cumulative fills before ledgering."""

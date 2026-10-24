@@ -250,8 +250,12 @@ class TestRunnerExecution(unittest.TestCase):
         self.assertEqual(self.r._maker_order_state({"status": "resting"}, 7), (0, "resting", False))
 
     def test_maker_malformed_fill_count_is_not_zero_fill_confirmation(self):
-        self.assertEqual(self.r._maker_order_state({"status": "resting", "fill_count_fp": "bad"}, 7),
-                         (0, "resting", False))
+        for raw in ("bad", "1.5", "8", "-1", "nan", "inf"):
+            with self.subTest(raw=raw):
+                self.assertEqual(
+                    self.r._maker_order_state(
+                        {"status": "resting", "fill_count_fp": raw}, 7),
+                    (0, "resting", False))
 
     def test_ambiguous_maker_submission_sets_durable_pause(self):
         from unittest.mock import patch
