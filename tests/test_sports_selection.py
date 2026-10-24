@@ -7,15 +7,22 @@ from bot.engine import _rotating_event_batch, _series_sport, _sports_excluded
 
 
 class TestSportsSelection(unittest.TestCase):
-    def test_all_is_default_and_combos_default_off(self):
+    def test_configured_sports_are_default_and_combos_default_off(self):
         with patch.dict(os.environ, {}, clear=True):
             settings = Settings()
-        self.assertEqual(settings.sports_mode, "all")
-        self.assertIsNone(settings.selected_series())
+        self.assertEqual(settings.sports_mode, "configured")
+        self.assertEqual(settings.selected_series(), {
+            "KXNFLGAME", "KXNBAGAME", "KXMLBGAME", "KXNHLGAME", "KXNCAAFGAME"})
         self.assertFalse(settings.combos_enabled)
         self.assertTrue(settings.combo_research_enabled)
         self.assertEqual(settings.combo_min_legs, 3)
         self.assertEqual(settings.combo_max_legs, 8)
+
+    def test_all_sports_mode_remains_an_explicit_opt_in(self):
+        with patch.dict(os.environ, {"SPORTS_MODE": "all"}, clear=True):
+            settings = Settings()
+        self.assertEqual(settings.sports_mode, "all")
+        self.assertIsNone(settings.selected_series())
 
     def test_manual_allowlist_is_normalized(self):
         with patch.dict(os.environ, {"SPORTS_MODE": "manual", "SPORTS_SELECTED": "kxnflgame, KXNBAGAME"}):
