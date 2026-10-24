@@ -406,3 +406,23 @@ class TestKrakenChecksum(unittest.TestCase):
             b.verify(good + 1)
         self.assertIsNone(b.mid() and None)
         self.assertEqual(b.last_update, 0.0)                    # book marked stale
+
+
+class TestStrictMakerFillSafety(unittest.TestCase):
+    def test_terminal_cancel_without_fill_count_is_ambiguous(self):
+        for status in ("canceled", "cancelled", "expired", "rejected"):
+            with self.subTest(status=status):
+                self.assertEqual(
+                    __import__("bot.live.runner", fromlist=["LiveRunner"]).LiveRunner._maker_order_state(
+                        {"status": status}, 7),
+                    (0, status, False))
+
+    def test_malformed_fractional_or_overfilled_counts_are_ambiguous(self):
+        from bot.live.runner import LiveRunner
+        for raw in ("bad", "1.5", "8", "-1", "nan", "inf"):
+            with self.subTest(raw=raw):
+                self.assertEqual(
+                    LiveRunner._maker_order_state(
+                        {"status": "resting", "fill_count_fp": raw}, 7),
+                    (0, "resting", False)
+                )
