@@ -15,6 +15,33 @@ REQUIRED_TABLES = {
 }
 
 
+REQUIRED_SOURCE_PATHS = (
+    "bot/main.py", "bot/engine.py", "bot/config.py", "bot/storage.py",
+    "bot/guard.py", "bot/risk.py", "bot/kalshi_client.py", "bot/council.py",
+    "bot/sports_fleet.py", "bot/sports_counsel.py", "bot/maintenance.py",
+    "bot/nerd.py", "bot/live/runner.py", ".github/workflows/bot.yml",
+    ".github/load.sh", ".github/save.sh",
+)
+
+
+def inspect_code(root=None):
+    """Verify critical project structure before market work starts.
+
+    This is detection/containment, not source-code self-modification. Missing
+    required files raise a clear incident so the scheduled workflow fails closed.
+    """
+    from pathlib import Path
+    root = Path(root or Path(__file__).resolve().parents[1]).resolve()
+    missing = [relative for relative in REQUIRED_SOURCE_PATHS
+               if not (root / relative).is_file()]
+    report = {"ts": int(time.time()), "ok": not missing,
+              "required_paths": len(REQUIRED_SOURCE_PATHS), "missing_paths": missing}
+    if missing:
+        report["error"] = "required source structure missing: " + ", ".join(missing)
+        raise RuntimeError(report["error"])
+    return report
+
+
 def inspect_store(store, full_integrity=False):
     """Check required schema and SQLite health; raise on unsafe state."""
     report = {"ts": int(time.time()), "ok": False, "checks": {}}
