@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from . import brain, fees
-from .adaptive_aggression import AggressionPolicy, choose
+from .adaptive_aggression import AggressionPolicy, choose, settled_paper_results
 
 
 
@@ -126,7 +126,9 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
         policy = choose(AggressionPolicy(
             level=getattr(s, "aggression_level", "off"),
             min_edge=s.min_edge, min_confidence=s.min_confidence,
-            kelly_fraction=s.kelly_fraction))
+            kelly_fraction=s.kelly_fraction),
+            settled_paper_results=settled_paper_results(store)
+            if getattr(s, "aggression_level", "off") == "adaptive" else ())
         if policy:
             if min_edge == s.min_edge:
                 min_edge = max(s.min_edge, policy["min_edge"])
