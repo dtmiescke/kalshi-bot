@@ -6,6 +6,7 @@ a 1-2% contract to 10-13%, and nothing stopped the bot buying it.
 """
 import math
 import os
+import random
 import tempfile
 import unittest
 from unittest import mock
@@ -40,20 +41,86 @@ class TestTailShrinkBounds(unittest.TestCase):
                        else __import__("json").dumps(stored)))
             self.assertEqual(vol.tail_shrink(self.st, "BTC"), want, stored)
 
-    def test_fit_cannot_leave_bounds(self):
-        # Long shots that "hit" far too often would pull an unbounded fit to 0.5.
-        rows = [(0.01, 1 if i % 4 == 0 else 0) for i in range(400)]
-        got = vol.learn_tail_shrink(self.st, "BTC", rows)
-        self.assertEqual(got, vol.TAIL_SHRINK_MIN)
-        self.assertEqual(vol.tail_shrink(self.st, "BTC"), vol.TAIL_SHRINK_MIN)
-        # Ultra-thin tails can't push it above the cap either.
-        rows = [(0.2, 0)] * 300 + [(0.8, 1)] * 300
-        self.assertEqual(vol.learn_tail_shrink(self.st, "ETH", rows), vol.TAIL_SHRINK_MAX)
+    @staticmethod
+    def windows(shrinks, n_windows, rows_per=6, seed=7, start=0):
+        """Synthetic settled windows: outcome ~ Bernoulli(Phi(true_shrink * z))."""
+        from statistics import NormalDist
+        rnd, nd, out = random.Random(seed), NormalDist(), []
+        for w in range(n_windows):
+            true = shrinks(w) if callable(shrinks) else shrinks
+            for i in range(rows_per):
+                z = rnd.uniform(-3, 3)
+                y = 1 if rnd.random() < nd.cdf(true * z) else 0
+                out.append((f"KXBTC15M-W{start + w}", 1000 * (start + w) + i, z, y))
+        return out
 
-    def test_fit_skips_bad_rows_and_needs_enough_data(self):
-        rows = [(float("nan"), 1), (None, 0), (0.5, 2)] * 100 + [(0.3, 0)] * 150
-        self.assertIsNone(vol.learn_tail_shrink(self.st, "SOL", rows))   # only 150 usable
-        self.assertIsNone(self.st.get_kv("tail_shrink_SOL"))
+    def test_needs_enough_windows_and_keeps_current_value(self):
+        details = vol.learn_tail_shrink(self.st, "BTC", self.windows(0.82, 90))
+        self.assertFalse(details["accepted"])
+        self.assertIn("not enough windows", details["reason"])
+        self.assertIsNone(self.st.get_kv("tail_shrink_BTC"))         # nothing stored
+        self.assertEqual(self.st.get_kv("tail_shrink_fit_BTC")["windows"], 90)
+
+    def test_accepts_fit_that_beats_default_on_newer_windows(self):
+        details = vol.learn_tail_shrink(self.st, "BTC", self.windows(0.80, 600, rows_per=25))
+        self.assertTrue(details["accepted"], details)
+        self.assertGreaterEqual(details["holdout_windows"], vol.MIN_HOLDOUT_WINDOWS)
+        self.assertLess(details["holdout_logloss_candidate"], details["holdout_logloss_default"])
+        self.assertAlmostEqual(vol.tail_shrink(self.st, "BTC"), details["candidate"])
+        self.assertLess(details["candidate"], 0.88)
+        self.assertEqual(self.st.get_kv("tail_shrink_fit_BTC")["value"], details["candidate"])
+
+    def test_rejects_fit_that_does_not_hold_on_newer_windows(self):
+        # older windows look fat-tailed, newer ones thin: the old fit doesn't hold up
+        rows = self.windows(lambda w: 0.80 if w < 280 else 1.05, 400, rows_per=10)
+        details = vol.learn_tail_shrink(self.st, "ETH", rows)
+        self.assertFalse(details["accepted"], details)
+        self.assertEqual(vol.tail_shrink(self.st, "ETH"), 0.9)
+        self.assertEqual(self.st.get_kv("tail_shrink_ETH"), 0.9)
+
+    def test_fit_cannot_leave_bounds(self):
+        # truth far fatter than allowed: the fit stops at the floor, never 0.5
+        details = vol.learn_tail_shrink(self.st, "SOL", self.windows(0.5, 400, rows_per=10))
+        self.assertEqual(details["candidate"], vol.TAIL_SHRINK_MIN)
+        self.assertGreaterEqual(vol.tail_shrink(self.st, "SOL"), vol.TAIL_SHRINK_MIN)
+
+    def test_window_split_is_by_time_and_counts_windows_once(self):
+        rows = self.windows(0.82, 200)
+        rows += [("KXBTC15M-W0", 5, 0.1, 1)] * 500        # many rows in one old window
+        details = vol.learn_tail_shrink(self.st, "BTC", rows)
+        self.assertEqual(details["windows"], 200)
+        self.assertEqual(details["holdout_windows"], 60)  # newest 30%
+
+    def test_bad_rows_are_skipped(self):
+        rows = [("A", 1, float("nan"), 1), ("B", 2, None, 0), ("C", 3, 0.5, 2),
+                ("D", 4, 0.5, True), ("E", "x", 0.5, 1)]
+        details = vol.learn_tail_shrink(self.st, "BTC", rows)
+        self.assertEqual(details["windows"], 0)
+
+    def test_learn_tails_uses_live_z_rows_of_current_version_only(self):
+        import json
+        from bot import features, ml
+        ml.ensure_table(self.st)
+        for i, (version, feats) in enumerate((
+                (features.FEATURE_VERSION - 1, {"live_z": 1.0}),   # old version
+                (features.FEATURE_VERSION, {"model_prob": 0.3}),   # no live z
+                (features.FEATURE_VERSION, {"live_z": -0.5}))):    # usable
+            self.st.x("INSERT INTO ml_rows VALUES(?,?,?,?,?,?,?)",
+                      (f"KXBTC15M-W{i}", i, "BTC", version, json.dumps(feats), 1, "live"))
+        out = ml.learn_tails(self.st)
+        self.assertEqual(out["BTC"]["windows"], 1)
+        self.assertFalse(out["BTC"]["accepted"])
+
+    def test_z_above_matches_prob_above(self):
+        from statistics import NormalDist
+        args = (99400, 100000, 0.00076, 600, 60)
+        z = settlement.z_above(*args, proxy_bps=3)
+        self.assertAlmostEqual(settlement.prob_above(*args, tail_shrink=0.85, proxy_bps=3),
+                               NormalDist().cdf(0.85 * z), places=12)
+        self.assertEqual(settlement.z_above(101, 100, 1e-12, 0, 60, realized_avg=101,
+                                            proxy_bps=0), math.inf)
+        self.assertIsNone(settlement.z_above(-1, 100, 0.01, 30))
+        self.assertIsNone(settlement.prob_above(*args, tail_shrink=float("nan")))
 
     def test_bounded_shrink_keeps_one_percent_contract_near_fair(self):
         # Spot 0.6% under strike, 10 minutes left, 0.076%/min vol: a ~1% contract.
@@ -119,6 +186,19 @@ class TestCryptoLongshotGuard(unittest.TestCase):
         plan, why = risk.decide(self.s, self.st, CRYPTO, 0.60, 0.9, mid_book, min_edge=0.05)
         self.assertIsNotNone(plan, why)
 
+    def test_exactly_twenty_cents_is_not_a_long_shot(self):
+        # refuse below $0.20; $0.20 itself is allowed without raw-model support
+        book = {"yes": [(0.19, 500)], "no": [(0.80, 500)]}             # YES ask $0.20
+        plan, why = risk.decide(self.s, self.st, CRYPTO, 0.40, 0.9, book,
+                                min_edge=0.05, raw_model_prob=0.02)
+        self.assertIsNotNone(plan, why)
+        self.assertEqual(plan["price"], 0.20)
+        book = {"yes": [(0.18, 500)], "no": [(0.81, 500)]}             # YES ask $0.19
+        plan, why = risk.decide(self.s, self.st, CRYPTO, 0.40, 0.9, book,
+                                min_edge=0.05, raw_model_prob=0.02)
+        self.assertIsNone(plan)
+        self.assertIn("crypto long shot", why)
+
     def test_threshold_zero_disables_guard(self):
         self.s.crypto_longshot_price = 0.0
         plan, why = risk.decide(self.s, self.st, CRYPTO, 0.30, 0.9, LONGSHOT_BOOK,
@@ -176,3 +256,28 @@ class TestEngineWiring(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTailValueLogged(unittest.TestCase):
+    def test_prediction_and_training_row_record_tail_value_and_z(self):
+        import json
+        from bot import crypto_brain
+        with tempfile.TemporaryDirectory() as d:
+            st = Store(os.path.join(d, "t.db"))
+            st.set_kv("tail_shrink_BTC", 0.85)
+            now = 1_800_000_000
+            candles = [{"ts": now - (300 - i) * 60, "open": 100000 + (i % 7) * 4,
+                        "high": 100010 + (i % 7) * 4, "low": 99990 + (i % 7) * 4,
+                        "close": 100000 + (i % 7) * 4, "volume": 1 + i % 3} for i in range(300)]
+            terms = {"strike": 100050.0, "close_ts": now + 420, "avg_seconds": 60}
+            readings, info = crypto_brain.research(
+                st, "KXBTC15M-W-00", "KXBTC15M", terms, candles, 0.40, 0.44, now=now,
+                spot=100010.0, dvol_fetch=lambda c: None, with_context=False)
+            cm = next(r for r in readings if r.name == "crypto_model")
+            self.assertEqual(cm.detail["tail_shrink"], 0.85)
+            z = settlement.z_above(100010.0, 100050.0, info["sigma"], 420, 60)
+            self.assertAlmostEqual(cm.detail["z"], round(z, 5))
+            row = json.loads(st.q("SELECT features FROM ml_rows")[0]["features"])
+            self.assertAlmostEqual(row["live_z"], z)
+            self.assertEqual(row["tail_shrink_used"], 0.85)
+            st.db.close()

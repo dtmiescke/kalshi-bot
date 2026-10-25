@@ -56,10 +56,15 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
                               tail_shrink=shrink)
     if p is None:
         return readings, info
+    # the exact z this price came from, so the tail fit uses the same calculation
+    z = settlement.z_above(spot, terms["strike"], sigma, secs, terms["avg_seconds"])
+    info.update({"tail_shrink": shrink, "live_z": z if z is not None and math.isfinite(z) else None})
     readings.append(Reading("crypto_model", clamp(p, 0.02, 0.98), 0.75 if secs > 120 else 0.5,
                             {"spot": spot, "strike": terms["strike"], "secs_left": round(secs),
                              "sigma": round(sigma, 7), "avg_s": terms["avg_seconds"],
-                             "season": parts.get("season"), "event_mult": parts.get("event_mult")}))
+                             "season": parts.get("season"), "event_mult": parts.get("event_mult"),
+                             "tail_shrink": shrink, "z": None if info["live_z"] is None
+                             else round(info["live_z"], 5)}))
     if dv:
         pi = settlement.prob_above(spot, terms["strike"], iv.dvol_to_per_minute(dv), secs,
                                    terms["avg_seconds"], tail_shrink=shrink)
@@ -85,6 +90,9 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
             row = dict(feats)
             row.update({f"ctx_{k}": v for k, v in info["context"].items()
                         if isinstance(v, (int, float)) and v is not None})
+            # not model inputs (features.names() ignores them): the live pricing
+            # z and tail value, for vol.learn_tail_shrink
+            row.update({"live_z": info["live_z"], "tail_shrink_used": shrink})
             ml.add_row(store, ticker, int(now) - int(now) % 60, coin, row, None, "live")
     info["features"] = feats
     return readings, info

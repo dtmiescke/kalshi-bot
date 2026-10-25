@@ -113,34 +113,74 @@ def tail_shrink(store, coin):
     return _bounded_shrink(store.get_kv(f"tail_shrink_{coin}"))
 
 
-def learn_tail_shrink(store, coin, rows):
-    """rows: [(formula_prob_made_with_0.9, outcome)]. Crypto has fat tails; the
-    right amount of shrink is measured from real settled windows, not assumed,
-    but only within [TAIL_SHRINK_MIN, TAIL_SHRINK_MAX]."""
-    from statistics import NormalDist
-    nd = NormalDist()
-    zs = []
-    for p, y in rows:
-        try:
-            p, y = float(p), int(y)
-        except (TypeError, ValueError):
-            continue
-        if not math.isfinite(p) or y not in (0, 1):
-            continue
-        zs.append((nd.inv_cdf(min(max(p, 1e-4), 1 - 1e-4)) / DEFAULT_TAIL_SHRINK, y))
-    if len(zs) < 200:
-        return None
-    lo, hi = round(TAIL_SHRINK_MIN * 100), round(TAIL_SHRINK_MAX * 100)
-    best, best_ll = DEFAULT_TAIL_SHRINK, 1e18
-    for a in [x / 100 for x in range(lo, hi + 1)]:
+MIN_HOLDOUT_WINDOWS = 50
+MIN_FIT_WINDOWS = 50
+HOLDOUT_FRACTION = 0.3
+
+
+def _window_logloss(a, by_window, nd):
+    """Mean per-window log loss at shrink `a`; each window counts once."""
+    total = 0.0
+    for rows in by_window:
         ll = 0.0
-        for z, y in zs:
+        for z, y in rows:
             p = min(max(nd.cdf(a * z), 1e-4), 1 - 1e-4)
             ll -= y * math.log(p) + (1 - y) * math.log(1 - p)
-        if ll < best_ll:
-            best, best_ll = a, ll
-    store.set_kv(f"tail_shrink_{coin}", best)
-    return best
+        total += ll / len(rows)
+    return total / len(by_window)
+
+
+def learn_tail_shrink(store, coin, rows, now=None):
+    """Fit the fat-tail shrink from settled windows, and keep it only if it
+    beats the 0.9 default on NEWER windows it never saw.
+
+    rows: [(window_ticker, ts, live_z, outcome)], where live_z is the un-shrunk
+    z the bot actually priced with (settlement.z_above, logged by crypto_brain).
+    Windows are split in time order: the newest HOLDOUT_FRACTION (at least
+    MIN_HOLDOUT_WINDOWS) are held out. The candidate is fitted on the older
+    windows within [TAIL_SHRINK_MIN, TAIL_SHRINK_MAX]; it is stored only if its
+    holdout log loss is lower than the default's, otherwise 0.9 is kept.
+    Fit details are saved to kv `tail_shrink_fit_<coin>` for the app.
+    """
+    from statistics import NormalDist
+    nd = NormalDist()
+    windows = {}
+    for ticker, ts, z, y in rows:
+        try:
+            ts, z = float(ts), float(z)
+        except (TypeError, ValueError):
+            continue
+        if type(y) is not int or y not in (0, 1) or not math.isfinite(z) or not math.isfinite(ts):
+            continue
+        w = windows.setdefault(ticker, {"first": ts, "rows": []})
+        w["first"] = min(w["first"], ts)
+        w["rows"].append((z, y))
+    ordered = [w["rows"] for w in sorted(windows.values(), key=lambda w: w["first"])]
+    n_hold = max(MIN_HOLDOUT_WINDOWS, int(len(ordered) * HOLDOUT_FRACTION))
+    details = {"ts": int(time.time() if now is None else now), "coin": coin,
+               "windows": len(ordered), "value": tail_shrink(store, coin), "accepted": False}
+    if len(ordered) - n_hold < MIN_FIT_WINDOWS:
+        details["reason"] = (f"not enough windows: {len(ordered)} "
+                             f"(need {MIN_FIT_WINDOWS + MIN_HOLDOUT_WINDOWS})")
+        store.set_kv(f"tail_shrink_fit_{coin}", details)
+        return details
+    fit, hold = ordered[:-n_hold], ordered[-n_hold:]
+    lo, hi = round(TAIL_SHRINK_MIN * 100), round(TAIL_SHRINK_MAX * 100)
+    grid = [x / 100 for x in range(lo, hi + 1)]
+    candidate = min(grid, key=lambda a: _window_logloss(a, fit, nd))
+    ll_cand = _window_logloss(candidate, hold, nd)
+    ll_default = _window_logloss(DEFAULT_TAIL_SHRINK, hold, nd)
+    accepted = ll_cand < ll_default
+    details.update({
+        "candidate": candidate, "fit_windows": len(fit), "holdout_windows": len(hold),
+        "holdout_logloss_candidate": round(ll_cand, 6),
+        "holdout_logloss_default": round(ll_default, 6),
+        "accepted": accepted, "value": candidate if accepted else DEFAULT_TAIL_SHRINK,
+        "reason": "beat 0.9 on newer windows" if accepted else "did not beat 0.9 on newer windows",
+    })
+    store.set_kv(f"tail_shrink_{coin}", details["value"])
+    store.set_kv(f"tail_shrink_fit_{coin}", details)
+    return details
 
 
 def learn_blend(store, coin, samples, lr=0.05):
