@@ -122,7 +122,8 @@ can verify AI connectivity without placing trades. LiteLLM is optional; leave it
 to preserve the existing OmniRoute → OpenRouter behavior.
 
 ## Integration choices from the open-source review
-- **Contract-rule review:** `bot/market_rules.py` compacts the exact rule fields already present in a Kalshi market payload, preserves bounded source text, and flags missing settlement source, early-close terms, cancellation/void language, and other review cues for sports counsel. It does not scrape or invent terms; missing rules are explicitly marked unavailable. This adopts the useful read-only research idea from Kalshi MCP servers without adding a second exchange client or order-write tool.\n- **Keep one execution authority.** Do not connect a third-party MCP trading server with order-write
+- **Contract-rule review:** `bot/market_rules.py` compacts the exact rule fields already present in a Kalshi market payload, preserves bounded source text, and flags missing settlement source, early-close terms, cancellation/void language, and other review cues for sports counsel. Missing or ambiguous terms now deterministically return `wait`, even if AI counsel is off or unavailable. It does not scrape or invent terms; missing rules are explicitly marked unavailable. This adopts the useful read-only research idea from Kalshi MCP servers without adding a second exchange client or order-write tool.
+- **Keep one execution authority.** Do not connect a third-party MCP trading server with order-write
   access alongside `KalshiClient`; that would duplicate order paths and bypass the current final
   risk recheck, ledger, and reconciliation guard. A future Kalshi MCP adapter should be read-only
   for contract rules, market metadata, and research until it can be proven to use the same guarded
@@ -138,6 +139,7 @@ to preserve the existing OmniRoute → OpenRouter behavior.
 - **FIX is not switched on by assumption.** It needs official account/API eligibility, protocol
   support, order-state reconciliation, and benchmarked latency/failure tests. REST remains the
   existing execution path until that work is separately validated.
+- Detailed component-by-component findings and safe integration boundaries: [docs/EXTERNAL_INTEGRATION_REVIEW.md](docs/EXTERNAL_INTEGRATION_REVIEW.md).
 
 ## Mobile dashboard (free, GitHub Pages)
 After each run the bot writes `index.html` + `bets.csv` to the `bot-data` branch. Turn on
