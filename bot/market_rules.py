@@ -57,8 +57,9 @@ def summarize_rules(market):
     lower = combined.lower()
     missing = []
     if not terms.get("rules_primary") and not terms.get("settlement_source") \
-            and not terms.get("rules_text") and not terms.get("rules_pdf_text") \
-            and not terms.get("contract_terms_text"):
+            and not terms.get("rules_text") and not terms.get("contract_terms_text"):
+        # PDF text is useful evidence, but it does not independently prove that
+        # the event-specific settlement source was correctly resolved.
         missing.append("primary settlement rules/source not present in supplied market data")
     flags = []
     patterns = (
