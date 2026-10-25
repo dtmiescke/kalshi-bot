@@ -1,6 +1,6 @@
 import unittest
 
-from bot.signals.crypto_microstructure import indicator_snapshot, orderbook, summarize_book
+from bot.signals.crypto_microstructure import (indicator_snapshot, orderbook, summarize_book,\n                                                summarize_kalshi_book)
 
 
 class FakeStore:
@@ -44,6 +44,17 @@ class CryptoMicrostructureTests(unittest.TestCase):
         self.assertIsNone(summarize_book({"bids": [], "asks": []}))
         self.assertIsNone(summarize_book({
             "bids": [["101", "1"]], "asks": [["100", "1"]]}))
+
+    def test_kalshi_book_summarizes_yes_no_depth(self):
+        result = summarize_kalshi_book({
+            "yes": [(0.55, 100), (0.54, 50)],
+            "no": [(0.44, 25), (0.43, 25)],
+        })
+        self.assertIsNotNone(result)
+        self.assertEqual(result["venue"], "kalshi")
+        self.assertAlmostEqual(result["depth_imbalance"], 100 / 200)
+        self.assertEqual(result["yes_levels"], 2)
+        self.assertIsNone(summarize_kalshi_book({"yes": [], "no": []}))
 
     def test_orderbook_uses_five_second_cache(self):
         store = FakeStore()
