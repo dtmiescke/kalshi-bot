@@ -43,6 +43,13 @@ class TestOddsBudget(unittest.TestCase):
 
     def test_no_game_soon_means_no_spend(self):
         self.assertEqual(self.plan(NOW + 48 * 3600), (False, "no game soon"))
+        # An empty cache must bootstrap once even when the selected Kalshi
+        # batch contains only games beyond the normal refresh horizon. Quota
+        # and daily pacing checks still apply.
+        self.assertEqual(
+            odds.refresh_plan(self.st, "basketball_nba", NOW, NOW + 48 * 3600,
+                              240, cache_empty=True),
+            (True, "scheduled"))
 
     def test_four_hourly_far_from_game_hourly_near_it(self):
         self.st.set_kv("odds_last_basketball_nba", NOW - 2 * 3600)
