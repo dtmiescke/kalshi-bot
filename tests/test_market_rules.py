@@ -49,7 +49,8 @@ class TestMarketRules(unittest.TestCase):
             }
         })
         self.assertTrue(result["available"])
-        self.assertEqual(result["status"], "terms_found")
+        self.assertEqual(result["status"], "review_required")
+        self.assertTrue(result["missing"])
         self.assertIn("rules_pdf_text", result["terms"])
         self.assertIn("void_or_cancellation", result["flags"])
 
