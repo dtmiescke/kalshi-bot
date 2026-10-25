@@ -32,7 +32,7 @@ class TestOpenRouterWebSearch(unittest.TestCase):
         self.llm = LLM(
             "test-key", self.store, models=["openai/gpt-5.2"],
             max_per_run=4, daily_limit=10, post=self.post,
-            endpoints={"openrouter": (URL, "test-key")},
+            endpoints=[("openrouter", URL, "test-key")],
         )
 
     def test_web_search_uses_openrouter_server_tool_and_returns_sources(self):
@@ -54,7 +54,7 @@ class TestOpenRouterWebSearch(unittest.TestCase):
         self.assertNotIn("example.com", fetch_tool["parameters"]["allowed_domains"])
 
     def test_missing_openrouter_key_does_not_attempt_search(self):
-        llm = LLM(None, self.store, models=["openai/gpt-5.2"], post=self.post, endpoints={})
+        llm = LLM(None, self.store, models=["openai/gpt-5.2"], post=self.post, endpoints=[("openrouter", URL, "")])
         self.assertEqual(llm.search_web("search"), (None, None, []))
         self.post.assert_not_called()
 
