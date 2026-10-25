@@ -49,6 +49,15 @@ class TestAppSummary(unittest.TestCase):
         self.assertLess(html.index('x.name==="summary.json"'), html.index('x.name==="bot.sqlite.gz"'))
         self.assertIn('x.name==="bot.sqlite.gz"', html)           # fallback kept
 
+    def test_council_chamber_reads_its_summary_keys(self):
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("members=s.members||{}", html)
+        for key in ("don_theo_last", "sunday_sitdown", "odds_quota", "janitors_last_result",
+                    "nerd_last_health", "kalshi_health"):
+            self.assertRegex(html, r"(kv|summaryKV)\." + key)
+            self.assertIn(key, dashboard.SUMMARY_KV)
+        self.assertIn("The Rott Master’s Table", html)
+
 
 if __name__ == "__main__":
     unittest.main()

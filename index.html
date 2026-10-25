@@ -183,6 +183,38 @@ dialog::backdrop{background:rgba(5,2,20,.75)}
 .planet.open{background:radial-gradient(circle at 35% 30%,#fff,#d6ccff 50%,#6a5aa8);box-shadow:0 0 0 4px rgba(236,232,255,.2),0 0 18px #ece8ff;animation:pulse 1.6s ease-in-out infinite}
 @keyframes pulse{50%{box-shadow:0 0 0 8px rgba(236,232,255,.08),0 0 24px #ece8ff}}
 .tip{background:rgba(14,8,40,.94);border:1.5px solid var(--cyan);font:600 11px var(--body);padding:5px 9px;border-radius:9px;white-space:nowrap;pointer-events:none}
+/* Council chamber: The Rott Master's Table (Phase 7) */
+.boss{display:grid;grid-template-columns:92px 1fr;gap:12px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px}
+.boss svg{width:92px;height:92px;cursor:pointer}
+.boss .line{font-family:var(--display);font-size:1rem;line-height:1.35}
+.boss .bad{color:var(--no);font-weight:600}
+.boss .why{margin-top:4px}
+.boss .glow{fill:#ff8a3d;transition:fill .4s}
+.boss[data-mood=smooth] .glow{fill:#ffc94a}
+.boss[data-mood=grumpy] .glow{fill:#ff3b3b}
+.boss[data-mood=all_business] .glow{fill:#9b6b4a}
+.boss .shades{display:none}.boss[data-mood=hot_hand] .shades{display:inline}
+.boss .glow{animation:puff 3.2s ease-in-out infinite}
+@keyframes puff{0%,100%{opacity:.55}50%{opacity:1}}
+.seats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}
+.seat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px;min-width:0}
+.seat b{display:block;font-family:var(--display);font-size:.92rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.seat span{display:block;font-size:.74rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.seat.top{border-color:var(--amber)}
+.seat.dog{border-style:dashed;opacity:.75}
+.tag{display:inline-block;font-size:.68rem;padding:1px 6px;border-radius:6px;border:1px solid var(--line);margin-top:4px}
+.tag.veto{color:var(--amber);border-color:var(--amber)}.tag.full{color:var(--yes);border-color:var(--yes)}.tag.dog{color:var(--no);border-color:var(--no)}
+.sitdown{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:10px;font-size:.9rem}
+details.floor{margin-top:12px;border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow:hidden}
+details.floor summary{padding:10px 12px;cursor:pointer;font-family:var(--display)}
+.bots{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--line)}
+.bot{background:var(--panel);padding:9px 10px;min-width:0;font-size:.8rem}
+.bot b{font-family:var(--display);font-size:.88rem}
+.bot .st{display:block;color:var(--muted);overflow-wrap:anywhere}
+.light{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;background:var(--muted)}
+.light.g{background:var(--yes);box-shadow:0 0 6px var(--yes)}.light.a{background:var(--amber)}.light.r{background:var(--no);box-shadow:0 0 6px var(--no)}
+#theoHQ{margin:0 0 8px;cursor:pointer}
+@media (prefers-reduced-motion:reduce){.boss .glow{animation:none}}
 @media (prefers-reduced-motion:reduce){.ring,.tablering,.planet.open{animation:none}}
 
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -212,6 +244,7 @@ dialog::backdrop{background:rgba(5,2,20,.75)}
     <div><b id="hOpen">0</b><span>Open</span></div>
   </div>
 
+  <p class="sub" id="theoHQ" hidden></p>
   <div class="spark"><canvas id="spCv" aria-label="Profit over time"></canvas></div>
   <section id="hub" class="view">
     <div style="position:relative"><div class="stage3d" id="hubStage" role="img" aria-label="Agent headquarters in 3D. Drag sideways to turn it, tap a room or agent for details."></div><span class="sample" id="s1" hidden>Sample data</span><span class="hint">Drag to turn</span></div>
@@ -221,6 +254,25 @@ dialog::backdrop{background:rgba(5,2,20,.75)}
   </section>
 
   <section id="council" class="view">
+    <h2 style="margin-top:4px" id="rmHead">The Rott Master’s Table</h2>
+    <div class="boss" id="boss" data-mood="all_business">
+      <svg viewBox="0 0 100 100" id="theoSvg" role="img" aria-label="Don Theo, the Rott Master. Tap for today’s reason.">
+        <rect x="8" y="70" width="84" height="30" rx="10" fill="#4a2a1a"/>
+        <ellipse cx="50" cy="48" rx="28" ry="26" fill="#1c1410"/>
+        <ellipse cx="28" cy="30" rx="9" ry="13" fill="#140e0b"/><ellipse cx="72" cy="30" rx="9" ry="13" fill="#140e0b"/>
+        <ellipse cx="50" cy="60" rx="15" ry="11" fill="#a0612f"/>
+        <circle cx="40" cy="44" r="3.4" fill="#ffd27a"/><circle cx="60" cy="44" r="3.4" fill="#ffd27a"/>
+        <g class="shades"><rect x="32" y="39" width="15" height="9" rx="3" fill="#000"/><rect x="53" y="39" width="15" height="9" rx="3" fill="#000"/><rect x="47" y="42" width="6" height="2" fill="#000"/></g>
+        <ellipse cx="50" cy="55" rx="5" ry="3.4" fill="#000"/>
+        <rect x="56" y="62" width="22" height="4" rx="2" fill="#7a4a24"/><circle class="glow" cx="78" cy="64" r="3"/>
+        <path id="theoChain" d="M26 78 Q50 96 74 78" stroke="#ffc94a" stroke-width="4" fill="none" stroke-dasharray="5 3" style="cursor:pointer"/>
+      </svg>
+      <div><div class="line" id="theoLine">…</div><div class="sub why" id="theoWhy"></div></div>
+    </div>
+    <div class="seats" id="seats"></div>
+    <div class="sitdown" id="sitdown" hidden></div>
+    <details class="floor"><summary>Elevator → Data Floor</summary><div class="bots" id="bots"></div></details>
+    <h2>Crypto AI review</h2>
     <div style="position:relative"><div class="stage3d" id="coStage" role="img" aria-label="The council voting on recent trades, in 3D"></div><span class="sample" id="s2" hidden>Sample data</span></div>
     <p class="sub" style="margin-top:8px" id="coNote"></p>
     <div class="verdict" id="verdict" hidden></div>
@@ -406,7 +458,7 @@ function category(b){return /BTC|ETH|SOL/.test(b.series)?(/15M/.test(b.series)?"
 
 /* ================= the bot's own database (bot.sqlite.gz or legacy bot.sqlite on bot-data) ================= */
 // Real council verdicts live in the kv table as council_<ticker>; model results in model_runs.
-let council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={};
+let council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={};
 const ROLE_KEY={crypto:"crypto_analyst",liquidity:"liquidity_analyst",prob:"probability_check",risk:"risk_controller"};
 function loadScript(src){return new Promise((ok,bad)=>{const t=document.createElement("script");t.src=src;t.onload=ok;t.onerror=()=>bad(new Error("couldn’t load "+src));document.head.appendChild(t)})}
 let SQLlib=null;
@@ -419,7 +471,7 @@ async function loadDB(){
     if(sf.sha===loadDB.sha)return;
     try{const s=JSON.parse(await file("summary.json"));
       council=s.council||[];model=s.model||null;lessons=s.lessons||[];audit=s.audit||[];combos=s.combos||[];
-      summaryKV=s.kv||{};loadDB.sha=sf.sha;dbNote="";return}
+      summaryKV=s.kv||{};members=s.members||{};loadDB.sha=sf.sha;dbNote="";return}
     catch(e){/* fall back to the full database below */}
   }
   const f=(list||[]).find(x=>x.name==="bot.sqlite.gz")||(list||[]).find(x=>x.name==="bot.sqlite");
@@ -445,6 +497,66 @@ async function loadDB(){
     combos=q("SELECT leg_count AS legs, COUNT(*) AS n, AVG(brier) AS brier, AVG(market_proxy_brier) AS mkt, SUM(hypothetical_pnl) AS pnl FROM combo_prediction_audit WHERE outcome IS NOT NULL GROUP BY leg_count ORDER BY leg_count");
     db.close();loadDB.sha=f.sha;dbNote="";
   }catch(e){dbNote="Couldn’t open the bot database: "+e.message}
+}
+
+/* ================= the Rott Master's Table + Data Floor (from summary.json) ================= */
+const NICK={sharp:"Numbers",stats:"Calculator",scout:"Eyes",situationist:"Professor",market:"Ticker",quant:"Quant"};
+const SAMPLE_THEO={line:"Everybody earns their kibble today. Get to work.",reason:"sample: no results yet",mood:"all_business",title:"Rott Master",bad_news:[]};
+function theoNow(){return summaryKV.don_theo_last||(demo?SAMPLE_THEO:null)}
+function renderChamber(){
+  const t=theoNow(),box=$("boss");
+  if(!t){$("theoLine").textContent="The Rott Master hasn’t spoken yet.";$("theoWhy").textContent=dbNote||"His line appears after the next bot run.";$("theoHQ").hidden=true}
+  else{
+    box.dataset.mood=t.mood||"all_business";
+    const bad=(t.bad_news||[]).length,text=String(t.line||"");
+    // bad news is already first in his line; colour that part so it can't be missed
+    const cut=bad?text.indexOf("That's real.")+12:0;
+    $("theoLine").innerHTML=(cut>11?`<span class="bad">${esc(text.slice(0,cut))}</span>`+esc(text.slice(cut)):esc(text));
+    $("theoWhy").textContent=`${t.title||"Rott Master"} · ${String(t.mood||"").replace("_"," ")} · ${t.reason||""}`+(t.ts?" · "+ago(t.ts*1000):"");
+    $("rmHead").textContent=bad?"The Rott Master’s Table — Don Theo has bad news":"The Rott Master’s Table";
+    const hq=$("theoHQ");hq.hidden=false;hq.innerHTML=`<span class="light ${bad?"r":"g"}"></span>`+esc(text);
+  }
+  const rows=Object.entries(members).sort((a,b)=>(a[1].seat||9)-(b[1].seat||9));
+  $("seats").innerHTML=rows.length?rows.map(([m,r])=>{
+    const tag=r.doghouse?'<span class="tag dog">Doghouse</span>':r.stage!=="advisory"?`<span class="tag ${r.stage}">${r.stage==="full"?"Full vote":"Veto"}</span>`:'<span class="tag">Advisory</span>';
+    return `<div class="seat${r.seat===1&&r.graded&&!r.doghouse?" top":""}${r.doghouse?" dog":""}"><b>${esc(NICK[m]||m)}</b><span>${esc(r.title)}</span>`+
+      `<span>${r.graded?esc(r.recent)+" last 20 · "+(r.streak>0?"W"+r.streak:r.streak<0?"L"+(-r.streak):"–"):"no graded votes yet"}</span>${tag}</div>`}).join("")
+    :'<div class="empty" style="grid-column:1/-1">Council seats fill in once member votes are graded.</div>';
+  const sd=summaryKV.sunday_sitdown,sb=$("sitdown");
+  if(sd&&sd.text){sb.hidden=false;sb.innerHTML=`<b class="disp">Sunday Sit-Down</b> <span class="sub">${esc(sd.week||"")}</span><p style="margin:6px 0 0">${esc(sd.text)}</p>`}else sb.hidden=true;
+  renderBots();
+}
+function botRows(){
+  const kv=summaryKV,now=Date.now()/1000,stale=(ts,h=2)=>!ts||now-ts>h*3600;
+  const row=(icon,name,light,status,ts)=>({icon,name,light:stale(ts,6)&&light==="g"?"a":light,status:status+(ts?" · "+ago(ts*1000):"")});
+  const out=[],k=kv.kalshi_health,paused=kv.health_paused_areas||{};
+  if(k)out.push(row("🛰️","Kalshi",k.other>k.ok?"r":k["429"]?"a":"g",`${k.ok} ok, ${k["429"]} rate-limited, ${k.other} errors`,k.ts));
+  const ld=kv.live_discovery_health;
+  if(ld){const ser=Object.values(ld.series||{}),act=ser.reduce((a,x)=>a+(x.active_markets||0),0);
+    out.push(row("🪙","Crypto",paused.crypto?"r":act?"g":"a",paused.crypto?paused.crypto:`${act} live 15-min markets`,ld.ts))}
+  const sc=kv.sports_scanner_health;
+  if(sc)out.push(row("🏟️","Sports scanner",paused.sports?"r":sc.scan_errors?"a":"g",paused.sports||`${sc.events_unique} games, ${sc.markets_unique} markets`,sc.ts));
+  const si=kv.sports_intel_health;
+  if(si)out.push(row("📰","News",si.sources_failed?"a":"g",si.sources_ok||si.sources_failed?`${si.sources_ok} sources ok, ${si.sources_failed} failed, ${si.new_items} new`:"idle (cached, refreshes every 30 min)",si.ts));
+  const oq=kv.odds_quota;
+  if(oq)out.push(row("🎲","Odds",oq.remaining<=25?"r":oq.remaining<100?"a":"g",`${Math.round(oq.remaining)} free credits left`,oq.ts));
+  const gl=kv.grading_lookup_health;
+  if(gl)out.push(row("📚","Librarian (grading)",gl.errors?"a":"g",`${gl.errors} lookup errors, ${gl.archive_fallbacks} from archive`,gl.ts));
+  const j=kv.janitors_last_result;
+  if(j){const a=j.janitor_a||{},b=j.janitor_b||{},n=o=>Object.values(o||{}).reduce((s,x)=>s+(typeof x==="number"?x:(x.invalid||0)+(x.duplicates||0)),0);
+    out.push(row("🧹","Janitor A (mop)",j.ok?"g":"r",`dedupe: ${n(a.removed)} rows cleaned`,a.ts||kv.janitors_last_run));
+    const trimmed=Object.keys(b.before||{}).reduce((s,t)=>s+Math.max(0,(b.before[t]||0)-((b.after||{})[t]||0)),0);
+    out.push(row("🪣","Janitor B (bucket)",j.ok?"g":"r",`retention: ${trimmed.toLocaleString()} old rows trimmed`,b.ts||kv.janitors_last_run))}
+  const nh=kv.nerd_last_health;
+  if(nh){const al=((nh.silent_failures||{}).alarms||[]);
+    out.push(row("🤓","Nerd watchdog",!nh.ok?"r":al.some(x=>x.severity==="critical")?"r":al.length?"a":"g",
+      !nh.ok?"database check failed":al.length?al.map(x=>x.message).join("; "):"all checks clean",nh.ts))}
+  return out;
+}
+function renderBots(){
+  const rows=botRows();
+  $("bots").innerHTML=rows.length?rows.map(r=>`<div class="bot"><span class="light ${r.light}"></span><b>${r.icon} ${esc(r.name)}</b><span class="st">${esc(r.status)}</span></div>`).join("")
+    :`<div class="empty" style="grid-column:1/-1">${demo?"Connect to see each data bot’s health.":"Health appears after the next bot run."}</div>`;
 }
 
 /* ================= council votes (rebuilt from each bet's numbers) ================= */
@@ -843,7 +955,7 @@ async function refresh(){
     file("REPORT.txt").then(t=>$("reportTxt").textContent=t||"No report yet. It appears after the first saved run.").catch(e=>$("reportTxt").textContent=explain(e));
   }else{sample=true;bets=sampleBets();$("briefing").textContent="Sample mode. Your bot’s AI briefing shows here once connected.";$("reportTxt").textContent="Sample mode."}
   await loadDB().catch(()=>{});
-  renderHud();renderPower();renderMode();renderRuns();renderFeed();renderBetList();renderEdge();renderAudit();leaderboard();renderVerdict();drawSpark();celebrate();
+  renderHud();renderPower();renderMode();renderRuns();renderFeed();renderBetList();renderEdge();renderAudit();leaderboard();renderVerdict();renderChamber();drawSpark();celebrate();
   if(document.querySelector("#control.show"))renderSettings();
 }
 
@@ -862,6 +974,9 @@ function show(tab){
   requestAnimationFrame(()=>{build(tab);drawSpark()});
 }
 $("tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(b)show(b.dataset.tab)});
+$("theoSvg").addEventListener("click",e=>{if(e.target.id==="theoChain"){toast("Real gold. Like my picks.");return}
+  const t=theoNow();toast(t?t.reason||t.line:"He’s still in the back office.")});
+$("theoHQ").addEventListener("click",()=>show("council"));
 function layoutAll(){drawSpark();["hub","council","trades"].forEach(t=>{if(document.querySelector("#"+t+".show"))build(t)})}
 addEventListener("resize",layoutAll);
 function loop(now){tickHub(now);tickCouncil(now);tickOrbit(now);requestAnimationFrame(loop)}
