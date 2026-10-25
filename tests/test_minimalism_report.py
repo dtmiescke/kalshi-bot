@@ -54,7 +54,7 @@ class TestMinimalismAndPlainEnglish(unittest.TestCase):
 
     def test_report_explains_brier_and_common_terms(self):
         report = build(self.store)
-        self.assertIn("prediction error (Brier)", report)
+        self.assertIn("Prediction error / Brier", report)
         self.assertIn("P&L = dollars won/lost after fees", report)
         self.assertIn("CLV (closing-line value)", report)
         self.assertIn("Calibration =", report)
