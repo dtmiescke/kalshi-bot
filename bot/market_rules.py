@@ -23,49 +23,65 @@ _RULE_FIELDS = (
 
 
 def _unwrap_market(payload):
-    """Normalize native Kalshi objects and common read-only MCP result envelopes.
+    """Normalize native Kalshi objects and nested read-only MCP envelopes.
 
-    MCP SDKs can expose tool output as structuredContent or as a list of text
-    content blocks. Parse only JSON objects from those known containers; plain
-    text is retained as PDF-like evidence and cannot satisfy the native
-    settlement-source gate. Tool errors and malformed results fail closed.
+    MCP SDKs may put structuredContent, JSON text blocks, and result/data/market
+    envelopes at multiple levels. Walk only those known containers with a strict
+    depth bound. Any MCP error fails closed; plain text is retained only as
+    bounded, non-authoritative evidence and cannot satisfy the native settlement
+    source gate.
     """
-    if not isinstance(payload, dict) or payload.get("isError") is True:
+    if not isinstance(payload, dict):
         return {}
-    market = dict(payload)
 
-    structured = market.get("structuredContent")
-    if isinstance(structured, dict):
-        market = {**market, **structured}
+    envelope_keys = {"structuredContent", "result", "data", "market", "content"}
+    merged = {}
+    pending = [(payload, 0)]
+    visited = set()
+    plain_text = []
+    max_depth = 8
 
-    blocks = market.get("content")
-    if isinstance(blocks, list):
-        text_parts = [
-            str(block.get("text", "")).strip()
-            for block in blocks
-            if isinstance(block, dict) and block.get("type") == "text"
-            and str(block.get("text", "")).strip()
-        ]
-        if text_parts:
-            combined_text = "\n".join(text_parts)
-            parsed = None
-            try:
-                candidate = json.loads(combined_text)
+    while pending:
+        node, depth = pending.pop(0)
+        if not isinstance(node, dict) or depth > max_depth:
+            continue
+        identity = id(node)
+        if identity in visited:
+            continue
+        visited.add(identity)
+
+        if node.get("isError") is True:
+            return {}
+
+        # Deeper payload fields override wrapper metadata, but wrappers themselves
+        # are not promoted to contract facts.
+        merged.update({k: v for k, v in node.items() if k not in envelope_keys})
+
+        for key in ("structuredContent", "result", "data", "market"):
+            nested = node.get(key)
+            if isinstance(nested, dict):
+                pending.append((nested, depth + 1))
+
+        blocks = node.get("content")
+        if isinstance(blocks, list):
+            for block in blocks:
+                if not isinstance(block, dict) or block.get("type") != "text":
+                    continue
+                text = str(block.get("text", "")).strip()
+                if not text:
+                    continue
+                try:
+                    candidate = json.loads(text)
+                except (TypeError, ValueError):
+                    candidate = None
                 if isinstance(candidate, dict):
-                    parsed = candidate
-            except (TypeError, ValueError):
-                pass
-            if parsed is not None:
-                market = {**market, **parsed}
-            else:
-                # Do not promote arbitrary prose/errors to authoritative rules.
-                market.setdefault("rules_pdf_text", combined_text[:6000])
+                    pending.append((candidate, depth + 1))
+                else:
+                    plain_text.append(text[:6000])
 
-    for key in ("result", "data", "market"):
-        nested = market.get(key)
-        if isinstance(nested, dict):
-            market = {**market, **nested}
-    return market
+    if plain_text and not merged.get("rules_pdf_text"):
+        merged["rules_pdf_text"] = "\\n".join(plain_text)[:6000]
+    return merged
 
 
 def summarize_rules(market, series=None):
