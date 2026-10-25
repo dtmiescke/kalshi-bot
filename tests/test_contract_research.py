@@ -49,6 +49,20 @@ class ContractResearchTests(unittest.TestCase):
             self.assertIsNone(_safe_document_url(value))
         self.assertEqual(_safe_document_url("https://example.com/rules"), "https://example.com/rules")
 
+    def test_rejects_malformed_tickers_before_network_calls(self):
+        for ticker in ("../portfolio", "A B", "A\nB", "A" * 81, "TEST?x=1"):
+            client = Mock()
+            with self.subTest(ticker=ticker), self.assertRaises(ValueError):
+                contract_research(client, ticker)
+            client.market.assert_not_called()
+
+    def test_rejects_malformed_series_ticker_before_series_lookup(self):
+        client = Mock()
+        client.market.return_value = {"ticker": "TEST", "series_ticker": "SERIES/../bad"}
+        with self.assertRaises(ValueError):
+            contract_research(client, "TEST")
+        client.series.assert_not_called()
+
     def test_rejects_unsafe_ticker(self):
         with self.assertRaises(ValueError):
             contract_research(Mock(), "../portfolio")
