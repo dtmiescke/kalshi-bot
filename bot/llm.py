@@ -110,14 +110,14 @@ class LLM:
             return None, None
         order = ([model] if model else []) + [m for m in self.models if m != model]
         for m in order:
+            ep, name = m.split("|", 1) if "|" in m else ("openrouter", m)
+            if ep not in self.endpoints or ep in self.dead:
+                continue
             with self._lock:   # council calls run in parallel threads
                 if m in self.dead or self.budget_left() <= 0:
                     continue
                 self.calls_this_run += 1
                 self.store.set_kv(self._day_key(), self.store.get_kv(self._day_key(), 0) + 1)
-            ep, name = m.split("|", 1) if "|" in m else ("openrouter", m)
-            if ep not in self.endpoints or ep in self.dead:
-                continue
             url, key = self.endpoints[ep]
             try:
                 r = self._post(url, timeout=60, headers={
