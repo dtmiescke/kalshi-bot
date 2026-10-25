@@ -1,7 +1,8 @@
-"""Opt-in adaptive aggression policy. Does not place orders or alter hard risk caps.
+"""Paper-only decision profiles layered over the bot's existing source ensemble.
 
-Aggressive is the requested paper-training default. Hard edge floors and hard risk caps remain in force.
-Only settled, chronological, out-of-sample paper outcomes may drive adaptation.
+Modes adjust decision strictness, not hard safety controls. The underlying model
+still blends the configured signals (including AI news when available), and the
+risk engine still enforces fee-inclusive edge, exposure, cash, and loss limits.
 """
 from dataclasses import dataclass
 import math
@@ -28,24 +29,30 @@ class AggressionPolicy:
 
 
 def choose(policy, settled_paper_results=()):
-    """Return optional decision thresholds; never modify the input policy.
+    """Return a bounded profile; never authorize a trade or weaken hard guards.
 
-    Adaptive only relaxes paper selection after >=50 chronological, independent
-    held-out settlements with positive fee-inclusive PnL and <=10% drawdown.
-    Results: sequence of dicts with pnl, held_out, mode and settled.
-    In all other cases adaptive stays conservative. No automatic live escalation.
+    Adaptive promotes to aggressive only after >=50 settled, held-out paper
+    results with positive fee-inclusive PnL and <=10% peak-to-trough drawdown.
+    Without verified held-out history it deliberately fails closed to
+    conservative. The runtime currently supplies no held-out history, so
+    adaptive remains conservative until a trustworthy history source is wired.
     """
     if policy.level == "off":
         return None
+
     level = policy.level
     if level == "adaptive":
         rows = list(settled_paper_results)
         valid = len(rows) >= 50 and all(
-            r.get("mode") == "paper" and r.get("held_out") is True
+            isinstance(r, dict)
+            and r.get("mode") == "paper"
+            and r.get("held_out") is True
             and r.get("settled") is True
             and isinstance(r.get("pnl"), (int, float))
             and not isinstance(r.get("pnl"), bool)
-            and math.isfinite(r["pnl"]) for r in rows)
+            and math.isfinite(r["pnl"])
+            for r in rows
+        )
         if valid:
             equity = peak = 0.0
             worst = 0.0
@@ -55,15 +62,19 @@ def choose(policy, settled_paper_results=()):
                 worst = max(worst, peak - equity)
             valid = equity > 0 and worst <= max(1.0, abs(equity)) * 0.10
         level = "aggressive" if valid else "conservative"
+
+    # Thresholds are applied to the ensemble's source-informed probability and
+    # confidence. Aggressive never reduces the baseline fee-inclusive edge floor.
     factors = {
-        "conservative": (1.25, 1.05, 0.60),
-        "balanced": (1.0, 1.0, 1.0),
-        "aggressive": (0.85, 0.96, 1.0),
+        "conservative": (1.25, 1.10, 0.60),
+        "balanced": (1.00, 1.00, 1.00),
+        "aggressive": (1.00, 0.96, 1.00),
     }
-    edge, confidence, size = factors[level]
+    edge_factor, confidence_factor, size_factor = factors[level]
     return {
         "effective_level": level,
-        "min_edge": max(policy.min_edge, min(0.99, policy.min_edge * edge)),
-        "min_confidence": min(1.0, policy.min_confidence * confidence),
-        "kelly_fraction": min(policy.kelly_fraction, policy.kelly_fraction * size),
+        "min_edge": max(policy.min_edge, min(0.99, policy.min_edge * edge_factor)),
+        "min_confidence": min(1.0, policy.min_confidence * confidence_factor),
+        "kelly_fraction": min(policy.kelly_fraction,
+                              policy.kelly_fraction * size_factor),
     }
