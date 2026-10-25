@@ -71,6 +71,7 @@ def run_scheduled(s, store, data):
     # demo/live this also enforces confirmation and credentials; in paper it
     # still prevents invalid risk limits and unsupported execution settings.
     s.validate()
+    cycle_started = int(time.time())
     # The Nerd watchdog runs before market work and fails closed on schema/database
     # damage. Two janitors run on a six-hour cadence; only raw observations are
     # deduplicated/trimmed. Bets, model weights, grades and audit history are kept.
@@ -89,6 +90,18 @@ def run_scheduled(s, store, data):
     nerd.record_success(store, health)
     if full_check_due:
         store.set_kv("nerd_last_full_check_ts", time.time())
+    # Kalshi fee type/multiplier per traded series, re-read at most daily (fees.py).
+    try:
+        from . import fees
+        from .config import CRYPTO_15M
+        fee_series = list(CRYPTO_15M) + os.environ.get("CRYPTO_LADDER_SERIES", "KXBTCD,KXETHD").split(",")
+        fee_series += sorted(s.selected_series() or SPORTS.keys())
+        changed = fees.refresh(store, data, fee_series)
+        if changed:
+            print("fee changes:", json.dumps(changed))
+            alerts.send("Kalshi fees changed", json.dumps(changed)[:500], tags=["warning"])
+    except Exception as exc:
+        logging.getLogger("bot").warning("fee table refresh failed; keeping last known fees: %s", exc)
     # Free-first public sports intelligence collection; data only, never order authority.
     if os.environ.get("SPORTS_INTEL_ENABLED", "yes").lower() in ("yes", "true", "1"):
         try:
@@ -200,6 +213,14 @@ def run_scheduled(s, store, data):
                                    "429": sum(1 for r in log_ if r["status"] == 429),
                                    "other": sum(1 for r in log_ if r["status"] >= 400 and r["status"] != 429),
                                    "ts": time.time()})
+    # Silent-failure detector: did this cycle actually price markets and produce
+    # signals? A critical alarm pauses only the affected area until it recovers.
+    try:
+        health_result = nerd.silent_failure_check(store, cycle_started, alert=alerts.send)
+        if health_result["alarms"]:
+            print("health alarms:", json.dumps(health_result["alarms"], default=str))
+    except Exception as exc:
+        logging.warning("silent-failure check failed: %s", exc)
     store.set_kv("last_run_ts", time.time())
     if time.time() - store.get_kv("last_compact", 0) >= 86400:
         store.compact()
@@ -296,6 +317,18 @@ def main(argv=None):
         if m.get("promoted"):
             alerts.send("New model promoted", ml.text(m)[:1500], tags=["brain"])
         store.set_kv("last_train", time.time())
+        return
+    if cmd == "price-gap":
+        # read-only: our spot vs Kalshi's CF Benchmarks settlement value
+        #   price-gap            the bot's own final-minute readings
+        #   price-gap replay 3   Coinbase minutes over the last N days of windows
+        from .grader import replay_settlement_gap, settlement_gap
+        if len(argv) > 1 and argv[1] == "replay":
+            days = float(argv[2]) if len(argv) > 2 else 3
+            report = replay_settlement_gap(store, data, days=days)
+        else:
+            report = settlement_gap(store, data, max_fetch=int(argv[1]) if len(argv) > 1 else 150)
+        print(json.dumps(report, indent=2))
         return
     if cmd == "vol-check":
         # read-only: is the volatility forecast the right size? (history.vol_check)

@@ -149,6 +149,10 @@ class Settings:
     # one window = BTC+ETH+SOL bets that settle together (they move together)
     crypto_max_per_window: float = field(
         default_factory=lambda: _env_float("CRYPTO_MAX_PER_WINDOW", 20.0))
+    # Crypto sides priced below this (dollars) are long shots: bought only when the
+    # raw exact-contract model, not just the blend, also shows the edge. 0 disables.
+    crypto_longshot_price: float = field(
+        default_factory=lambda: _env_float("CRYPTO_LONGSHOT_PRICE", 0.20))
     crypto_min_minutes: float = 2.0    # too close to the bell: our price feed lags
     crypto_max_minutes: float = 13.0   # too early: strike may not be set yet
 
@@ -291,6 +295,8 @@ class Settings:
                             ("CRYPTO_MIN_EDGE", self.crypto_min_edge)):
             if not math.isfinite(value) or not 0 < value < 1:
                 raise ValueError(f"{name} must be greater than 0 and less than 1")
+        if not math.isfinite(self.crypto_longshot_price) or not 0 <= self.crypto_longshot_price < 0.5:
+            raise ValueError("CRYPTO_LONGSHOT_PRICE must be a dollar price from 0 up to 0.50")
         if not math.isfinite(self.min_confidence) or not 0 < self.min_confidence <= 1:
             raise ValueError("MIN_CONFIDENCE must be greater than 0 and at most 1")
         for name, value in (("TAKER_FEE_RATE", self.taker_fee_rate),

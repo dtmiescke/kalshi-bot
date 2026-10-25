@@ -80,19 +80,38 @@ def prob_above(spot, strike, vol_per_min, seconds_left, avg_seconds=60,
     already in it (needed for an exact answer in the last minute).
     """
     try:
-        numeric_inputs = (spot, strike, vol_per_min, seconds_left, avg_seconds, tail_shrink)
+        shrink = float(tail_shrink)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(shrink) or shrink < 0:
+        return None
+    z = z_above(spot, strike, vol_per_min, seconds_left, avg_seconds, realized_avg, proxy_bps)
+    if z is None:
+        return None
+    if math.isinf(z):
+        return 1.0 if z > 0 else 0.0
+    return _norm_cdf(shrink * z)
+
+
+def z_above(spot, strike, vol_per_min, seconds_left, avg_seconds=60,
+            realized_avg=None, proxy_bps=None):
+    """The un-shrunk z-score prob_above prices with: (mean - log strike) / sd of
+    the settlement average, proxy variance included. +/-inf when there is no
+    variance left; None on invalid input. Logged so tail fitting uses exactly
+    the calculation the bot bets with."""
+    try:
+        numeric_inputs = (spot, strike, vol_per_min, seconds_left, avg_seconds)
         if any(not math.isfinite(float(value)) for value in numeric_inputs):
             return None
         spot, strike, vol_per_min = float(spot), float(strike), float(vol_per_min)
         seconds_left, avg_seconds = float(seconds_left), float(avg_seconds)
-        tail_shrink = float(tail_shrink)
         if realized_avg is not None:
             realized_avg = float(realized_avg)
             if not math.isfinite(realized_avg) or realized_avg <= 0:
                 return None
     except (TypeError, ValueError, OverflowError):
         return None
-    if spot <= 0 or strike <= 0 or vol_per_min <= 0 or avg_seconds <= 0 or tail_shrink < 0:
+    if spot <= 0 or strike <= 0 or vol_per_min <= 0 or avg_seconds <= 0:
         return None
     s2 = (vol_per_min ** 2) / 60.0          # variance per second
     x, k = math.log(spot), math.log(strike)
@@ -118,6 +137,5 @@ def prob_above(spot, strike, vol_per_min, seconds_left, avg_seconds=60,
         proxy_bps = 3.0
     var += (proxy_bps / 1e4) ** 2
     if var <= 1e-14:
-        return 1.0 if mean > k else 0.0
-    z = (mean - k) / math.sqrt(var)
-    return _norm_cdf(tail_shrink * z)
+        return math.inf if mean > k else -math.inf
+    return (mean - k) / math.sqrt(var)

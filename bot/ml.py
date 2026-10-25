@@ -185,16 +185,23 @@ class Stacker:
 
 # --- training ---------------------------------------------------------------------------
 def learn_tails(store):
-    """Fit each coin's fat-tail adjustment from labelled rows."""
+    """Fit each coin's fat-tail adjustment from labelled rows of the current
+    feature version that carry the live pricing z (see crypto_brain.research)."""
     from . import vol as volmod
     ensure_table(store)
     out = {}
     for coin in COINS:
-        rows = store.q("SELECT features, y FROM ml_rows WHERE coin=? AND y IS NOT NULL", (coin,))
-        pairs = [(json.loads(r["features"]).get("model_prob", 0.5), r["y"]) for r in rows]
-        v = volmod.learn_tail_shrink(store, coin, pairs)
-        if v:
-            out[coin] = v
+        rows = store.q("""SELECT ticker, ts, features, y FROM ml_rows
+                          WHERE coin=? AND y IS NOT NULL AND version=? ORDER BY ts""",
+                       (coin, features.FEATURE_VERSION))
+        usable = []
+        for r in rows:
+            z = json.loads(r["features"]).get("live_z")
+            if z is not None:
+                usable.append((r["ticker"], r["ts"], z, r["y"]))
+        details = volmod.learn_tail_shrink(store, coin, usable)
+        out[coin] = {k: details.get(k) for k in ("value", "accepted", "candidate", "windows",
+                                                 "holdout_windows", "reason")}
     return out
 
 

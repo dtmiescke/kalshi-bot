@@ -8,7 +8,7 @@ import time
 import uuid
 from datetime import datetime
 
-from . import alerts, brain, guard, risk
+from . import alerts, brain, fees, guard, risk
 from .llm import LLM
 from .config import CRYPTO_15M, SPORTS
 from .kalshi_client import KalshiClient, num, price
@@ -138,6 +138,7 @@ class Engine:
         self.public = ms.load_public_betting()
         self.betting_ok = True
         self._headlines = {}
+        fees.load(store)             # last refreshed Kalshi fee table
 
     @staticmethod
     def _confirmed_ioc_fill(order, requested):
@@ -834,7 +835,7 @@ class Engine:
         total_cap = min(2 * self.s.max_per_bet, left_day, left_game, left_open, left_cash)
         if not math.isfinite(total_cap) or total_cap <= 0:
             return 0.0
-        return max(0.0, total_cap / (1 + self.s.taker_fee_rate))
+        return max(0.0, total_cap / (1 + fees.rate(event_ticker, self.s)))
 
     def _unwind_leg(self, ticker, side, price, order_id, filled,
                     event_ticker, series, team=None):
@@ -869,7 +870,7 @@ class Engine:
                     "event_ticker": event_ticker or ticker, "series": series or "ARB",
                     "team": team, "side": side, "price": price, "contracts": residual,
                     "stake": round(residual * price, 2),
-                    "fee": risk.taker_fee(residual, price, self.s.taker_fee_rate),
+                    "fee": risk.taker_fee(residual, price, fees.rate(series or ticker, self.s)),
                     "model_prob": None, "edge": None, "confidence": 1.0,
                     "signals": {"arbitrage": {"unwind_residual": True,
                                               "original_order_id": order_id,
@@ -908,8 +909,9 @@ class Engine:
         budget = self._arbitrage_budget(event_ticker)
         per_leg_cap = int(self.s.max_per_bet // max(pl, ph)) if max(pl, ph) > 0 else 0
         n = int(min(ql, qh, per_leg_cap, budget // (pl + ph))) if budget > 0 else 0
-        fees = risk.taker_fee(n, pl, self.s.taker_fee_rate) + risk.taker_fee(n, ph, self.s.taker_fee_rate)
-        if n < 1 or n * (1 - pl - ph) - fees <= 0:
+        rate = fees.rate(a.get("series") or a["low"], self.s)
+        cost_fees = risk.taker_fee(n, pl, rate) + risk.taker_fee(n, ph, rate)
+        if n < 1 or n * (1 - pl - ph) - cost_fees <= 0:
             return
         allowed, reason = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
         if not allowed:
@@ -947,7 +949,7 @@ class Engine:
             self.store.add_bet({
                 "ts": now, "mode": self.s.mode, "ticker": ticker, "event_ticker": event_ticker,
                 "series": a.get("series") or "ARB", "team": None, "side": side, "price": px, "contracts": filled,
-                "stake": round(filled * px, 2), "fee": risk.taker_fee(filled, px, self.s.taker_fee_rate),
+                "stake": round(filled * px, 2), "fee": risk.taker_fee(filled, px, fees.rate(ticker, self.s)),
                 "model_prob": None, "edge": None, "confidence": 1.0,
                 "signals": {"arbitrage": {"pair": [a["low"], a["high"]],
                                           "locked": round(filled * (1 - pl - ph) - fees, 2)}},
@@ -968,15 +970,15 @@ class Engine:
         except Exception:
             return False
         budget = self._arbitrage_budget(ev["event_ticker"])
-        plan = guard.arb_plan(ev["series_ticker"], books[0], books[1],
-                              self.s.taker_fee_rate, budget)
+        rate = fees.rate(ev["series_ticker"], self.s)
+        plan = guard.arb_plan(ev["series_ticker"], books[0], books[1], rate, budget)
         if not plan:
             return False
         # Each leg is an individual bet and must independently respect MAX_PER_BET.
         per_leg_cap = int(self.s.max_per_bet // max(plan["price_a"], plan["price_b"]))
         if plan["contracts"] > per_leg_cap:
             plan = guard.arb_plan(
-                ev["series_ticker"], books[0], books[1], self.s.taker_fee_rate,
+                ev["series_ticker"], books[0], books[1], rate,
                 per_leg_cap * (plan["price_a"] + plan["price_b"])
             )
         if not plan:
@@ -1012,7 +1014,7 @@ class Engine:
                 log.error("ARB incomplete fill unexpectedly reached ledger: %s %s/%s",
                           m["ticker"], filled, plan["contracts"])
                 return False
-            fee = risk.taker_fee(filled, px, self.s.taker_fee_rate)
+            fee = risk.taker_fee(filled, px, rate)
             self.store.add_bet({
                 "ts": now, "mode": self.s.mode, "ticker": m["ticker"],
                 "event_ticker": ev["event_ticker"], "series": ev["series_ticker"],
@@ -1085,7 +1087,8 @@ class Engine:
             log.warning("orderbook %s: %s", snap["ticker"], e)
             return None
         plan, why = risk.decide(self.s, self.store, snap, prob, conf, book,
-                                min_edge=min_edge, max_per_bet=max_per_bet)
+                                min_edge=min_edge, max_per_bet=max_per_bet,
+                                raw_model_prob=risk.crypto_model_prob(readings))
         if not plan:
             self._record_decision(snap, readings, "rejected", why, prob, conf)
             self._skip(summary, why)
@@ -1136,6 +1139,7 @@ class Engine:
                     self.s.crypto_max_per_bet if is_crypto else self.s.max_per_bet
                 ),
                 maker=False,
+                raw_model_prob=risk.crypto_model_prob(readings),
             )
             if not fresh_plan:
                 self._skip(summary, f"execution recheck: {why}")
@@ -1150,7 +1154,8 @@ class Engine:
             # retain the original full-order stake.
             plan["stake"] = round(plan["contracts"] * plan["price"], 2)
             # Resting maker fills use the maker fee schedule.
-            plan["fee"] = risk.taker_fee(plan["contracts"], plan["price"], self.s.maker_fee_rate)
+            plan["fee"] = risk.taker_fee(plan["contracts"], plan["price"],
+                                         fees.rate(snap.get("series") or snap["ticker"], self.s, maker=True))
         elif self.s.mode in ("demo", "live"):
             try:
                 order = self.trade.place_limit_buy(snap["ticker"], plan["side"],
@@ -1170,9 +1175,10 @@ class Engine:
                 # Recompute fees on actual fill counts and the observed average
                 # price. If the exchange omits fill-type counts, conservatively
                 # treat the unclassified fills as taker fills.
+                series = snap.get("series") or snap["ticker"]
                 plan["fee"] = (
-                    risk.taker_fee(taker_filled, plan["price"], self.s.taker_fee_rate)
-                    + risk.taker_fee(maker_filled, plan["price"], self.s.maker_fee_rate)
+                    risk.taker_fee(taker_filled, plan["price"], fees.rate(series, self.s))
+                    + risk.taker_fee(maker_filled, plan["price"], fees.rate(series, self.s, maker=True))
                 )
             except Exception as e:
                 self._pause_for_reconciliation(

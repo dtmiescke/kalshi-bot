@@ -90,6 +90,30 @@ CREATE TABLE IF NOT EXISTS combo_prediction_audit (
 CREATE INDEX IF NOT EXISTS ix_combo_audit_grade ON combo_prediction_audit(outcome, leg_count);
 """
 
+# Raw observations only: (time column, days kept). Learned data is never here.
+# flow_trades is the biggest table and is read at most 3 hours back (sports
+# research; first fetch backfills 6 h), so it is kept as ~48 h hot data.
+RAW_RETENTION = {
+    "market_snapshots": ("ts", 14),
+    "flow_trades": ("ts", 2),
+    "signal_readings": ("ts", 30),
+    "odds_snapshots": ("ts", 30),
+    "sports_intel_items": ("observed_ts", 14),   # readers take the newest few hundred
+}
+
+
+def trim_raw(db, now, retention=None):
+    """Delete raw rows older than their retention window. Returns rows deleted
+    per table; tables that don't exist yet are skipped."""
+    existing = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    deleted = {}
+    for table, (column, days) in (retention or RAW_RETENTION).items():
+        if table not in existing:
+            continue
+        cur = db.execute(f"DELETE FROM {table} WHERE {column} < ?", (int(now) - days * 86400,))
+        deleted[table] = max(0, cur.rowcount)
+    return deleted
+
 
 class Store:
     def __init__(self, path):
@@ -242,15 +266,13 @@ class Store:
         """Trim RAW data so the memory file stays small enough to save to GitHub.
         Learned things (weights, grades, bets, lessons, model runs) are never
         trimmed; raw snapshots can be re-downloaded from Kalshi any time."""
-        keep_days = keep_days or {"market_snapshots": 14, "flow_trades": 7,
-                                  "signal_readings": 30, "odds_snapshots": 30, "ml_rows": 60}
+        retention = dict(RAW_RETENTION)
+        retention["ml_rows"] = ("ts", 60)
+        if keep_days:
+            retention.update({t: (retention.get(t, ("ts", d))[0], d) for t, d in keep_days.items()})
         now = int(time.time())
         with self.lock:
-            for table, days in keep_days.items():
-                try:
-                    self.db.execute(f"DELETE FROM {table} WHERE ts < ?", (now - days * 86400,))
-                except sqlite3.OperationalError:
-                    pass
+            trim_raw(self.db, now, retention)
             self.db.commit()
             self.db.execute("VACUUM")
 
