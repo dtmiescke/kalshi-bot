@@ -20,16 +20,21 @@ _RULE_FIELDS = (
     "rules", "contract_terms", "series_prohibitions", "prohibitions",
     "settlement_sources", "additional_prohibitions",
 )
+_MAX_DEPTH = 8
+_MAX_NODES = 64
+_MAX_TEXT_BLOCKS = 8
+_MAX_PLAIN_TEXT_CHARS = 6000
+_MAX_JSON_ENVELOPE_CHARS = 20000
 
 
 def _unwrap_market(payload):
     """Normalize native Kalshi objects and nested read-only MCP envelopes.
 
     MCP SDKs may put structuredContent, JSON text blocks, and result/data/market
-    envelopes at multiple levels. Walk only those known containers with a strict
-    depth bound. Any MCP error fails closed; plain text is retained only as
-    bounded, non-authoritative evidence and cannot satisfy the native settlement
-    source gate.
+    envelopes at multiple levels. Walk only those known containers with strict
+    depth, node, and text bounds. Any MCP error or resource-limit violation fails
+    closed. Plain text is retained only as bounded evidence and cannot satisfy
+    the native settlement-source gate.
     """
     if not isinstance(payload, dict):
         return {}
@@ -39,12 +44,20 @@ def _unwrap_market(payload):
     pending = [(payload, 0)]
     visited = set()
     plain_text = []
-    max_depth = 8
+    plain_text_chars = 0
+    text_blocks = 0
+    nodes_seen = 0
 
     while pending:
         node, depth = pending.pop(0)
-        if not isinstance(node, dict) or depth > max_depth:
+        if not isinstance(node, dict):
             continue
+        if depth > _MAX_DEPTH:
+            return {}
+        nodes_seen += 1
+        if nodes_seen > _MAX_NODES:
+            return {}
+
         identity = id(node)
         if identity in visited:
             continue
@@ -61,6 +74,18 @@ def _unwrap_market(payload):
             nested = node.get(key)
             if isinstance(nested, dict):
                 pending.append((nested, depth + 1))
+            elif isinstance(nested, str):
+                # Some adapters serialize the result/data object instead of
+                # returning structuredContent. Parse only known envelope fields;
+                # never interpret arbitrary contract prose as executable data.
+                candidate_text = nested.strip()
+                if candidate_text.startswith("{") and len(candidate_text) <= _MAX_JSON_ENVELOPE_CHARS:
+                    try:
+                        candidate = json.loads(candidate_text)
+                    except (TypeError, ValueError):
+                        candidate = None
+                    if isinstance(candidate, dict):
+                        pending.append((candidate, depth + 1))
 
         blocks = node.get("content")
         if isinstance(blocks, list):
@@ -70,17 +95,27 @@ def _unwrap_market(payload):
                 text = str(block.get("text", "")).strip()
                 if not text:
                     continue
-                try:
-                    candidate = json.loads(text)
-                except (TypeError, ValueError):
-                    candidate = None
+                text_blocks += 1
+                if text_blocks > _MAX_TEXT_BLOCKS:
+                    return {}
+                candidate = None
+                if len(text) <= _MAX_JSON_ENVELOPE_CHARS:
+                    try:
+                        candidate = json.loads(text)
+                    except (TypeError, ValueError):
+                        candidate = None
                 if isinstance(candidate, dict):
                     pending.append((candidate, depth + 1))
                 else:
-                    plain_text.append(text[:6000])
+                    remaining = _MAX_PLAIN_TEXT_CHARS - plain_text_chars
+                    if remaining <= 0:
+                        break
+                    bounded = text[:remaining]
+                    plain_text.append(bounded)
+                    plain_text_chars += len(bounded)
 
     if plain_text and not merged.get("rules_pdf_text"):
-        merged["rules_pdf_text"] = "\n".join(plain_text)[:6000]
+        merged["rules_pdf_text"] = "\\n".join(plain_text)[:_MAX_PLAIN_TEXT_CHARS]
     return merged
 
 
