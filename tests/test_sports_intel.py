@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-from bot.sports_intel import (_football_matchup_profile, _parse_espn, _parse_rss, _request,
+from bot.sports_intel import (_event_evidence_profile, _football_matchup_profile, _parse_espn, _parse_rss, _request,
                               _select_summary_candidates, ensure_schema, recent, _record_items)
 from bot.storage import Store
 
@@ -97,6 +97,26 @@ class TestSportsIntelligence(unittest.TestCase):
         self.assertFalse(profile["data_quality"]["injury_data_available"])
         self.assertFalse(profile["lineups_confirmed"])
         self.assertIn("confirmed_starting_lineups", profile["missing_information"])
+
+
+    def test_generic_event_evidence_profile_covers_nonfootball_without_inference(self):
+        event = {
+            "provider_event_id": "nba-1", "name": "Away at Home", "state": "pre",
+            "competitors": [{"team": {"displayName": "Away"}, "score": "0"},
+                            {"team": {"displayName": "Home"}, "score": "0"}],
+        }
+        profile = _event_evidence_profile(
+            "nba", "basketball", "nba", event,
+            {"teams": [{"team": {"displayName": "Home"}, "statistics": [{"name": "rebounds", "displayValue": "40"}]}],
+             "players": [{"team": {"displayName": "Home"}, "statistics": []}]},
+            {"lineups": [], "injuries": [], "seasonseries": []}, 1234)
+        self.assertEqual(profile["sport_category"], "nba")
+        self.assertEqual(len(profile["participants"]), 2)
+        self.assertTrue(profile["data_quality"]["team_statistics_available"])
+        self.assertFalse(profile["data_quality"]["injury_records_available"])
+        self.assertIn("injury_records", profile["missing_information"])
+        self.assertFalse(profile["verified"])
+        self.assertIn("unknown, not negative", profile["interpretation_guardrail"])
 
     def test_summary_selection_covers_manual_leagues_and_rotates_extra_slots(self):
         categories = [
