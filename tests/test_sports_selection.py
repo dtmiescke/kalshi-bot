@@ -13,9 +13,7 @@ class TestSportsSelection(unittest.TestCase):
         self.assertEqual(settings.sports_mode, "configured")
         self.assertEqual(settings.selected_series(), {
             "KXNFLGAME", "KXNBAGAME", "KXMLBGAME", "KXNHLGAME", "KXNCAAFGAME",
-            "KXEPLGAME", "KXLALIGAGAME", "KXBUNDESLIGAGAME", "KXSERIEAGAME",
-            "KXLIGUE1GAME", "KXUCLGAME", "KXUELGAME", "KXUECLGAME",
-            "KXEREDIVISIEGAME", "KXLIGAMXGAME", "KXBRASILEIROGAME", "KXSAUDIPLGAME"})
+        })
         self.assertFalse(settings.combos_enabled)
         self.assertTrue(settings.combo_research_enabled)
         self.assertEqual(settings.combo_min_legs, 3)

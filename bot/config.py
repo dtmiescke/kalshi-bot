@@ -121,7 +121,9 @@ class Settings:
         if self.sports_mode == "all":
             return None
         if self.sports_mode == "configured":
-            return set(SPORTS)
+            # Keep the original five leagues as the default; the wider SPORTS
+            # catalog is opt-in through manual/all mode.
+            return {"KXNFLGAME", "KXNCAAFGAME", "KXNBAGAME", "KXMLBGAME", "KXNHLGAME"}
         if self.sports_mode != "manual":
             raise ValueError("SPORTS_MODE must be configured, manual, or all")
         return {item.strip().upper() for item in self.sports_selected.split(",") if item.strip()}
