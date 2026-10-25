@@ -7,3 +7,8 @@ __pycache__/
 data/bot.sqlite
 data/bot.sqlite-*
 data/bot.sqlite.gz
+
+# Runtime outputs written by the bot and the memory scripts.
+data/live_summary.json
+data/.memory_restored
+data/.memory_base
