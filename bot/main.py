@@ -297,6 +297,18 @@ def main(argv=None):
             alerts.send("New model promoted", ml.text(m)[:1500], tags=["brain"])
         store.set_kv("last_train", time.time())
         return
+    if cmd == "price-gap":
+        # read-only: our spot vs Kalshi's CF Benchmarks settlement value
+        #   price-gap            the bot's own final-minute readings
+        #   price-gap replay 3   Coinbase minutes over the last N days of windows
+        from .grader import replay_settlement_gap, settlement_gap
+        if len(argv) > 1 and argv[1] == "replay":
+            days = float(argv[2]) if len(argv) > 2 else 3
+            report = replay_settlement_gap(store, data, days=days)
+        else:
+            report = settlement_gap(store, data, max_fetch=int(argv[1]) if len(argv) > 1 else 150)
+        print(json.dumps(report, indent=2))
+        return
     if cmd == "compact":
         store.compact()
         print("compacted")
