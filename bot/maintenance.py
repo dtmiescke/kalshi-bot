@@ -55,7 +55,7 @@ def janitor_dedupe(store, now=None):
 def janitor_retention(store, now=None):
     """Trim only raw time-series data under existing retention policy."""
     # Same retention windows as Store.compact (storage.RAW_RETENTION), but no
-    # VACUUM every six hours; the daily compact owns physical compaction.
+    # VACUUM every pass; the daily compact (or a big trim) owns physical compaction.
     now = int(time.time() if now is None else now)
     before, after = {}, {}
     with store.lock:
@@ -85,8 +85,11 @@ def janitor_retention(store, now=None):
 COMPACT_AFTER_ROWS = 100_000
 
 
-def run_janitors(store, now=None, force=False, every_hours=6):
-    """Run both janitors at a bounded cadence; never hide cleanup exceptions."""
+def run_janitors(store, now=None, force=False, every_hours=1):
+    """Run both janitors at a bounded cadence; never hide cleanup exceptions.
+
+    Hourly: cycles now run back to back (#44), so raw data piles up ~12 MB/hour
+    and a 6-hour gap let the memory file approach GitHub's size limit."""
     now = float(time.time() if now is None else now)
     last = float(store.get_kv("janitors_last_run", 0) or 0)
     if not force and now - last < max(1, float(every_hours)) * 3600:
