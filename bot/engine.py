@@ -521,6 +521,26 @@ class Engine:
                 events_by_series, scanner_health, live_watch = scan_fleet(
                     events_by_series, now=now, workers=8)
                 self.store.set_kv("sports_scanner_health", scanner_health)
+                catalog_health = self.store.get_kv("sports_catalog_health", {}) or {}
+                # A clean scanner pass is not proof of complete catalog coverage.
+                self.store.set_kv("sports_coverage_audit", {
+                    "ts": now,
+                    "scanner_ok": bool(scanner_health.get("ok")),
+                    "events_unique": scanner_health.get("events_unique", 0),
+                    "events_with_start_time": scanner_health.get("events_with_start_time", 0),
+                    "events_missing_start_time": scanner_health.get("events_missing_start_time", 0),
+                    "events_without_markets": scanner_health.get("events_without_markets", 0),
+                    "active_markets": scanner_health.get("active_markets", 0),
+                    "active_markets_with_quotes": scanner_health.get("active_markets_with_quotes", 0),
+                    "active_markets_missing_quotes": scanner_health.get("active_markets_missing_quotes", 0),
+                    "series_coverage": scanner_health.get("series_coverage", {}),
+                    "catalog_coverage_warning": bool(catalog_health.get("coverage_warning")),
+                    "catalog_events_seen": catalog_health.get("open_events_seen"),
+                    "catalog_series_discovered": catalog_health.get("series_discovered"),
+                    "coverage_status": ("catalog_truncated_or_at_limit" if catalog_health.get("coverage_warning")
+                                        else "observed_catalog; upstream completeness not guaranteed"),
+                    "execution_enabled": False,
+                })
                 self.store.set_kv("sports_live_watch", live_watch[:500])
             except Exception as e:
                 log.exception("sports scanner fleet failed: %s", e)
