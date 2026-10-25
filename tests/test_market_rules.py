@@ -60,5 +60,12 @@ class TestMarketRules(unittest.TestCase):
             self.assertEqual(result["status"], "unavailable")
 
 
+    def test_pdf_text_without_native_settlement_source_still_requires_review(self):
+        result = summarize_rules({"rules_pdf_text": "Official contract text says the event settles after completion."})
+        self.assertTrue(result["available"])
+        self.assertEqual(result["status"], "review_required")
+        self.assertTrue(result["missing"])
+
+
 if __name__ == "__main__":
     unittest.main()
