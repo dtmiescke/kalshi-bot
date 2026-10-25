@@ -295,3 +295,26 @@ class KalshiClient:
             ("yes_price" if side == "yes" else "no_price"): cents,
         }
         return self._req("POST", "/portfolio/orders", body=body).get("order", {})
+
+    # Official Kalshi live evidence; read-only and advisory, never execution authority.
+    @staticmethod
+    def _safe_identifier(value):
+        import re
+        if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,120}", value):
+            raise ValueError("invalid Kalshi identifier")
+        return value
+
+    def sports_filters(self):
+        return self._req("GET", "/search/filters_by_sport")
+
+    def milestone_live_data(self, milestone_id):
+        ident = self._safe_identifier(milestone_id)
+        return self._req("GET", f"/live_data/milestone/{ident}")
+
+    def milestone_game_stats(self, milestone_id):
+        ident = self._safe_identifier(milestone_id)
+        return self._req("GET", f"/live_data/milestone/{ident}/game_stats")
+
+    def event_live_data(self, event_ticker):
+        ident = self._safe_identifier(event_ticker)
+        return self._req("GET", f"/live_data/events/{ident}")
