@@ -3,6 +3,7 @@
 Uses the existing KalshiClient exclusively. No additional API client, credentials,
 order methods, network downloads, or execution path are introduced.
 """
+import re
 from urllib.parse import urlparse
 
 
@@ -23,12 +24,14 @@ def contract_research(client, ticker):
     from a similarly named market. API errors propagate to the caller (fail closed).
     """
     ticker = str(ticker or "").strip()
-    if not ticker or any(ch in ticker for ch in "/?#\\"):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", ticker):
         raise ValueError("invalid Kalshi market ticker")
     market = client.market(ticker)
     if not isinstance(market, dict) or not market or market.get("ticker") != ticker:
         raise ValueError("market missing or ticker mismatch")
     series_ticker = str(market.get("series_ticker") or "").strip()
+    if series_ticker and not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", series_ticker):
+        raise ValueError("invalid Kalshi series ticker")
     series = client.series(series_ticker) if series_ticker else {}
     if not isinstance(series, dict):
         raise ValueError("invalid series response")
