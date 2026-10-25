@@ -11,7 +11,7 @@ import re
 from .market_rules import summarize_rules
 
 _TICKER = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
-_ALLOWED = frozenset({"market", "series", "orderbook", "rules"})
+_ALLOWED = frozenset({"market", "series", "orderbook", "rules", "trades"})
 
 
 def research_tool(client, tool, ticker):
@@ -31,6 +31,10 @@ def research_tool(client, tool, ticker):
         return client.series(ticker)
     if tool == "orderbook":
         return client.orderbook(ticker)
+    if tool == "trades":
+        # Reuse the existing paced Kalshi client; bound one research lookup.
+        # Public trade prints are observations, never order instructions.
+        return client.trades(ticker, limit=100)
     market = client.market(ticker)
     if not isinstance(market, dict):
         return summarize_rules({})
