@@ -76,7 +76,7 @@ def summarize_rules(market, series=None):
     missing = []
     if not terms.get("rules_primary") and not terms.get("settlement_source") \
             and not terms.get("settlement_sources") \
-            and not terms.get("rules_text") and not terms.get("rules_pdf_text") \
+            and not terms.get("rules_text") \
             and not terms.get("contract_terms_text") \
             and not terms.get("rules") and not terms.get("contract_terms"):
         missing.append("primary settlement rules/source not present in supplied market/series data")
