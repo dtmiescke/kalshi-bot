@@ -63,11 +63,11 @@ def build(store):
         for k, v in sorted(brain.get_weights(store, dom).items(), key=lambda x: -x[1]):
             lines.append(f"{k:24s} {v:.3f}")
 
-    lines.append("\n-- Signals vs market (Brier score, lower = better) --")
+    lines.append("\n-- Which signals predict outcomes best? (lower prediction error is better) --")
     rows = store.q("""SELECT signal, COUNT(*) n, AVG(brier) b FROM signal_grades
                       GROUP BY signal ORDER BY b""")
     for r in rows:
-        lines.append(f"{r['signal']:24s} n={r['n']:5d}  brier={r['b']:.4f}")
+        lines.append(f"{r['signal']:24s} n={r['n']:5d}  prediction error (Brier)={r['b']:.4f}")
     if not rows:
         lines.append("(no settled markets graded yet)")
 
@@ -83,10 +83,11 @@ def build(store):
             lines.append(f"{'PROMOTED' if runs[0]['promoted'] else 'not promoted'} | test log loss "
                          f"model {m['test_logloss_model']} vs Kalshi {m['test_logloss_kalshi']}")
             lines.append("Top tools: " + ", ".join(f[0] for f in m.get("top_features", [])[:8]))
+            lines.append("Log loss = how badly probability estimates miss; lower is better. Promotion means it passed the bot’s unseen-data checks, not that future profit is guaranteed.")
 
     cal = brain.calibration_table(store)
     if cal:
-        lines.append("\n-- Calibration (said vs happened) --")
+        lines.append("\n-- Probability accuracy (predicted chance vs what happened) --")
         for b, v in cal.items():
             lines.append(f"~{_pct(v['predicted'])}: n={v['n']:4d} actual {_pct(v['actual'])}")
     # Short-horizon scorecard: canonical, settled decision forecasts only.
@@ -107,7 +108,7 @@ def build(store):
                 p_model = float(row["model_prob"])
                 p_market = float(row["market_price"])
                 grouped[domain].append(((p_model - y) ** 2, (p_market - y) ** 2))
-        lines.append(f"\\n-- Forecast scorecard: {label} (settled audit forecasts) --")
+        lines.append(f"\\n-- Forecast scorecard: {label} (settled predictions only) --")
         if not grouped:
             lines.append("No eligible settled audit forecasts in this window.")
         for domain, pairs in sorted(grouped.items()):
@@ -117,6 +118,12 @@ def build(store):
             verdict = "model better" if delta > 0 else "market better" if delta < 0 else "tied"
             lines.append(f"{domain}: n={len(pairs)}, model Brier={model_brier:.4f}, "
                          f"market-price Brier={market_brier:.4f}, {verdict} by {abs(delta):.4f}")
-        lines.append("Small samples are descriptive only; this scorecard is not a guarantee of profit.")
+        lines.append("Brier score = average squared miss between predicted chance and result: 0 is perfect, lower is better. Small samples are descriptive only; this scorecard is not a guarantee of profit.")
 
+    lines.append("\n-- Quick guide --")
+    lines.append("P&L = dollars won/lost after fees. ROI = profit/loss as a share of money committed.")
+    lines.append("CLV (closing-line value) = whether your price was better than the final market price; positive is generally a good sign, not proof of profit.")
+    lines.append("Prediction error / Brier = how far predicted chances were from results; 0 is perfect. Compare similar markets and use plenty of settled predictions.")
+    lines.append("Signal weights = how strongly the bot currently uses each input; they are not a grade by themselves.")
+    lines.append("Calibration = when the bot says 60%, does it happen about 60% of the time? Small samples can mislead.")
     return "\n".join(lines)
