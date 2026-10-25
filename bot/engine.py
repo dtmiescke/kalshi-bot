@@ -315,7 +315,12 @@ class Engine:
                             if k in ("open", "now", "steam_logit", "team", "opponent",
                                      "big_imbalance", "kalshi_leads_books")}
                    for r in readings if r.name != "kalshi_market"}
-        news = self.news_reading(mkt, ev_match, book_team, opp_team, sport, mid, hist, now,
+        # In Kalshi-only mode, carry only explicit event context inferred from
+        # the active event's two distinct team labels and its own scheduled time.
+        # Never manufacture an opponent or treat contract close time as kickoff.
+        research_team = book_team or mkt.get("team")
+        research_opp = opp_team or mkt.get("opponent")
+        news = self.news_reading(mkt, ev_match, research_team, research_opp, sport, mid, hist, now,
                                  context)
         if news:
             readings.append(news)
@@ -331,7 +336,10 @@ class Engine:
 
     def news_reading(self, mkt, ev_match, team, opp, sport, mid, hist, now, context=None):
         key = f"news_reading_{mkt['ticker']}"
-        start = iso_to_ts(ev_match.get("commence_time")) if ev_match else None
+        # A sportsbook event is optional. For unmatched Kalshi markets, use only
+        # the event start time explicitly carried from Kalshi's event payload.
+        start = (iso_to_ts(ev_match.get("commence_time")) if ev_match else
+                 iso_to_ts(mkt.get("start_time") or mkt.get("commence_time")))
         if not (self.llm and team and start and 0 < start - now < 24 * 3600):
             return None
 
@@ -682,10 +690,18 @@ class Engine:
                 for m in markets:
                     summary["markets"] += 1
                     snap = self.snapshot(ev, m, now)
+                    # Preserve Kalshi's actual scheduled event time for the
+                    # independent research path; do not substitute close/expiry.
+                    snap["start_time"] = (ev.get("start_time") or ev.get("commence_time")
+                                          or ev.get("scheduled_start_time"))
                     self.pull_flow(m["ticker"], now)
                     team = snap["team"]
                     book_team = mapping.get(team) if mapping else None
                     opp = next((v for k, v in (mapping or {}).items() if k != team), None)
+                    # A safe fallback is possible only when the event exposes
+                    # exactly two distinct team labels and this market labels one.
+                    if not book_team and len(teams) == 2 and team in teams:
+                        snap["opponent"] = next((label for label in teams if label != team), None)
 
                     if ev_match:
                         start = iso_to_ts(ev_match.get("commence_time"))
