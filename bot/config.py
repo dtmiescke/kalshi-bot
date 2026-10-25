@@ -124,7 +124,10 @@ class Settings:
     odds_max_age_minutes: float = field(
         default_factory=lambda: _env_float("ODDS_MAX_AGE_MINUTES", 60))
 
-    # Optional paper-only aggression. No effect on demo/live execution.\n    aggression_level: str = field(default_factory=lambda: _env("AGGRESSION_LEVEL", "aggressive").strip().lower())\n\n    # --- decision rules -----------------------------------------------------
+    # Optional paper-only aggression. No effect on demo/live execution.
+    aggression_level: str = field(default_factory=lambda: _env("AGGRESSION_LEVEL", "aggressive").strip().lower())
+
+    # --- decision rules -----------------------------------------------------
     min_edge: float = field(default_factory=lambda: _env_pct("MIN_EDGE", 3))
     min_confidence: float = field(default_factory=lambda: _env_pct("MIN_CONFIDENCE", 55))
     min_price: float = 0.05   # never buy dust contracts
@@ -271,7 +274,9 @@ class Settings:
             raise ValueError("COMBO_MAX_LEGS must be between COMBO_MIN_LEGS and 8")
         if not 0 < self.combo_min_edge < 1:
             raise ValueError("COMBO_MIN_EDGE must be between 0 and 1")
-        if self.aggression_level not in ("off", "conservative", "balanced", "aggressive", "adaptive"):\n            raise ValueError("AGGRESSION_LEVEL must be off/conservative/balanced/aggressive/adaptive")\n        if self.mode not in ("paper", "demo", "live"):
+        if self.aggression_level not in ("off", "conservative", "balanced", "aggressive", "adaptive"):
+            raise ValueError("AGGRESSION_LEVEL must be off/conservative/balanced/aggressive/adaptive")
+        if self.mode not in ("paper", "demo", "live"):
             raise ValueError(f"BOT_MODE must be paper/demo/live, got {self.mode!r}")
         if self.mode == "live" and not self.live_confirmed:
             raise RuntimeError(
