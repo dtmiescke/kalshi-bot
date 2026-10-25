@@ -236,7 +236,8 @@ td div.mut{{white-space:normal}}.mut{{color:var(--mut);font-size:12px}}a{{color:
 SUMMARY_KV = ("janitors_last_result", "janitors_last_run", "nerd_last_health",
               "nerd_last_healthy_ts", "health_paused_areas", "grading_lookup_health",
               "kalshi_health", "live_discovery_health", "sports_intel_health",
-              "sports_scanner_health", "settle_gap_report", "last_run_ts", "last_train_status")
+              "sports_scanner_health", "settle_gap_report", "last_run_ts", "last_train_status",
+              "members_last_ruling")
 
 
 def summary(store):
@@ -271,11 +272,17 @@ def summary(store):
         model = {"ts": run[0]["ts"] * 1000, "promoted": bool(run[0].get("promoted")),
                  "status": mt.get("status"), "conf": mt.get("bootstrap_confidence"),
                  "windows": mt.get("test_windows") or mt.get("n_test")}
+    try:
+        from .config import Settings
+        from .council import standings
+        members = standings(store, Settings())
+    except Exception:
+        members = {}
     kv = {k: store.get_kv(k) for k in SUMMARY_KV}
     kv.update({k: store.get_kv(k) for k in (f"tail_model_{c}" for c in ("BTC", "ETH", "SOL"))})
     return {
         "version": 1, "ts": int(time.time()),
-        "council": council[:50], "model": model,
+        "council": council[:50], "members": members, "model": model,
         "lessons": q("SELECT ts, text FROM lessons ORDER BY ts DESC LIMIT 5"),
         "audit": q("""SELECT decision, COUNT(brier) AS n, AVG(brier) AS brier,
                       AVG(hypothetical_pnl) AS pnl FROM decision_audit

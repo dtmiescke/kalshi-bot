@@ -88,6 +88,16 @@ CREATE TABLE IF NOT EXISTS combo_prediction_audit (
     hypothetical_pnl REAL, settled_ts INTEGER
 );
 CREATE INDEX IF NOT EXISTS ix_combo_audit_grade ON combo_prediction_audit(outcome, leg_count);
+
+-- Council member votes on math-approved candidates: one row per (ticker, member),
+-- latest pre-settlement vote wins so rescans can't inflate a member's record.
+CREATE TABLE IF NOT EXISTS council_votes (
+    ticker TEXT NOT NULL, member TEXT NOT NULL, ts INTEGER NOT NULL, series TEXT,
+    side TEXT, price REAL, vote TEXT, confidence REAL, reason TEXT,
+    outcome INTEGER, correct INTEGER, brier REAL, market_brier REAL, settled_ts INTEGER,
+    PRIMARY KEY (ticker, member)
+);
+CREATE INDEX IF NOT EXISTS ix_council_votes_member ON council_votes(member, outcome, settled_ts);
 """
 
 # Raw observations only: (time column, days kept). Learned data is never here.
@@ -190,6 +200,42 @@ class Store:
                 self.db.execute(
                     "UPDATE decision_audit SET outcome=?, brier=?, hypothetical_pnl=?, settled_ts=? WHERE id=?",
                     (y, brier, pnl, settled_ts, row["id"]))
+            self.db.commit()
+            return len(rows)
+
+    def record_council_votes(self, ticker, series, side, price, votes, ts=None):
+        """Upsert one vote per member; a settled vote is never overwritten."""
+        ts = int(ts or time.time())
+        with self.lock:
+            for v in votes:
+                self.db.execute("""INSERT INTO council_votes
+                    (ticker,member,ts,series,side,price,vote,confidence,reason)
+                    VALUES(?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(ticker, member) DO UPDATE SET ts=excluded.ts,
+                      series=excluded.series, side=excluded.side, price=excluded.price,
+                      vote=excluded.vote, confidence=excluded.confidence, reason=excluded.reason
+                    WHERE council_votes.outcome IS NULL""",
+                    (ticker, v["member"], ts, series, side, price, v["vote"],
+                     v["confidence"], v["reason"]))
+            self.db.commit()
+
+    def grade_council_votes(self, ticker, outcome, settled_ts=None):
+        """Score each member's vote: right/wrong, Brier on its confidence, and the
+        market's Brier at the same price for comparison. outcome = YES result."""
+        if type(outcome) is not int or outcome not in (0, 1):
+            raise ValueError("council vote outcome must be integer 0 or 1")
+        settled_ts = int(settled_ts or time.time())
+        with self.lock:
+            rows = self.db.execute("SELECT member, side, price, vote, confidence FROM council_votes "
+                                   "WHERE ticker=? AND outcome IS NULL", (ticker,)).fetchall()
+            for r in rows:
+                won = int((r["side"] == "yes") == (outcome == 1))
+                correct = int((r["vote"] == "back") == bool(won))
+                brier = (float(r["confidence"]) - won) ** 2 if r["confidence"] is not None else None
+                mkt = (float(r["price"]) - won) ** 2 if r["price"] is not None else None
+                self.db.execute("UPDATE council_votes SET outcome=?, correct=?, brier=?, market_brier=?, "
+                                "settled_ts=? WHERE ticker=? AND member=?",
+                                (outcome, correct, brier, mkt, settled_ts, ticker, r["member"]))
             self.db.commit()
             return len(rows)
 

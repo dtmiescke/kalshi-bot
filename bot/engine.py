@@ -8,7 +8,7 @@ import time
 import uuid
 from datetime import datetime
 
-from . import alerts, brain, fees, guard, risk
+from . import alerts, brain, council, fees, guard, risk
 from .llm import LLM
 from .config import CRYPTO_15M, SPORTS
 from .kalshi_client import KalshiClient, num, price
@@ -1105,6 +1105,14 @@ class Engine:
         plan["execution_max_per_bet"] = float(
             max_per_bet if max_per_bet is not None else self.s.max_per_bet
         )
+        # The council only sits on math-approved candidates. Advisory members change
+        # nothing; only members who EARNED veto power can turn this into a pass.
+        verdict = council.convene(self.store, self.s, snap, plan, readings, prob, conf)
+        if verdict.get("binding") and verdict.get("decision") == "pass":
+            self._record_decision(snap, readings, "rejected", verdict["reason"], prob, conf,
+                                  side=plan["side"], market_price=plan["price"], edge=plan["edge"])
+            self._skip(summary, "council veto")
+            return None
         self._record_decision(snap, readings, "candidate", "passed deterministic risk checks",
                               prob, conf, side=plan["side"], market_price=plan["price"], edge=plan["edge"])
         return snap, plan, readings, prob, conf

@@ -162,8 +162,8 @@ successfully. Following the plan, the bot-data branches are left alone.
 | Five members + Quant, advisory first | Partial | `bot/council.py` (crypto roles today) and `bot/sports_counsel.py` (sports), unified on one member roster in `council.py`. Advisory = verdict recorded, `risk.decide` result unchanged (test) |
 | Triage then debate, daily AI cap, rule-based fallback reasons | Partial | `council.review` + `llm.LLM` budget |
 | Votes, reasons and ruling saved with the bet/pass | Partial | `decision_audit` (`signals_json`) and bets `signals.council` |
-| Member grading (right/wrong + Brier) | New | `grader.py` after settlement, in a new `council_votes` table in `storage.py` |
-| Seating, doghouse, earned power (Advisory → Veto → Full) | New | Derived from member grades in `council.py`, with thresholds in `config.py` |
+| Member grading (right/wrong + Brier) | Done (6a) | `grader.grade_council_votes` after settlement, `council_votes` table in `storage.py` |
+| Seating, doghouse, earned power (Advisory → Veto → Full) | Done (6a) | `council.standings` / `council.ruling`, thresholds `COUNCIL_*` in `config.py`; rule-based member votes in `council.member_votes`, convened from `Engine.evaluate` and the live runner |
 | Memory callbacks from the casebook | New | Phase 1 casebook → `don_theo` |
 | AI-written lines with fallback, never blank | Partial | `briefing.py` / `llm.py` → `don_theo` fallback |
 | Sunday Sit-Down | New | `briefing.py` weekly, in Don Theo's voice, bad news first |
