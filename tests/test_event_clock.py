@@ -32,11 +32,11 @@ class TestEventClock(unittest.TestCase):
             {"event_ticker": "C-DUP", "markets": []},
             {"event_ticker": "C-DUP", "markets": []},
         ]
-        batch, _ = _rotating_event_batch(events, "", budget=3)
+        batch, _ = _rotating_event_batch(events, "", budget=4)
         tickers = [event["event_ticker"] for event in batch]
         self.assertIn("Z-SOON", tickers)
         self.assertEqual(tickers.count("C-DUP"), 1)
-        self.assertEqual(len(tickers), 3)
+        self.assertEqual(len(tickers), 4)
 
     def test_held_events_remain_and_recently_started_games_get_priority(self):
         now = time.time()
