@@ -65,6 +65,7 @@ class LLM:
         self.calls_this_run = 0
         self._post = post or requests.post
         self.dead = set()       # models that failed this run
+        self.web_searches_this_run = 0
         self._lock = threading.Lock()
 
     def _day_key(self):
@@ -101,6 +102,123 @@ class LLM:
             except Exception:
                 self.dead.add(m)
         return None, None
+
+    def search_web(self, prompt, model=None, max_results=5, max_uses=2, allow_fetch=False):
+        """Run bounded OpenRouter server-tool research; return (text, model, source URLs).
+
+        Web tools are OpenRouter-specific, so this method deliberately uses the
+        OpenRouter endpoint rather than sending incompatible tools to OmniRoute.
+        The ordinary model path remains OmniRoute-first with OpenRouter fallback.
+        """
+        endpoint = self.endpoints.get("openrouter")
+        if not endpoint or not endpoint[1] or self.budget_left() <= 0:
+            return None, None, []
+        run_limit = max(0, int(os.environ.get("OPENROUTER_WEB_SEARCH_MAX_PER_RUN", 2)))
+        daily_limit = max(0, int(os.environ.get("OPENROUTER_WEB_SEARCH_DAILY_LIMIT", 6)))
+        day_key = "openrouter_web_searches_" + time.strftime("%Y%m%d", time.gmtime())
+        if run_limit <= 0 or daily_limit - int(self.store.get_kv(day_key, 0) or 0) <= 0:
+            return None, None, []
+
+        preferred = model or os.environ.get("OPENROUTER_WEB_SEARCH_MODEL", "").strip()
+        order = ([preferred] if preferred else []) + [
+            candidate for candidate in self.models
+            if "|" not in candidate and candidate != preferred
+        ]
+        url, key = endpoint
+        for candidate in order:
+            if not candidate or "|" in candidate or candidate in self.dead:
+                continue
+            with self._lock:
+                if self.budget_left() <= 0 or self.web_searches_this_run >= run_limit:
+                    break
+                used_today = int(self.store.get_kv(day_key, 0) or 0)
+                if used_today >= daily_limit:
+                    break
+                self.calls_this_run += 1
+                self.web_searches_this_run += 1
+                self.store.set_kv(self._day_key(), int(self.store.get_kv(self._day_key(), 0) or 0) + 1)
+                self.store.set_kv(day_key, used_today + 1)
+
+            tools = [{
+                "type": "openrouter:web_search",
+                "parameters": {
+                    "max_results": max(1, min(10, int(max_results))),
+                    "max_uses": max(1, min(3, int(max_uses))),
+                    "search_context_size": "medium",
+                },
+            }]
+            if allow_fetch:
+                tools.append({
+                    "type": "openrouter:web_fetch",
+                    "parameters": {
+                        "engine": "openrouter",
+                        "max_content_tokens": 6000,
+                        "allowed_domains": [
+                            "github.com", "raw.githubusercontent.com", "docs.github.com",
+                            "openrouter.ai", "arxiv.org", "paperswithcode.com",
+                        ],
+                    },
+                })
+            try:
+                response = self._post(url, timeout=75, headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://github.com/dtmiescke/kalshi-bot",
+                    "X-Title": "Kalshi Intelligence Bot",
+                }, json={
+                    "model": candidate,
+                    "temperature": 0.1,
+                    "max_tokens": 1200,
+                    "max_tool_calls": 5 if allow_fetch else 4,
+                    "tools": tools,
+                    "messages": [{
+                        "role": "user",
+                        "content": str(prompt)[:12000],
+                    }],
+                })
+                response.raise_for_status()
+                payload = response.json()
+                message = payload["choices"][0]["message"]
+                raw_content = message.get("content", "")
+                if isinstance(raw_content, list):
+                    text = "\n".join(
+                        str(part.get("text", "")) for part in raw_content
+                        if isinstance(part, dict)
+                    )
+                else:
+                    text = str(raw_content or "")
+                import re
+                urls = re.findall(r"https?://[^\s)\]}>]+", text)
+                citations = message.get("citations") or message.get("annotations") or []
+                for citation in citations if isinstance(citations, list) else []:
+                    if isinstance(citation, str):
+                        urls.append(citation)
+                    elif isinstance(citation, dict):
+                        url_value = citation.get("url") or citation.get("uri")
+                        if isinstance(url_value, str):
+                            urls.append(url_value)
+                        nested = citation.get("url_citation")
+                        if isinstance(nested, dict) and isinstance(nested.get("url"), str):
+                            urls.append(nested["url"])
+                sources = []
+                seen = set()
+                for source in urls:
+                    source = source.rstrip(".,;")
+                    if source.startswith(("https://", "http://")) and source not in seen:
+                        seen.add(source)
+                        sources.append(source[:1000])
+                    if len(sources) >= 10:
+                        break
+                if text.strip():
+                    return text.strip()[:12000], candidate, sources
+                self.dead.add(candidate)
+            except requests.ConnectionError:
+                self.dead.add("openrouter")
+                break
+            except Exception:
+                # Tool support differs by model; try the next configured model.
+                self.dead.add(candidate)
+        return None, None, []
 
     def ask_json(self, prompt, model=None):
         text, m = self.ask(prompt, model=model)

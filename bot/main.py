@@ -220,6 +220,17 @@ def run_scheduled(s, store, data):
             print("\n=== AI BRIEFING ===\n" + text)
             if os.environ.get("BRIEFING_ALERTS", "no") == "yes":
                 alerts.send("AI briefing", text[:1500])
+    # Weekly public-source engineering scout. Findings are stored as candidates;
+    # it cannot edit source, run downloaded code, alter weights, or authorize bets.
+    if s.openrouter_key and os.environ.get("OPENROUTER_TECH_SCOUT_ENABLED", "yes").lower() in ("yes", "true", "1"):
+        try:
+            from . import research_brain
+            scout = research_brain.run_tech_scout(
+                store, LLM(s.openrouter_key, store, max_per_run=1))
+            if scout.get("source_count"):
+                print("OpenRouter tech scout:", json.dumps(scout, default=str))
+        except Exception as exc:
+            logging.warning("OpenRouter tech scout unavailable: %s", exc)
     # connection health for the dashboard: how did Kalshi answer this run?
     from .kalshi_client import request_log
     log_ = request_log()
