@@ -144,6 +144,23 @@ def summarize_rules(market, series=None):
         elif value and key in terms and value not in terms[key]:
             terms[key] = (terms[key] + " | series: " + value)[:3000]
 
+    # An MCP adapter or stale series response must not silently contradict
+    # the native market's settlement source. Preserve both as evidence and
+    # require review rather than selecting whichever field was traversed last.
+    market_source = str(market.get("settlement_source") or "").strip()
+    series_sources = series.get("settlement_sources") or series.get("settlement_source")
+    if isinstance(series_sources, (list, dict, tuple)):
+        series_sources = str(series_sources)
+    series_source = str(series_sources or "").strip()
+    source_conflict = bool(
+        market_source and series_source
+        and market_source.casefold() != series_source.casefold()
+        and market_source.casefold() not in series_source.casefold()
+        and series_source.casefold() not in market_source.casefold()
+    )
+    if source_conflict:
+        terms["series_settlement_source"] = series_source[:3000]
+
     combined = " ".join(terms.values())
     lower = combined.lower()
     missing = []
@@ -164,6 +181,8 @@ def summarize_rules(market, series=None):
     for name, pattern in patterns:
         if re.search(pattern, lower):
             flags.append(name)
+    if source_conflict:
+        flags.append("settlement_source_conflict")
     if (terms.get("additional_prohibitions") or terms.get("series_prohibitions")
             or terms.get("prohibitions")) and "series_prohibition" not in flags:
         flags.append("series_prohibition")
@@ -178,7 +197,7 @@ def summarize_rules(market, series=None):
 
     if not terms:
         status = "unavailable"
-    elif missing or "early_close" in flags or "series_prohibition" in flags:
+    elif missing or "early_close" in flags or "series_prohibition" in flags or source_conflict:
         status = "review_required"
     else:
         status = "terms_found"
