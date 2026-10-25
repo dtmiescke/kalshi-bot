@@ -58,6 +58,9 @@ jobs:
           OMNIROUTE_URL: ${{ secrets.OMNIROUTE_URL }}
           OMNIROUTE_API_KEY: ${{ secrets.OMNIROUTE_API_KEY }}
           OMNIROUTE_MODELS: ${{ vars.OMNIROUTE_MODELS }}
+          LITELLM_URL: ${{ vars.LITELLM_URL }}
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+          LITELLM_MODELS: ${{ vars.LITELLM_MODELS }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           SPORTS_EVERY_HOURS: ${{ vars.SPORTS_EVERY_HOURS || '5.5' }}
           SPORTS_SCAN_EVENT_BUDGET: ${{ vars.SPORTS_SCAN_EVENT_BUDGET || '150' }}
