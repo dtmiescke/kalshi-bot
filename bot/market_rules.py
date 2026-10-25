@@ -15,7 +15,9 @@ _RULE_FIELDS = (
     # Read-only MCP/PDF extractors sometimes expose a consolidated text field
     # instead of Kalshi's native rules_primary/rules_secondary fields.
     "rules_text", "rules_pdf_text", "contract_terms_text",
-    "series_prohibitions", "settlement_sources", "additional_prohibitions",
+    # Conservative aliases used by third-party read-only MCP responses.
+    "rules", "contract_terms", "series_prohibitions", "prohibitions",
+    "settlement_sources", "additional_prohibitions",
 )
 
 
