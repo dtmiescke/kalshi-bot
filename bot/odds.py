@@ -133,15 +133,25 @@ def _ts(value):
 
 
 def next_game_ts(events, now):
-    """Soonest game time among open markets (Kalshi puts it on each market as
-    occurrence_datetime; expected_expiration_time is the fallback). Games that
-    started over 3 hours ago are ignored."""
+    """Soonest known event time among open markets.
+
+    Kalshi payloads vary by endpoint: some expose event start/commence time,
+    while others expose occurrence/expiration/close time only on the market.
+    Use these known timestamp fields in priority order so the odds budget
+    scheduler does not mistake a populated upcoming slate for no scheduled game.
+    Games whose only known time is more than 3 hours in the past are ignored.
+    """
     best = None
     for ev in events or []:
+        event_time = (_ts(ev.get("start_time")) or _ts(ev.get("commence_time"))
+                      or _ts(ev.get("scheduled_start_time")))
+        if event_time and event_time >= now - 3 * 3600 and (best is None or event_time < best):
+            best = event_time
         for m in ev.get("markets") or []:
             if m.get("status") not in ("active", "open", None):
                 continue
-            t = _ts(m.get("occurrence_datetime")) or _ts(m.get("expected_expiration_time"))
+            t = (_ts(m.get("occurrence_datetime")) or _ts(m.get("expected_expiration_time"))
+                 or _ts(m.get("close_time")))
             if t and t >= now - 3 * 3600 and (best is None or t < best):
                 best = t
     return best
@@ -155,14 +165,15 @@ def _month_days_left(now):
 
 
 def refresh_plan(store, sport, now, next_game, base_minutes, regions="us",
-                 monthly_credits=500):
+                 monthly_credits=500, cache_empty=False):
     """(due, reason) for re-pulling one sport's odds within the free budget."""
     cost = max(1, len([r for r in str(regions).split(",") if r.strip()]))
     if next_game is not None and next_game - now > HORIZON_HOURS * 3600:
         return False, "no game soon"
     near = next_game is not None and next_game - now <= NEAR_GAME_HOURS * 3600
     interval = 60 if near else base_minutes
-    if now - float(store.get_kv(f"odds_last_{sport}", 0) or 0) < interval * 60:
+    if (now - float(store.get_kv(f"odds_last_{sport}", 0) or 0) < interval * 60
+            and not cache_empty):
         return False, "fresh"
     quota = store.get_kv("odds_quota") or {}
     remaining = quota.get("remaining")
