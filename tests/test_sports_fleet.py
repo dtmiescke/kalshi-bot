@@ -36,9 +36,28 @@ class TestSportsFleet(unittest.TestCase):
         self.assertEqual(len({scanner["role"] for scanner in summary["scanners"]}), 8)
         roles = {scanner["role"]: scanner for scanner in summary["scanners"]}
         self.assertEqual(roles["quote_quality"]["priced_markets"], 24)
+        self.assertEqual(summary["active_markets"], 24)
+        self.assertEqual(summary["active_markets_with_quotes"], 24)
+        self.assertEqual(summary["events_with_start_time"], 0)
         self.assertEqual(roles["schedule_and_status"]["missing_start_times"], 24)
         self.assertTrue(all(row["execution_eligible"] is False for row in live))
         self.assertEqual(len({row["ticker"] for row in live}), len(live))
+
+    def test_kalshi_dollar_quotes_and_occurrence_time_are_counted(self):
+        _, summary, _ = scan_fleet({"KXNBAGAME": [{
+            "event_ticker": "EVT-CLOCK",
+            "markets": [{
+                "ticker": "MKT-DOLLARS", "status": "active",
+                "yes_bid_dollars": "0.41", "yes_ask_dollars": "0.44",
+                "occurrence_datetime": "2026-10-25T13:00:00Z",
+            }],
+        }]}, now=123, workers=8)
+        self.assertEqual(summary["events_with_start_time"], 1)
+        self.assertEqual(summary["events_missing_start_time"], 0)
+        self.assertEqual(summary["active_markets_with_quotes"], 1)
+        self.assertEqual(summary["active_markets_missing_quotes"], 0)
+        roles = {scanner["role"]: scanner for scanner in summary["scanners"]}
+        self.assertEqual(roles["quote_quality"]["priced_markets"], 1)
 
     def test_malformed_records_are_skipped_without_crashing_other_scanners(self):
         normalized = normalize_events({"KXNFLGAME": [
