@@ -31,7 +31,9 @@ _EXECUTION_LOCK = threading.RLock()
 
 
 def _rotating_event_batch(events, cursor="", budget=150, held=()):
-    """Select a deterministic rotating batch while always retaining held events."""
+    """Prioritize imminent games while preserving rotation and held-event coverage."""
+    from .event_clock import event_start_ts
+
     unique = {}
     for event in events:
         ticker = str(event.get("event_ticker") or event.get("ticker") or "")
@@ -44,11 +46,30 @@ def _rotating_event_batch(events, cursor="", budget=150, held=()):
     limit = max(0, int(budget))
     if not eligible or limit == 0:
         return [event for _, event in held_rows], str(cursor or "")
+
+    # At most one third of each batch is dedicated to games starting within
+    # 90 minutes or already started within 3 hours; the rest keeps rotating.
+    now = time.time()
+    priority = []
+    for ticker, event in eligible:
+        start = event_start_ts(event)
+        if start is None:
+            continue
+        delta = start - now
+        if -3 * 3600 <= delta <= 90 * 60:
+            priority.append((0 if delta >= 0 else 1, abs(delta), ticker, event))
+    priority.sort(key=lambda item: (item[0], item[1], item[2]))
+    urgent_count = min(len(priority), max(1, limit // 3)) if priority else 0
+    urgent = [(ticker, event) for _, _, ticker, event in priority[:urgent_count]]
+    urgent_tickers = {ticker for ticker, _ in urgent}
+    rotating = [(ticker, event) for ticker, event in eligible if ticker not in urgent_tickers]
+
     cursor = str(cursor or "")
-    after = [(ticker, event) for ticker, event in eligible if ticker > cursor]
-    before = [(ticker, event) for ticker, event in eligible if ticker <= cursor]
-    selected = (after + before)[:limit]
-    next_cursor = selected[-1][0] if selected else cursor
+    after = [(ticker, event) for ticker, event in rotating if ticker > cursor]
+    before = [(ticker, event) for ticker, event in rotating if ticker <= cursor]
+    rotating_selected = (after + before)[:max(0, limit - len(urgent))]
+    selected = urgent + rotating_selected
+    next_cursor = rotating_selected[-1][0] if rotating_selected else cursor
     return [event for _, event in held_rows + selected], next_cursor
 
 
