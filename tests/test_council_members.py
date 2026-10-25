@@ -246,5 +246,52 @@ class TestSummary(Base):
         self.assertEqual(out["members"]["sharp"]["recent"], "2-1")
 
 
+class TestLLMReviewFallback(Base):
+    def setUp(self):
+        super().setUp()
+        self.summary = {"spot": {"data_quality": {"stale": False, "exchanges_fresh": 2}},
+                        "kalshi_book_age_s": 1.0, "signals": {"crypto_model": 0.62}}
+
+    def test_required_mode_uses_numeric_gate_when_budget_is_exhausted(self):
+        class ExhaustedLLM:
+            def budget_left(self):
+                return 0
+        with mock.patch.dict(os.environ, {"COUNCIL_MODE": "required"}):
+            result = council.review(ExhaustedLLM(), self.st, "KXBTC15M-X", self.summary)
+        self.assertEqual(result["decision"], "approve")
+        self.assertEqual(result["by"], "numbers")
+        self.assertIn("budget unavailable", result["reason"])
+
+    def test_required_mode_uses_numeric_gate_when_model_returns_no_chair(self):
+        class BrokenLLM:
+            models = ["model-a", "model-b"]
+            dead = set()
+            def budget_left(self):
+                return 6
+            def ask_json(self, prompt, model):
+                return None, None
+        with mock.patch.dict(os.environ, {"COUNCIL_MODE": "required"}):
+            result = council.review(BrokenLLM(), self.st, "KXBTC15M-Y", self.summary)
+        self.assertEqual(result["decision"], "approve")
+        self.assertEqual(result["by"], "numbers")
+        self.assertIn("chair response unavailable", result["reason"])
+
+    def test_valid_chair_rejection_is_preserved(self):
+        class VotingLLM:
+            models = ["model-a", "model-b"]
+            dead = set()
+            def budget_left(self):
+                return 6
+            def ask_json(self, prompt, model):
+                if "skeptic" in prompt.lower():
+                    return {"severe_issue": False, "issues": []}, model
+                return {"chair": {"decision": "reject", "reason": "edge too thin"}}, model
+        with mock.patch.dict(os.environ, {"COUNCIL_MODE": "required"}):
+            result = council.review(VotingLLM(), self.st, "KXBTC15M-Z", self.summary)
+        self.assertEqual(result["decision"], "reject")
+        self.assertEqual(result["by"], "council")
+        self.assertIn("edge too thin", result["reason"])
+
+
 if __name__ == "__main__":
     unittest.main()
