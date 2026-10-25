@@ -60,5 +60,21 @@ class TestMinimalismAndPlainEnglish(unittest.TestCase):
         self.assertIn("Calibration =", report)
 
 
+
+    def test_schema_driven_json_avoids_extra_policy_tokens(self):
+        captured = {}
+
+        class JsonResponse(FakeResponse):
+            def json(self):
+                return {"choices": [{"message": {"content": '{"decision":"wait"}'}}]}
+
+        def post(url, json=None, **kwargs):
+            captured.update(json)
+            return JsonResponse()
+
+        llm = LLM("key", self.store, models=["test-model"], post=post)
+        self.assertEqual(llm.ask_json("Return JSON with decision.")[0], {"decision": "wait"})
+        self.assertEqual(captured["messages"], [{"role": "user", "content": "Return JSON with decision."}])
+
 if __name__ == "__main__":
     unittest.main()
