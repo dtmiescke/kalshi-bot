@@ -1,6 +1,6 @@
 """No-network tests: MCP research must not create a second execution path."""
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from bot.mcp_readonly import research_tool
 
@@ -32,6 +32,22 @@ class ReadOnlyResearchTests(unittest.TestCase):
         result = research_tool(self.client, "rules", "KXNFLGAME-EXAMPLE")
         self.assertTrue(result["available"])
         self.client.series.assert_called_once_with("KXNFLGAME")
+
+    def test_rules_pdf_reuses_existing_series_and_store(self):
+        store = Mock()
+        self.client.series.return_value = {"contract_terms_url": "https://www.kalshi.com/rules.pdf"}
+        with patch("bot.mcp_readonly.load_series_contract_pdf", return_value={"text": "official rules"}) as loader:
+            result = research_tool(self.client, "rules_pdf", "KXNFLGAME", store=store, now=123)
+        self.assertEqual(result["text"], "official rules")
+        self.client.series.assert_called_once_with("KXNFLGAME")
+        loader.assert_called_once_with(self.client, store, "KXNFLGAME", 123,
+                                       series_metadata=self.client.series.return_value)
+        self.client.place_limit_buy.assert_not_called()
+
+    def test_rules_pdf_requires_existing_store(self):
+        with self.assertRaises(ValueError):
+            research_tool(self.client, "rules_pdf", "KXNFLGAME")
+        self.client.series.assert_not_called()
 
     def test_no_order_write_or_dynamic_method_dispatch(self):
         for name in ("place_limit_buy", "cancel", "positions", "balance",
