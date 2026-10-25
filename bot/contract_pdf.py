@@ -108,7 +108,7 @@ def load_series_contract_pdf(data_client, store, series_ticker, now, series_meta
         if not isinstance(series, dict):
             return None
         url = series.get("contract_terms_url") or series.get("contract_url")
-        if not _trusted_url(url):
+        if not is_trusted_contract_url(url):
             return None
         extracted = extract_contract_pdf_text(url)
         if not extracted:
