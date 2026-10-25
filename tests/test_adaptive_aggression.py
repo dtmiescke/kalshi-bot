@@ -55,6 +55,19 @@ class TestAggression(unittest.TestCase):
         self.assertIn("status='graded'", store.sql)
         self.assertIn("mode='paper'", store.sql)
 
+    def test_unavailable_history_fails_closed_without_crashing(self):
+        from bot.adaptive_aggression import safe_settled_paper_results
+
+        class BrokenStore:
+            def q(self, sql, args):
+                raise RuntimeError("ledger unavailable")
+
+        history = safe_settled_paper_results(BrokenStore())
+        self.assertEqual(history, [])
+        policy = choose(AggressionPolicy(level="adaptive"),
+                        settled_paper_results=history)
+        self.assertEqual(policy["effective_level"], "conservative")
+
     def test_invalid_level_fails_closed(self):
         with self.assertRaises(ValueError):
             AggressionPolicy(level="reckless")

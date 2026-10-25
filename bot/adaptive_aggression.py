@@ -43,6 +43,18 @@ def settled_paper_results(store, limit=100):
              "settled_ts": r["graded_ts"], "result": r["result"]} for r in rows]
 
 
+def safe_settled_paper_results(store, limit=100):
+    """Return settled paper history, or an empty history if the ledger is unavailable.
+
+    Adaptive then fails closed to Conservative instead of breaking the decision
+    cycle or promoting from missing evidence. This does not alter the ledger.
+    """
+    try:
+        return settled_paper_results(store, limit=limit)
+    except Exception:
+        return []
+
+
 def choose(policy, settled_paper_results=()):
     """Return a bounded profile; never authorize a trade or weaken hard guards.
 
