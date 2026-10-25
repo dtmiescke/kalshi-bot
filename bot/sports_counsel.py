@@ -64,6 +64,7 @@ def review(llm, store, event, snap, plan, readings, prob, confidence, now=None):
     cached = store.get_kv(cache_key)
     if cached and now - int(cached.get("ts", 0)) < 180:
         return cached.get("result", result)
+    from .market_rules import summarize_rules
     payload = {
         "sport_series": snap.get("series"), "event_ticker": snap.get("event_ticker"),
         "event_title": event.get("title") or event.get("subtitle"),
@@ -71,7 +72,8 @@ def review(llm, store, event, snap, plan, readings, prob, confidence, now=None):
         "team": snap.get("team"), "side": plan.get("side"), "price": plan.get("price"),
         "edge": plan.get("edge"), "model_probability": prob,
         "confidence": confidence, "signals": _reading_payload(readings),
-        "note": "Only the supplied evidence is available; do not assume missing lineups or live stats.",
+        "contract_rules": summarize_rules(snap),
+        "note": "Only supplied evidence is available. Treat settlement rules as authoritative; if absent or ambiguous, wait for manual verification. Never assume missing lineups or live stats.",
     }
     if llm is None or llm.budget_left() < 2:
         decision = ({"decision": "wait", "by": "rules", "reason": "required sports counsel unavailable"}
