@@ -696,6 +696,21 @@ class Engine:
                         candidates.append(c)
                 if candidates:
                     best = max(candidates, key=lambda c: c[1]["edge"])
+                    # Contract rules often are omitted from nested event payloads.
+                    # Fetch the full market only for the shortlisted candidate (not every
+                    # market), and merge rule text only; never replace the fresh price snapshot.
+                    rule_keys = ("rules_primary", "rules_secondary", "early_close_condition",
+                                 "settlement_value", "settlement_source", "custom_strike")
+                    if not any(best[0].get(key) for key in rule_keys):
+                        try:
+                            details = self.data.market(best[0]["ticker"])
+                            for key in rule_keys:
+                                value = details.get(key) if isinstance(details, dict) else None
+                                if value not in (None, ""):
+                                    best[0][key] = str(value)[:3000]
+                        except Exception as exc:
+                            log.debug("contract-rule lookup unavailable for %s: %s",
+                                      best[0].get("ticker"), exc)
                     # Sport-specific counsel is a veto/wait layer only; it cannot
                     # create candidates, alter sizing, or bypass the existing risk gate.
                     from . import sports_counsel
