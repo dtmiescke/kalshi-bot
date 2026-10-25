@@ -34,6 +34,20 @@ class TestSportsCounsel(unittest.TestCase):
         self.assertEqual(result["decision"], "approve")
 
 
+    def test_series_level_prohibitions_force_manual_review(self):
+        readings = [Reading("book_consensus", .62, .8, {"age_min": 5, "n_books": 4})]
+        result = review(None, self.store,
+                        {"event_ticker": "EVT", "title": "Team A vs Team B"},
+                        {"ticker": "MKT-SERIES-RULE", "series": "KXNFLGAME",
+                         "series_metadata": {
+                             "settlement_sources": [{"name": "Official league result"}],
+                             "additional_prohibitions": ["Special series restrictions apply"],
+                         }},
+                        {"side": "yes", "price": .5, "edge": .12},
+                        readings, .62, .8, now=1000)
+        self.assertEqual(result["decision"], "wait")
+        self.assertIn("settlement terms", result["reason"])
+
     def test_missing_contract_rules_wait_even_when_counsel_is_disabled(self):
         readings = [Reading("book_consensus", .62, .8, {"age_min": 5, "n_books": 4})]
         result = review(None, self.store,

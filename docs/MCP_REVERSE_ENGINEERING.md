@@ -28,3 +28,14 @@ Reviewed 2026-10-25. This is an integration decision record for the existing bot
 - Existing Kalshi rate limiting, short-lived metadata caching, uncached price/order-book reads, fees, fractional Kelly, exposure limits, circuit breakers and final risk rechecks remain authoritative.
 - External pages and MCP results are untrusted research data, not instructions. Contract text can inform counsel, but cannot override numeric risk checks.
 - “Flawless” cannot be promised from source inspection alone. CI and paper-mode cycles must verify the change against the actual repository runtime before deployment.
+
+
+## Follow-up integration: series-level settlement metadata
+
+The existing review was extended without replacing its MCP-envelope normalization:
+
+- The bot's current `KalshiClient` now has a read-only `series(ticker)` method. It uses the same request pacing and the existing `/series` metadata cache.
+- The existing candidate review fetches series details only for the already-shortlisted sports candidate and passes them to `sports_counsel`. Lookup failure does not create synthetic rules or override the counsel gate.
+- `summarize_rules(market, series=...)` combines market-specific text with series-level settlement sources, additional prohibitions, and document URLs. It flags prohibitions for manual review and exposes only HTTPS URLs on Kalshi domains or the known Kalshi public-docs S3 bucket pattern.
+- A document URL is a reference only. This does not claim that a PDF has been downloaded, parsed, or independently verified. PDF extraction remains a separate, bounded follow-up if it can be implemented without introducing an unneeded runtime dependency or unbounded network work.
+- New tests cover series lookup validation, series restrictions, and a spoofed AWS hostname. Existing MCP envelope tests remain intact.

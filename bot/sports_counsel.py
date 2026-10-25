@@ -58,7 +58,8 @@ def review(llm, store, event, snap, plan, readings, prob, confidence, now=None):
         return {"decision": "reject", "by": "rules", "reason": "invalid side or price"}
 
     from .market_rules import summarize_rules
-    contract_rules = summarize_rules(snap)
+    # Series metadata is optional, read-only evidence fetched by the existing engine.
+    contract_rules = summarize_rules(snap, series=snap.get("series_metadata"))
     # Settlement terms are a hard data dependency for sports contracts. A missing
     # rules payload must not silently turn into approval when AI counsel is disabled
     # or its token budget is exhausted.
