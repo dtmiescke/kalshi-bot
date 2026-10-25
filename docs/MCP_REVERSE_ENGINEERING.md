@@ -16,10 +16,10 @@ Reviewed 2026-10-25. This is an integration decision record for the existing bot
 
 ## Changes in this PR
 
-- bot/market_rules.py now normalizes direct Kalshi market objects and common read-only MCP response envelopes (market, result, data).
+- `bot/market_rules.py` normalizes direct Kalshi market objects and nested read-only MCP envelopes (`structuredContent`, JSON text blocks, `result`, `data`, and `market`) with a depth bound; an MCP error at any nested level fails closed.
 - It accepts bounded consolidated rule text fields (rules_text, rules_pdf_text, contract_terms_text) and series prohibitions when an upstream read-only source supplies them.
 - Missing rule text remains explicitly unavailable. The helper does not fetch third-party data, assert a PDF was verified, infer missing settlement rules, or authorize an order.
-- Tests cover nested envelopes, consolidated text, size bounds and fail-closed behavior.
+- Tests cover nested JSON-in-content envelopes, error propagation, depth bounds, consolidated text, size bounds and fail-closed behavior.
 
 ## Integration boundaries
 
