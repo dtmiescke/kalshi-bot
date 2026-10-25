@@ -38,6 +38,7 @@ def _unwrap_market(payload):
 
     envelope_keys = {"structuredContent", "result", "data", "market", "content"}
     merged = {}
+    settlement_sources_seen = set()
     pending = [(payload, 0)]
     visited = set()
     plain_text = []
@@ -63,7 +64,14 @@ def _unwrap_market(payload):
         if node.get("isError") is True:
             return {}
 
-        merged.update({k: v for k, v in node.items() if k not in envelope_keys})
+        source = node.get("settlement_source")
+        if isinstance(source, str) and source.strip():
+            settlement_sources_seen.add(source.strip().casefold())
+        # Prefer the first native field instead of silently overwriting it with
+        # nested MCP metadata. Conflicts are reported separately below.
+        for key, value in node.items():
+            if key not in envelope_keys and key not in merged:
+                merged[key] = value
 
         for key in ("structuredContent", "result", "data", "market"):
             nested = node.get(key)
@@ -108,6 +116,8 @@ def _unwrap_market(payload):
                     plain_text.append(bounded)
                     plain_text_chars += len(bounded)
 
+    if len(settlement_sources_seen) > 1:
+        merged["_mcp_settlement_source_conflict"] = True
     if plain_text and not merged.get("rules_pdf_text"):
         merged["rules_pdf_text"] = "\n".join(plain_text)[:_MAX_PLAIN_TEXT_CHARS]
     return merged
@@ -183,6 +193,8 @@ def summarize_rules(market, series=None):
             flags.append(name)
     if source_conflict:
         flags.append("settlement_source_conflict")
+    if market.get("_mcp_settlement_source_conflict") or series.get("_mcp_settlement_source_conflict"):
+        flags.append("mcp_settlement_source_conflict")
     if (terms.get("additional_prohibitions") or terms.get("series_prohibitions")
             or terms.get("prohibitions")) and "series_prohibition" not in flags:
         flags.append("series_prohibition")
@@ -197,7 +209,7 @@ def summarize_rules(market, series=None):
 
     if not terms:
         status = "unavailable"
-    elif missing or "early_close" in flags or "series_prohibition" in flags or source_conflict:
+    elif missing or "early_close" in flags or "series_prohibition" in flags or source_conflict or "mcp_settlement_source_conflict" in flags:
         status = "review_required"
     else:
         status = "terms_found"
