@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 SPORTS_COUNSEL_PROMPT = """You are the skeptical sports betting counsel reviewing one already-qualified
 Kalshi sports candidate. Do not invent injuries, lineups, scores, or facts not in the payload.
-Look for stale sportsbook data, contradictory probabilities, weak evidence, and misleading edges.
+Look for stale sportsbook data, contradictory probabilities, weak evidence, misleading edges, and settlement-rule ambiguity. If contract rules are missing, contradictory, or flag early-close/void conditions that could affect settlement, prefer wait and explain why. Never treat missing rule text as proof of safety.
 You may only approve, reject, or wait. You cannot alter price, size, or risk limits.
 Return ONLY JSON: {{"chair": {{"decision":"approve|reject|wait","reason":"short"}},
 "skeptic": {{"severe_issue":true|false,"issues":["short"]}}}}
@@ -64,6 +64,7 @@ def review(llm, store, event, snap, plan, readings, prob, confidence, now=None):
     cached = store.get_kv(cache_key)
     if cached and now - int(cached.get("ts", 0)) < 180:
         return cached.get("result", result)
+    from .market_rules import summarize_rules
     payload = {
         "sport_series": snap.get("series"), "event_ticker": snap.get("event_ticker"),
         "event_title": event.get("title") or event.get("subtitle"),
@@ -71,7 +72,8 @@ def review(llm, store, event, snap, plan, readings, prob, confidence, now=None):
         "team": snap.get("team"), "side": plan.get("side"), "price": plan.get("price"),
         "edge": plan.get("edge"), "model_probability": prob,
         "confidence": confidence, "signals": _reading_payload(readings),
-        "note": "Only the supplied evidence is available; do not assume missing lineups or live stats.",
+        "contract_rules": summarize_rules(snap),
+        "note": "Only supplied evidence is available. Treat settlement rules as authoritative; if absent or ambiguous, wait for manual verification. Never assume missing lineups or live stats.",
     }
     if llm is None or llm.budget_left() < 2:
         decision = ({"decision": "wait", "by": "rules", "reason": "required sports counsel unavailable"}

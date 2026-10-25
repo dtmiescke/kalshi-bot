@@ -2,11 +2,11 @@
 hard budget.
 
 Endpoints, tried in this order:
-1. OmniRoute (optional): a self-hosted free AI gateway. Set OMNIROUTE_URL to its
-   OpenAI-compatible base (e.g. https://your-host/v1), OMNIROUTE_API_KEY, and
-   OMNIROUTE_MODELS (model or combo names from your OmniRoute dashboard).
-2. OpenRouter: OPENROUTER_API_KEY + OPENROUTER_MODELS (free ":free" models).
-If OmniRoute is unreachable, every call falls through to OpenRouter.
+1. OmniRoute (optional): OMNIROUTE_URL / OMNIROUTE_API_KEY / OMNIROUTE_MODELS.
+2. LiteLLM Proxy (optional): LITELLM_URL / LITELLM_API_KEY / LITELLM_MODELS.
+3. OpenRouter: OPENROUTER_API_KEY + OPENROUTER_MODELS (free ":free" models).
+OmniRoute and LiteLLM use OpenAI-compatible chat-completions endpoints; failed
+gateways/models fall through without changing the bot's risk or execution logic.
 
 
 Free models come and go on OpenRouter, so the list is configurable
@@ -56,6 +56,11 @@ def endpoints_from_env(openrouter_key=None):
     base = os.environ.get("OMNIROUTE_URL", "").rstrip("/")
     if base:
         eps.append(("omniroute", base + "/chat/completions", os.environ.get("OMNIROUTE_API_KEY", "")))
+    litellm_base = os.environ.get("LITELLM_URL", "").rstrip("/")
+    if litellm_base:
+        # Accept either a proxy root or an already versioned OpenAI API base.
+        chat_url = litellm_base if litellm_base.endswith("/chat/completions") else litellm_base + "/chat/completions"
+        eps.append(("litellm", chat_url, os.environ.get("LITELLM_API_KEY", "")))
     if openrouter_key:
         eps.append(("openrouter", URL, openrouter_key))
     return eps
@@ -76,9 +81,13 @@ class LLM:
         self.store = store
         if models is None:
             om = [m.strip() for m in os.environ.get("OMNIROUTE_MODELS", "auto").split(",") if m.strip()]
-            models = ([f"omniroute|{m}" for m in om] if "omniroute" in self.endpoints else []) + \
-                models_from_env()
-        # labels: "omniroute|<model>" or a plain OpenRouter model name
+            lm = [m.strip() for m in os.environ.get("LITELLM_MODELS", "").split(",") if m.strip()]
+            models = (
+                ([f"omniroute|{m}" for m in om] if "omniroute" in self.endpoints else [])
+                + ([f"litellm|{m}" for m in lm] if "litellm" in self.endpoints else [])
+                + models_from_env()
+            )
+        # labels: "omniroute|<model>", "litellm|<model>", or a plain OpenRouter model name
         self.models = models
         self.max_per_run = int(max_per_run or os.environ.get("LLM_MAX_CALLS_PER_RUN", 6))
         self.daily_limit = int(daily_limit or os.environ.get("LLM_DAILY_LIMIT", 45))

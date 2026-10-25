@@ -212,7 +212,7 @@ class Settings:
         return (kid, pem) if kid and pem else (None, None)
 
     def ai_enabled(self):
-        return bool(self.openrouter_key or _env("OMNIROUTE_URL"))
+        return bool(self.openrouter_key or _env("OMNIROUTE_URL") or _env("LITELLM_URL"))
 
     def base_url(self):
         if self.kalshi_base_url:
