@@ -80,7 +80,7 @@ def _unwrap_market(payload):
                     plain_text.append(text[:6000])
 
     if plain_text and not merged.get("rules_pdf_text"):
-        merged["rules_pdf_text"] = "\\n".join(plain_text)[:6000]
+        merged["rules_pdf_text"] = "\n".join(plain_text)[:6000]
     return merged
 
 
