@@ -32,9 +32,13 @@ any future reuse of implementation code.
    is exhausted. AI counsel remains a veto/review layer: it cannot create a candidate,
    change size, or bypass the numeric risk gate.
 4. Added offline tests for rule-field preservation, bounded context, missing-rule behavior,
-   unavailable AI counsel, series restrictions/document URL allowlisting, and common MCP
-   field aliases. Prohibition-only payloads cannot satisfy the required settlement-rule check.
+   unavailable AI counsel, series restrictions/document URL allowlisting, common MCP field
+   aliases, and safe official-PDF extraction/cache behavior. Prohibition-only payloads and
+   PDF text without a settlement source cannot satisfy the required settlement-rule check.
    No live order was sent.
+5. Added an optional official contract-PDF fallback: HTTPS-only allowlisted hosts, no
+   redirects, an 8 MiB download cap, 30-page / 6,000-character extraction cap, seven-day
+   cache, and at most 3,000 characters passed to counsel. Extraction errors remain unknown.
 
 ## Deliberately not added
 
