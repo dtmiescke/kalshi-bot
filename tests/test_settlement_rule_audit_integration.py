@@ -5,7 +5,7 @@ from bot.live.settlement import contract_terms
 
 
 class TestSettlementRuleAuditIntegration(unittest.TestCase):
-    def test_contract_terms_reuses_bounded_shared_rule_summary(self):
+    def test_contract_terms_reuses_compact_shared_rule_summary(self):
         market = {
             "ticker": "KXBTC15M-TEST",
             "floor_strike": 100000,
@@ -20,6 +20,7 @@ class TestSettlementRuleAuditIntegration(unittest.TestCase):
         self.assertEqual(terms["rules_audit"]["status"], "review_required")
         self.assertIn("early_close", terms["rules_audit"]["flags"])
         self.assertLessEqual(terms["rules_audit"]["text_chars"], 6000)
+        self.assertNotIn("terms", terms["rules_audit"])
 
     def test_missing_rules_are_not_invented(self):
         terms = contract_terms({"ticker": "KXTEST"})
