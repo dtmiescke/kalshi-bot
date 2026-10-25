@@ -34,14 +34,20 @@ def _get(url, params=None, timeout=10, get=requests.get):
 
 
 def _cached(store, key, minutes, fn):
-    c = store.get_kv(key)
-    if c and time.time() - c["ts"] < minutes * 60:
-        return c["v"]
-    v = fn()
-    if v is not None:
-        store.set_kv(key, {"ts": time.time(), "v": v})
-        return v
-    return c["v"] if c else None
+    """Never recycle expired external evidence when an upstream read fails."""
+    now = time.time()
+    cached = store.get_kv(key)
+    if isinstance(cached, dict):
+        try:
+            age = now - float(cached["ts"])
+            if 0 <= age < max(0, float(minutes)) * 60 and "v" in cached:
+                return cached["v"]
+        except (KeyError, TypeError, ValueError, OverflowError):
+            pass
+    value = fn()
+    if value is not None:
+        store.set_kv(key, {"ts": time.time(), "v": value})
+    return value
 
 
 def futures(store, coin, get=requests.get):
