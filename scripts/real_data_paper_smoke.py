@@ -37,6 +37,7 @@ def main():
     assert isinstance(markets, list) and markets, "No real open Kalshi markets returned"
     sampled = 0
     quoted = 0
+    simulated_fills = 0
     for market in markets:
         ticker = market.get("ticker")
         if not isinstance(ticker, str) or not ticker:
@@ -54,14 +55,16 @@ def main():
                 contracts, avg_price = fill_plan(asks[side], max_dollars=5, limit_price=0.99)
                 assert contracts >= 0
                 assert avg_price is None or 0 < avg_price <= 1
-        if quoted > 0 and sampled >= 5:
+                if contracts > 0:
+                    simulated_fills += 1
+        if simulated_fills > 0 and sampled >= 5:
             break
         if sampled >= 100:
             break
     assert sampled > 0, "No real orderbooks available for paper fill simulation"
-    assert quoted > 0, "No quoted liquidity found; cannot certify real-data paper fill simulation"
+    assert simulated_fills > 0, "No positive paper fill against real quoted liquidity"
     assert all(not path.startswith("/portfolio/") for path in calls)
-    print(f"REAL-DATA PAPER SMOKE PASS: open_markets={len(markets)} books={sampled} quoted_sides={quoted} GETs={len(calls)} exchange_writes=0")
+    print(f"REAL-DATA PAPER SMOKE PASS: open_markets={len(markets)} books={sampled} quoted_sides={quoted} simulated_fills={simulated_fills} GETs={len(calls)} exchange_writes=0")
 
 
 if __name__ == "__main__":
