@@ -4,7 +4,10 @@ Janitor A removes duplicate raw snapshots and adds uniqueness constraints.
 Janitor B removes invalid raw rows and applies existing retention windows.
 Neither janitor deletes bets, forecasts, grades, lessons, model weights, or audit history.
 """
+import sqlite3
 import time
+
+from .storage import RAW_RETENTION, trim_raw
 
 
 RAW_KEYS = {
@@ -51,19 +54,21 @@ def janitor_dedupe(store, now=None):
 
 def janitor_retention(store, now=None):
     """Trim only raw time-series data under existing retention policy."""
-    # Preserve the Store.compact retention windows, but don't VACUUM every six
-    # hours; the existing daily compact owns physical database compaction.
-    keep_days = {"market_snapshots": 14, "flow_trades": 7,
-                 "signal_readings": 30, "odds_snapshots": 30}
+    # Same retention windows as Store.compact (storage.RAW_RETENTION), but no
+    # VACUUM every six hours; the daily compact owns physical compaction.
     now = int(time.time() if now is None else now)
     before, after = {}, {}
     with store.lock:
         store.db.execute("BEGIN IMMEDIATE")
         try:
-            for table, days in keep_days.items():
-                before[table] = store.db.execute(
-                    f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                store.db.execute(f"DELETE FROM {table} WHERE ts < ?", (now - days * 86400,))
+            for table in RAW_RETENTION:
+                try:
+                    before[table] = store.db.execute(
+                        f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                except sqlite3.OperationalError:
+                    continue            # optional table not created yet
+            trim_raw(store.db, now)
+            for table in before:
                 after[table] = store.db.execute(
                     f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             store.db.commit()

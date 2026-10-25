@@ -41,6 +41,17 @@ finally:
 PY
 gzip -n -c "$WORK/bot.snapshot.sqlite" > "$WORK/bot.sqlite.gz"
 rm -f "$WORK/bot.snapshot.sqlite"
+# GitHub rejects files over 100 MB. Alert at 80% so the janitors' retention can
+# be tightened before memory stops saving; refuse a push that would fail anyway.
+SIZE=$(stat -c %s "$WORK/bot.sqlite.gz")
+if [ "$SIZE" -ge 95000000 ]; then
+  echo "ERROR: bot.sqlite.gz is $SIZE bytes, too close to GitHub's 100 MB file limit; not saving." >&2
+  python -c 'import sys; from bot import alerts; alerts.send("Memory too big to save", sys.argv[1], priority="urgent", tags=["warning"])' "bot.sqlite.gz is $SIZE bytes; memory was NOT saved." || true
+  exit 1
+elif [ "$SIZE" -ge 80000000 ]; then
+  echo "::warning::bot.sqlite.gz is $SIZE bytes (80% of GitHub's 100 MB file limit)."
+  python -c 'import sys; from bot import alerts; alerts.send("Memory file near size limit", sys.argv[1], priority="high", tags=["warning"])' "bot.sqlite.gz is $SIZE bytes (limit 100 MB)." || true
+fi
 cp /tmp/REPORT.txt "$WORK/REPORT.txt"
 [ ! -f data/BRIEFING.txt ] || cp data/BRIEFING.txt "$WORK/BRIEFING.txt"
 [ ! -f data/live_summary.json ] || cp data/live_summary.json "$WORK/LIVE.json"
