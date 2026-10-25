@@ -295,3 +295,31 @@ class KalshiClient:
             ("yes_price" if side == "yes" else "no_price"): cents,
         }
         return self._req("POST", "/portfolio/orders", body=body).get("order", {})
+
+    # --- official Kalshi live evidence (read-only, never an order signal alone) ---
+    @staticmethod
+    def _safe_identifier(value):
+        """Restrict path identifiers so caller input cannot change the API route."""
+        import re
+        if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,120}", value):
+            raise ValueError("invalid Kalshi identifier")
+        return value
+
+    def sports_filters(self):
+        """Official sports catalog filters; caller decides which sports are enabled."""
+        return self._req("GET", "/search/filters_by_sport")
+
+    def milestone_live_data(self, milestone_id):
+        """Game status from official live feed; missing data must remain unknown."""
+        ident = self._safe_identifier(milestone_id)
+        return self._req("GET", f"/live_data/milestone/{ident}")
+
+    def milestone_game_stats(self, milestone_id):
+        """Play-by-play evidence, possibly null for unsupported games."""
+        ident = self._safe_identifier(milestone_id)
+        return self._req("GET", f"/live_data/milestone/{ident}/game_stats")
+
+    def event_live_data(self, event_ticker):
+        """Event-keyed crypto/other data; response schema depends on type."""
+        ident = self._safe_identifier(event_ticker)
+        return self._req("GET", f"/live_data/events/{ident}")
