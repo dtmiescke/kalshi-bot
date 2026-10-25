@@ -251,6 +251,65 @@ def _parse_espn(payload, source, category, observed_at):
             events.append(event_row)
     return events
 
+def _event_evidence_profile(category, sport, league, event, box, raw, observed_at):
+    """Normalize available cross-sport evidence; never infer missing facts."""
+    box = box if isinstance(box, dict) else {}
+    raw = raw if isinstance(raw, dict) else {}
+    team_stats = (box.get("teams") or [])[:10]
+    player_stats = (box.get("players") or [])[:50]
+    competitors = (event.get("competitors") or [])[:4]
+    injuries = raw.get("injuries")
+    if not isinstance(injuries, list):
+        injuries = []
+    lineups = raw.get("lineups", raw.get("roster", []))
+    rosters = raw.get("rosters", [])
+    depth_charts = raw.get("depthCharts", raw.get("depthcharts", []))
+    season_series = raw.get("seasonseries", raw.get("headToHead", []))
+    plays = raw.get("plays", [])
+    scoring_plays = raw.get("scoringPlays", [])
+    win_probability = raw.get("winprobability", [])
+    missing = [
+        label for label, present in (
+            ("team_statistics", bool(team_stats)),
+            ("player_statistics", bool(player_stats)),
+            ("injury_records", bool(injuries)),
+            ("lineup_or_roster_data", bool(lineups or rosters or depth_charts)),
+            ("head_to_head_or_season_series", bool(season_series)),
+            ("live_play_data", bool(plays or scoring_plays)) if event.get("state") == "in" else ("live_play_data", True),
+        ) if not present
+    ]
+    return {
+        "sport_category": category, "provider_sport": sport, "provider_league": league,
+        "event_id": event.get("provider_event_id"),
+        "event": event.get("name") or event.get("short_name"),
+        "state": event.get("state"), "observed_ts": observed_at,
+        "source": "ESPN public event summary", "verified": False,
+        "participants": competitors, "team_statistics": team_stats,
+        "player_statistics": player_stats, "leaders": (raw.get("leaders") or [])[:20],
+        "injury_records": injuries[:30], "lineups": lineups,
+        "rosters": rosters[:20] if isinstance(rosters, list) else rosters,
+        "depth_charts": depth_charts, "game_info": raw.get("gameInfo", {}),
+        "season_series": season_series,
+        "plays": plays[-50:] if isinstance(plays, list) else [],
+        "scoring_plays": scoring_plays[-30:] if isinstance(scoring_plays, list) else [],
+        "win_probability": win_probability[-20:] if isinstance(win_probability, list) else [],
+        "data_quality": {
+            "team_statistics_available": bool(team_stats),
+            "player_statistics_available": bool(player_stats),
+            "injury_records_available": bool(injuries),
+            "lineup_data_available": bool(lineups or rosters or depth_charts),
+            "head_to_head_available": bool(season_series),
+            "live_play_data_available": bool(plays or scoring_plays),
+            "lineups_confirmed": False,
+        },
+        "missing_information": missing,
+        "interpretation_guardrail": (
+            "Descriptive source evidence only. Missing fields mean unknown, not negative; "
+            "injury/lineup data is not confirmed unless the provider explicitly confirms it."
+        ),
+    }
+
+
 def _football_matchup_profile(event, box, raw, observed_at, league_domain):
     """Build a cautious football-specific evidence profile from fields ESPN exposes.
 
@@ -489,7 +548,7 @@ def collect(store, force=False, now=None, categories=None):
                "news_seen": 0, "scores_seen": 0, "new_items": 0, "sources_ok": 0,
                "sources_failed": 0, "summaries_seen": 0, "team_stats_profiles": 0,
                "player_stats_profiles": 0, "injury_profiles": 0, "lineup_profiles": 0,
-               "football_profiles": 0, "ts": now, "errors": []}
+               "football_profiles": 0, "event_evidence_profiles": 0, "event_evidence_categories": {}, "ts": now, "errors": []}
     # Google News RSS gives broad web discovery without an API key. Queries are cached
     # independently and kept deliberately modest for free-tier friendliness.
     for category, terms in SPORT_TERMS.items():
@@ -594,6 +653,11 @@ def collect(store, force=False, now=None, categories=None):
                 "source_note": "ESPN public event summary; field availability varies by sport; verify lineup/injury freshness before use",
                 "verified": False,
             }
+            payload["event_evidence_profile"] = _event_evidence_profile(
+                category, sport, league, event, box, raw, now)
+            summary["event_evidence_profiles"] += 1
+            summary["event_evidence_categories"][category] = (
+                summary["event_evidence_categories"].get(category, 0) + 1)
             if category in ("nfl", "college_football"):
                 payload["football_matchup_profile"] = _football_matchup_profile(event, box, raw, now, category)
                 summary["football_profiles"] += 1
