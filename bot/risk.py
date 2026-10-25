@@ -207,8 +207,9 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
     if str(mkt.get("series", "")).endswith("15M"):
         caps.append(s.crypto_max_per_window - staked_on_window(store, mkt["event_ticker"], mode=s.mode))
     budget = min(caps)
-    if budget < 1.0:
-        return None, "risk caps reached"
+    minimum = max(0.0, float(getattr(s, "min_per_bet", 0.0)))
+    if budget < max(1.0, minimum):
+        return None, "risk caps reached or below minimum bet"
 
     if style == "maker":
         contracts, avg = int(budget // price), price
@@ -237,6 +238,8 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
     if contracts < 1:
         return None, "fees exceed available budget"
     fee = taker_fee(contracts, avg, rate)
+    if contracts * avg + fee + 1e-9 < minimum:
+        return None, "available liquidity or sizing below minimum bet"
     # Final check on the REAL order: fees round up per order, so small orders
     # and deeper fills can turn a "5% edge" into 3%. Re-test after actual costs.
     real_edge = p_win - avg - fee / contracts
