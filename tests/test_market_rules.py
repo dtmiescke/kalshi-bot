@@ -110,6 +110,14 @@ class TestMarketRules(unittest.TestCase):
         self.assertTrue(prohibited_only["missing"])
         self.assertEqual(prohibited_only["status"], "review_required")
 
+    def test_pdf_text_without_native_settlement_source_still_requires_review(self):
+        result = summarize_rules({
+            "rules_pdf_text": "Official contract text says the event settles after completion."
+        })
+        self.assertTrue(result["available"])
+        self.assertEqual(result["status"], "review_required")
+        self.assertTrue(result["missing"])
+
     def test_non_dict_or_empty_mcp_result_fails_closed(self):
         for payload in (None, [], "not a market", {"result": None}):
             result = summarize_rules(payload)
