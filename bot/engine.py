@@ -711,11 +711,23 @@ class Engine:
                         except Exception as exc:
                             log.debug("contract-rule lookup unavailable for %s: %s",
                                       best[0].get("ticker"), exc)
+                    # Series-level settlement sources and restrictions are legal
+                    # context for counsel. Reuse the existing paced/cached data client.
+                    counsel_snapshot = dict(best[0])
+                    series_ticker = counsel_snapshot.get("series")
+                    if series_ticker and not counsel_snapshot.get("series_metadata"):
+                        try:
+                            series_meta = self.data.series(series_ticker)
+                            if series_meta:
+                                counsel_snapshot["series_metadata"] = series_meta
+                        except Exception as exc:
+                            log.debug("series rule metadata unavailable for %s: %s",
+                                      series_ticker, type(exc).__name__)
                     # Sport-specific counsel is a veto/wait layer only; it cannot
                     # create candidates, alter sizing, or bypass the existing risk gate.
                     from . import sports_counsel
                     counsel = sports_counsel.review(
-                        self.llm, self.store, ev, best[0], best[1], best[2],
+                        self.llm, self.store, ev, counsel_snapshot, best[1], best[2],
                         best[3], best[4], now=now)
                     self.store.set_kv("sports_counsel_last_decision", {
                         "ts": now, "ticker": best[0]["ticker"], **counsel})
