@@ -230,6 +230,35 @@ class KalshiClient:
             raise ValueError("invalid Kalshi series ticker")
         return self._req("GET", f"/series/{ticker}").get("series", {})
 
+    def market_rules(self, ticker):
+        """Read-only contract terms using the existing paced Kalshi API client.
+
+        Keep raw rules and settlement fields; absence of terms is not proof
+        of eligibility. No external MCP server, credentials, or order path.
+        """
+        ticker = str(ticker or "").strip()
+        if not ticker or not all(c.isalnum() or c in "-_" for c in ticker):
+            raise ValueError("invalid Kalshi market ticker")
+        market = self.market(ticker)
+        series_ticker = market.get("series_ticker")
+        series = self.series(series_ticker) if series_ticker else {}
+        return {
+            "ticker": ticker,
+            "series_ticker": series_ticker,
+            "rules_primary": market.get("rules_primary"),
+            "rules_secondary": market.get("rules_secondary"),
+            "early_close_condition": market.get("early_close_condition"),
+            "settlement_source": market.get("settlement_source") or series.get("settlement_source"),
+            "settlement_sources": series.get("settlement_sources"),
+            "contract_url": market.get("contract_url") or series.get("contract_url"),
+            "series_restrictions": series.get("restrictions"),
+            "raw_market": market,
+            "raw_series": series,
+            "complete": bool(market.get("rules_primary") and (
+                market.get("settlement_source") or series.get("settlement_source")
+                or series.get("settlement_sources"))),
+        }
+
     def orderbook(self, ticker, depth=20):
         """Returns {'yes': [(price, qty), ...], 'no': [...]} as bids, best first."""
         data = self._req("GET", f"/markets/{ticker}/orderbook", params={"depth": depth})
