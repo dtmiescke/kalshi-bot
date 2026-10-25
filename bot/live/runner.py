@@ -279,7 +279,7 @@ class LiveRunner:
         plan, why = risk.decide(self.s, self.store, snap, prob, conf,
                                 self.books[ticker].as_rest_book(),
                                 min_edge=min_edge, max_per_bet=self.s.crypto_max_per_bet,
-                                maker=maker)
+                                maker=maker, raw_model_prob=risk.crypto_model_prob(readings))
         return (snap, plan, prob, conf) if plan else None
 
     def finish(self, ticker, readings, ctx, plan, verdict):

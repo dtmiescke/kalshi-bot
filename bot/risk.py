@@ -102,12 +102,19 @@ def bid_for(book, side):
     return levels[0][0] if levels else None
 
 
+def crypto_model_prob(readings):
+    """The raw exact-contract YES probability, before blending, if present."""
+    return next((r.prob for r in readings or () if r.name == "crypto_model"), None)
+
+
 def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_bet=None,
-           maker=False):
+           maker=False, raw_model_prob=None):
     """Pick the best side (YES or NO), check edge after fees and every cap.
 
     maker=True prices a resting limit order one tick above the best bid (cheaper,
     lower fee, but may not fill) instead of paying the ask now.
+    raw_model_prob: the unblended crypto_model YES probability; crypto long shots
+    (below s.crypto_longshot_price) need it to show the edge on its own.
     Returns (plan, "ok") or (None, reason).
     """
     min_edge = s.min_edge if min_edge is None else min_edge
@@ -126,6 +133,9 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
 
     asks = asks_from_book(book)
     options = []
+    longshot_cap = getattr(s, "crypto_longshot_price", 0.0) or 0.0
+    crypto_domain = brain.domain_of(mkt.get("series") or mkt.get("ticker")) == "crypto"
+    longshot_blocked = None
     for side, p_win in (("yes", model_prob), ("no", 1 - model_prob)):
         if not asks[side]:
             continue
@@ -137,7 +147,21 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
         if not (s.min_price <= price <= s.max_price):
             continue
         fee_per = taker_fee(100, price, rate) / 100
+        if crypto_domain and price < longshot_cap:
+            # Long shots are where a too-fat tail or a market-anchored blend
+            # invents edge. The raw contract model must agree on its own.
+            raw = None if raw_model_prob is None else (
+                raw_model_prob if side == "yes" else 1 - raw_model_prob)
+            if raw is None or raw - price - fee_per < min_edge:
+                longshot_blocked = (side, price, raw)
+                continue
         options.append((p_win - price - fee_per, side, p_win, price, best_ask, rate, style))
+    if longshot_blocked and (not options or max(options)[0] < min_edge):
+        # Name the guard, not the leftover side's shortfall, so audits show why.
+        side, price, raw = longshot_blocked
+        support = "no raw model" if raw is None else f"raw model {raw:.1%}"
+        return None, (f"crypto long shot: {side.upper()} @ ${price:.2f} below "
+                      f"${longshot_cap:.2f} without model support ({support})")
     if not options:
         return None, "no tradable price"
     edge, side, p_win, price, best_ask, rate, style = max(options)
