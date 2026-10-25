@@ -50,6 +50,7 @@ def event_research(llm, store, *, event_ticker, sport, team, opponent,
         result = cached
 
     else:
+        context_text = str(context or {})
         prompt = f"""Research this specific upcoming sports event using current public web sources.
 Event: {team} vs {opponent or 'opponent unknown'}
 Sport/league: {sport}
@@ -57,7 +58,7 @@ Event ticker: {event_ticker}
 Scheduled start (Unix seconds if known): {event_start_ts}
 Current Kalshi probability for the named team: {market_price}
 Vig-free sportsbook probability if available: {book_prob}
-Existing evidence context: {context or {{}}}
+Existing evidence context: {context_text}
 
 Find material, event-specific developments: official injury/availability and lineup updates,
 rosters/depth charts, player-vs-player or positional matchups, recent team/player performance,
