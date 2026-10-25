@@ -36,10 +36,10 @@ MINIMALISM_SYSTEM = (
 )
 
 
-def _messages(prompt):
-    """Build one consistent message list for normal and web-search calls."""
+def _messages(prompt, minimalism=True):
+    """Build a message list; skip extra policy tokens for schema-driven JSON calls."""
     messages = []
-    if os.environ.get("LLM_MINIMALISM_ENABLED", "yes").strip().lower() not in ("0", "no", "false", "off"):
+    if minimalism and os.environ.get("LLM_MINIMALISM_ENABLED", "yes").strip().lower() not in ("0", "no", "false", "off"):
         messages.append({"role": "system", "content": MINIMALISM_SYSTEM})
     messages.append({"role": "user", "content": prompt})
     return messages
@@ -95,7 +95,7 @@ class LLM:
         used = self.store.get_kv(self._day_key(), 0)
         return min(self.daily_limit - used, self.max_per_run - self.calls_this_run)
 
-    def ask(self, prompt, model=None, temperature=0.1, max_tokens=400):
+    def ask(self, prompt, model=None, temperature=0.1, max_tokens=400, minimalism=True):
         """Return (text, model_used) or (None, None). Falls back across models."""
         if not self.endpoints or self.budget_left() <= 0:
             return None, None
@@ -114,7 +114,7 @@ class LLM:
                 r = self._post(url, timeout=60, headers={
                     "Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                     json={"model": name, "temperature": temperature, "max_tokens": max_tokens,
-                          "messages": _messages(prompt)})
+                          "messages": _messages(prompt, minimalism=minimalism)})
                 r.raise_for_status()
                 return r.json()["choices"][0]["message"]["content"], m
             except requests.ConnectionError:
@@ -238,7 +238,7 @@ class LLM:
         return None, None, []
 
     def ask_json(self, prompt, model=None):
-        text, m = self.ask(prompt, model=model)
+        text, m = self.ask(prompt, model=model, minimalism=False)
         if not text:
             return None, None
         hit = re.search(r"\{.*\}", text, re.S)
