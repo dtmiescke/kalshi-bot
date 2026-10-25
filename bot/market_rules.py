@@ -125,21 +125,16 @@ def summarize_rules(market, series=None):
             or terms.get("prohibitions")) and "series_prohibition" not in flags:
         flags.append("series_prohibition")
 
+    # Reuse the PDF reader's single strict URL policy: only exact official
+    # document hosts, HTTPS, standard port, and no embedded credentials.
+    # A broad *.kalshi.com or *.amazonaws.com suffix is not sufficient trust.
+    from .contract_pdf import is_trusted_contract_url
+
     doc_urls = []
     for key in ("contract_terms_url", "contract_url"):
         url = str(series.get(key) or market.get(key) or "").strip()
-        try:
-            from urllib.parse import urlparse
-            parsed = urlparse(url)
-            host = (parsed.hostname or "").lower().rstrip(".")
-            official_host = (
-                host == "kalshi.com" or host.endswith(".kalshi.com")
-                or (host.startswith("kalshi-public-docs.s3.") and host.endswith(".amazonaws.com"))
-            )
-            if parsed.scheme == "https" and official_host and url not in doc_urls:
-                doc_urls.append(url[:1000])
-        except ValueError:
-            pass
+        if is_trusted_contract_url(url) and url not in doc_urls:
+            doc_urls.append(url[:1000])
 
     # No text means unavailable, not a generic review-required result.
     if not terms:

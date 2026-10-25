@@ -70,12 +70,33 @@ class TestMarketRules(unittest.TestCase):
         self.assertIn("series_prohibition", result["flags"])
         self.assertEqual(len(result["official_rule_document_urls"]), 1)
 
-    def test_untrusted_contract_document_url_is_not_exposed(self):
-        result = summarize_rules(
-            {"rules_primary": "Official settlement source is the league result."},
-            {"contract_url": "https://attacker-kalshi.amazonaws.com/rules.pdf"},
+    def test_contract_document_urls_share_the_pdf_readers_strict_allowlist(self):
+        market = {"rules_primary": "Official settlement source is the league result."}
+        rejected = (
+            "https://attacker-kalshi.amazonaws.com/rules.pdf",
+            "https://attacker.kalshi.com/rules.pdf",
+            "https://kalshi.com.evil.example/rules.pdf",
+            "https://user@kalshi.com/rules.pdf",
+            "https://kalshi.com:8443/rules.pdf",
+            "http://kalshi.com/rules.pdf",
         )
-        self.assertEqual(result["official_rule_document_urls"], [])
+        for url in rejected:
+            with self.subTest(url=url):
+                result = summarize_rules(market, {"contract_url": url})
+                self.assertEqual(result["official_rule_document_urls"], [])
+
+    def test_contract_document_urls_accept_exact_official_hosts_only(self):
+        market = {"rules_primary": "Official settlement source is the league result."}
+        for url in (
+            "https://kalshi.com/contracts/rules.pdf",
+            "https://www.kalshi.com/contracts/rules.pdf",
+            "https://kalshi-public-docs.s3.amazonaws.com/contracts/rules.pdf",
+            "https://kalshi-public-docs.s3.us-east-1.amazonaws.com/contracts/rules.pdf",
+            "https://kalshi-public-docs.s3.us-east-2.amazonaws.com/contracts/rules.pdf",
+        ):
+            with self.subTest(url=url):
+                result = summarize_rules(market, {"contract_url": url})
+                self.assertEqual(result["official_rule_document_urls"], [url])
 
     def test_third_party_mcp_rules_aliases_are_normalized(self):
         result = summarize_rules({
