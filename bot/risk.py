@@ -128,7 +128,7 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
             kelly_fraction=s.kelly_fraction))
         if policy:
             if min_edge == s.min_edge:
-                min_edge = max(0.01, policy["min_edge"])
+                min_edge = max(s.min_edge, policy["min_edge"])
             min_confidence = policy["min_confidence"]
     if confidence < min_confidence:
         return None, f"confidence {confidence:.0%} below {min_confidence:.0%}"
