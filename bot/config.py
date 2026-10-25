@@ -147,14 +147,15 @@ class Settings:
     kelly_fraction: float = field(default_factory=lambda: _env_float("KELLY_FRACTION", 0.25))
 
     # --- risk caps (dollars) ------------------------------------------------
-    bankroll: float = field(default_factory=lambda: _env_float("BANKROLL", 1000.0))
-    max_per_bet: float = field(default_factory=lambda: _env_float("MAX_PER_BET", 25.0))
-    max_per_game: float = field(default_factory=lambda: _env_float("MAX_PER_GAME", 50.0))
-    max_per_day: float = field(default_factory=lambda: _env_float("MAX_PER_DAY", 150.0))
+    bankroll: float = field(default_factory=lambda: _env_float("BANKROLL", 20000.0 if _env("BOT_MODE", "paper") == "paper" else 1000.0))
+    max_per_bet: float = field(default_factory=lambda: _env_float("MAX_PER_BET", 500.0 if _env("BOT_MODE", "paper") == "paper" else 25.0))
+    min_per_bet: float = field(default_factory=lambda: _env_float("MIN_PER_BET", 25.0 if _env("BOT_MODE", "paper") == "paper" else 0.0))
+    max_per_game: float = field(default_factory=lambda: _env_float("MAX_PER_GAME", 500.0 if _env("BOT_MODE", "paper") == "paper" else 50.0))
+    max_per_day: float = field(default_factory=lambda: _env_float("MAX_PER_DAY", 7500.0 if _env("BOT_MODE", "paper") == "paper" else 150.0))
 
     # --- account limits (from the Council Lab design) ----------------------------
-    max_open_positions: int = field(default_factory=lambda: _env_int("MAX_OPEN_POSITIONS", 5))
-    max_open_cost: float = field(default_factory=lambda: _env_float("MAX_OPEN_COST", 200.0))
+    max_open_positions: int = field(default_factory=lambda: _env_int("MAX_OPEN_POSITIONS", 15 if _env("BOT_MODE", "paper") == "paper" else 5))
+    max_open_cost: float = field(default_factory=lambda: _env_float("MAX_OPEN_COST", 7500.0 if _env("BOT_MODE", "paper") == "paper" else 200.0))
     daily_loss_limit: float = field(default_factory=lambda: _env_float("DAILY_LOSS_LIMIT", 30.0))
 
     # --- council (DON_THEO_SPEC): members start advisory and EARN power ---------
