@@ -680,11 +680,19 @@ class Engine:
                     readings = self.research(snap, ev_match, book_team, opp, sport, now)
                     if not readings:
                         continue
-                    start = iso_to_ts(ev_match["commence_time"]) if ev_match else None
-                    if not start or start <= now:
-                        # in-game prices move faster than our book data: research
-                        # and log, but only bet pre-game for now
-                        self._skip(summary, "not pre-game or unmatched")
+                    if not ev_match:
+                        # Keep data-matching failures distinct from already-started
+                        # games; otherwise a zero-match cycle cannot be diagnosed.
+                        self._skip(summary, "no sportsbook event match")
+                        continue
+                    start = iso_to_ts(ev_match.get("commence_time"))
+                    if not start:
+                        self._skip(summary, "matched event missing start time")
+                        continue
+                    if start <= now:
+                        # In-game prices move faster than our book data; research
+                        # and log, but only bet pre-game for now.
+                        self._skip(summary, "sportsbook event already started")
                         continue
                     if not self.betting_ok or benched:
                         self._skip(summary, "league benched" if benched else "betting paused")
