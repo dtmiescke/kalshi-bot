@@ -41,6 +41,10 @@ any future reuse of implementation code.
    redirects, an 8 MiB download cap, 30-page / 6,000-character extraction cap, seven-day
    cache, and at most 3,000 characters passed to counsel. Extraction errors remain unknown.
 
+## MCP protocol compatibility hardening
+
+The rule normalizer accepts native Kalshi objects, known read-only MCP wrappers, MCP structuredContent, and JSON encoded in MCP text content blocks. Non-JSON text is retained only as bounded PDF-like evidence and cannot satisfy the settlement-source gate; explicit MCP tool errors and non-text/empty payloads fail closed. This is a small compatibility adapter, not a running MCP client/server, and adds neither credentials nor a second order path.
+
 ## Deliberately not added
 
 - No separate MCP server with order-write access.
