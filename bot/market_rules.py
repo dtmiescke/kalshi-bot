@@ -13,10 +13,7 @@ import re
 _RULE_FIELDS = (
     "rules_primary", "rules_secondary", "early_close_condition",
     "settlement_value", "settlement_source", "custom_strike",
-    # Read-only MCP/PDF extractors sometimes expose a consolidated text field
-    # instead of Kalshi's native rules_primary/rules_secondary fields.
     "rules_text", "rules_pdf_text", "contract_terms_text",
-    # Conservative aliases used by third-party read-only MCP responses.
     "rules", "contract_terms", "series_prohibitions", "prohibitions",
     "settlement_sources", "additional_prohibitions",
 )
@@ -66,8 +63,6 @@ def _unwrap_market(payload):
         if node.get("isError") is True:
             return {}
 
-        # Deeper payload fields override wrapper metadata, but wrappers themselves
-        # are not promoted to contract facts.
         merged.update({k: v for k, v in node.items() if k not in envelope_keys})
 
         for key in ("structuredContent", "result", "data", "market"):
@@ -76,8 +71,7 @@ def _unwrap_market(payload):
                 pending.append((nested, depth + 1))
             elif isinstance(nested, str):
                 # Some adapters serialize the result/data object instead of
-                # returning structuredContent. Parse only known envelope fields;
-                # never interpret arbitrary contract prose as executable data.
+                # returning structuredContent. Parse only known envelope fields.
                 candidate_text = nested.strip()
                 if candidate_text.startswith("{") and len(candidate_text) <= _MAX_JSON_ENVELOPE_CHARS:
                     try:
@@ -115,7 +109,7 @@ def _unwrap_market(payload):
                     plain_text_chars += len(bounded)
 
     if plain_text and not merged.get("rules_pdf_text"):
-        merged["rules_pdf_text"] = "\\n".join(plain_text)[:_MAX_PLAIN_TEXT_CHARS]
+        merged["rules_pdf_text"] = "\n".join(plain_text)[:_MAX_PLAIN_TEXT_CHARS]
     return merged
 
 
@@ -137,8 +131,6 @@ def summarize_rules(market, series=None):
         if value:
             terms[key] = value[:3000]
 
-    # Series endpoints own legal settlement sources and prohibitions. Preserve
-    # market-specific text first, adding series terms only when not already present.
     for key in ("settlement_sources", "additional_prohibitions", "series_prohibitions",
                 "rules_primary", "rules_secondary"):
         value = series.get(key)
@@ -176,9 +168,6 @@ def summarize_rules(market, series=None):
             or terms.get("prohibitions")) and "series_prohibition" not in flags:
         flags.append("series_prohibition")
 
-    # Reuse the PDF reader's single strict URL policy: only exact official
-    # document hosts, HTTPS, standard port, and no embedded credentials.
-    # A broad *.kalshi.com or *.amazonaws.com suffix is not sufficient trust.
     from .contract_pdf import is_trusted_contract_url
 
     doc_urls = []
@@ -187,7 +176,6 @@ def summarize_rules(market, series=None):
         if is_trusted_contract_url(url) and url not in doc_urls:
             doc_urls.append(url[:1000])
 
-    # No text means unavailable, not a generic review-required result.
     if not terms:
         status = "unavailable"
     elif missing or "early_close" in flags or "series_prohibition" in flags:
