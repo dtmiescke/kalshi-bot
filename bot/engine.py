@@ -22,6 +22,8 @@ from .signals import flow as flow_sig
 from .signals import intel
 from .signals import market_signals as ms
 from .signals import schedule as sched
+from .signals.base import Reading, clamp
+from .signals.crypto_microstructure import summarize_kalshi_book
 
 log = logging.getLogger("bot")
 
@@ -829,6 +831,35 @@ class Engine:
             snap.get("yes_bid"), snap.get("yes_ask"), now=now, spot=spot)
         if not readings:
             return []
+        # Reuse the existing KalshiClient and its binary-market orderbook
+        # semantics. Cache per ticker so repeat reviews don't hammer the API.
+        ticker = snap["ticker"]
+        book_key = f"kalshi_crypto_book_{ticker}"
+        cached = self.store.get_kv(book_key)
+        book_info = cached.get("value") if isinstance(cached, dict) and now - cached.get("ts", 0) < 5 else None
+        if book_info is None:
+            try:
+                raw_book = self.data.orderbook(ticker, depth=20)
+                book_info = summarize_kalshi_book(raw_book)
+                if book_info:
+                    self.store.set_kv(book_key, {"ts": now, "value": book_info})
+            except Exception:
+                book_info = None
+        if book_info:
+            imbalance = max(-1.0, min(1.0, float(book_info["depth_imbalance"])))
+            mid = readings[0].detail.get("mid")
+            if isinstance(mid, (int, float)):
+                # Depth is contextual evidence, not an independent forecast.
+                # Bound the adjustment to 1.5 probability points and keep its
+                # confidence low until out-of-sample learning proves value.
+                adjusted = clamp(mid + 0.015 * imbalance, 0.02, 0.98)
+                readings.append(Reading("crypto_kalshi_orderbook", adjusted, 0.25, {
+                    "venue": "kalshi", "depth_imbalance": round(imbalance, 4),
+                    "yes_bid_depth": round(book_info["yes_bid_depth"], 4),
+                    "no_bid_depth": round(book_info["no_bid_depth"], 4),
+                    "yes_levels": book_info["yes_levels"], "no_levels": book_info["no_levels"],
+                    "adjustment_cap": 0.015,
+                }))
         tf = flow_sig.trade_flow(self.store.flow(snap["ticker"], now - 900),
                                  readings[0].detail["mid"])
         if tf:

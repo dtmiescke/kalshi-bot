@@ -16,6 +16,7 @@ from . import features, marketdata, ml, vol as volmod
 from .live import settlement
 from .signals import implied_vol as iv
 from .signals.base import Reading, clamp
+from .signals.crypto_microstructure import indicator_snapshot
 
 COIN_OF_SERIES = {"KXBTC15M": "BTC", "KXETH15M": "ETH", "KXSOL15M": "SOL"}
 
@@ -47,7 +48,8 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
     dv = iv.cached_dvol(store, coin, fetch=dvol_fetch or iv.fetch_dvol) if coin in ("BTC", "ETH") else None
     sigma, parts = volmod.forecast(store, coin, closes[-120:], dv, now, ctx.get("_events"))
     info = {"coin": coin, "secs_left": secs, "sigma": sigma, "vol_parts": parts,
-            "context": {k: v for k, v in ctx.items() if not k.startswith("_")}}
+            "context": {k: v for k, v in ctx.items() if not k.startswith("_")},
+            "chart_url": "https://www.tradingview.com/chart/?symbol=COINBASE%3A" + coin + "USD"}
     if not sigma:
         return readings, info
 
@@ -70,6 +72,24 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
                              "vol_scale": shape.get("vol_scale", 1.0),
                              "z": None if info["live_z"] is None
                              else round(info["live_z"], 5)}))
+    # Cross-venue order-book pressure is a small auxiliary signal only. It is
+    # not the Kalshi book and must never outweigh the contract/volatility model.
+    book = ctx.get("orderbook") if isinstance(ctx, dict) else None
+    if isinstance(book, dict) and isinstance(book.get("depth_imbalance"), (int, float)):
+        imbalance = max(-1.0, min(1.0, float(book["depth_imbalance"])))
+        spread_bps = max(0.0, float(book.get("spread_bps", 0.0) or 0.0))
+        shift = max(-0.02, min(0.02, 0.02 * imbalance))
+        book_prob = clamp(p + shift, 0.02, 0.98)
+        book_conf = clamp(0.35 * (1.0 - min(spread_bps, 30.0) / 40.0), 0.05, 0.35)
+        readings.append(Reading("crypto_orderbook", book_prob, book_conf, {
+            "venue": book.get("venue", "coinbase"),
+            "depth_imbalance": round(imbalance, 4),
+            "spread_bps": round(spread_bps, 3),
+            "microprice_delta_bps": round(float(book.get("microprice_delta_bps", 0.0) or 0.0), 3),
+            "levels": book.get("levels", 0),
+            "cross_venue_proxy": True,
+        }))
+
     if dv:
         pi = settlement.prob_above(spot, terms["strike"], iv.dvol_to_per_minute(dv), secs,
                                    terms["avg_seconds"], tail_shrink=shrink,
@@ -101,4 +121,8 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
             row.update({"live_z": info["live_z"], "tail_shrink_used": shrink})
             ml.add_row(store, ticker, int(now) - int(now) % 60, coin, row, None, "live")
     info["features"] = feats
+    info["indicators"] = indicator_snapshot(feats)
+    if isinstance(book, dict):
+        info["orderbook"] = {k: book.get(k) for k in (
+            "venue", "spread_bps", "depth_imbalance", "microprice_delta_bps", "levels")}
     return readings, info
