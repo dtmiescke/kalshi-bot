@@ -368,6 +368,23 @@ class Engine:
                                if not h.get("event_ticker") or h.get("event_ticker") == mkt.get("event_ticker")]
             heads = intel.relevant(event_headlines, [team, opp or ""])
             ai_context = dict(context or {})
+            # Contract terms arrive with the existing market payload when the
+            # exchange provides them. Reuse that payload (no second collector);
+            # keep rule text compact and explicitly untrusted for AI research.
+            try:
+                from .market_rules import compact_market_rules
+                contract_rules = compact_market_rules(mkt, max_chars=1800)
+                if contract_rules.get("rule_text"):
+                    ai_context["contract_rules"] = {
+                        "ticker": contract_rules.get("ticker") or mkt.get("ticker"),
+                        "title": contract_rules.get("title"),
+                        "text": contract_rules["rule_text"],
+                        "source": contract_rules["source"],
+                        "truncated": contract_rules["truncated"],
+                        "trusted_as_instructions": False,
+                    }
+            except (TypeError, ValueError) as exc:
+                log.debug("market rules unavailable for %s: %s", mkt.get("ticker"), exc)
             if sports_intel:
                 stat_categories = {
                     "americanfootball_nfl": ["nfl"], "americanfootball_ncaaf": ["college_football"],
