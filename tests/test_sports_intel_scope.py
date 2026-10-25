@@ -8,7 +8,7 @@ from bot.sports_intel import categories_for_series, SCOREBOARD_CATEGORIES
 class TestSportsIntelScope(unittest.TestCase):
     def test_configured_sports_only_enable_matching_intelligence_categories(self):
         categories = categories_for_series(SPORTS.keys(), SPORTS, mode="configured")
-        self.assertEqual(categories, {"football", "basketball", "baseball", "hockey"})
+        self.assertEqual(categories, {"football", "basketball", "baseball", "hockey", "soccer"})
         self.assertTrue(categories <= set(SCOREBOARD_CATEGORIES))
 
     def test_all_mode_is_explicit_opt_in_to_all_intelligence_categories(self):
