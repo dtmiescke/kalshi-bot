@@ -71,6 +71,7 @@ def run_scheduled(s, store, data):
     # demo/live this also enforces confirmation and credentials; in paper it
     # still prevents invalid risk limits and unsupported execution settings.
     s.validate()
+    cycle_started = int(time.time())
     # The Nerd watchdog runs before market work and fails closed on schema/database
     # damage. Two janitors run on a six-hour cadence; only raw observations are
     # deduplicated/trimmed. Bets, model weights, grades and audit history are kept.
@@ -212,6 +213,14 @@ def run_scheduled(s, store, data):
                                    "429": sum(1 for r in log_ if r["status"] == 429),
                                    "other": sum(1 for r in log_ if r["status"] >= 400 and r["status"] != 429),
                                    "ts": time.time()})
+    # Silent-failure detector: did this cycle actually price markets and produce
+    # signals? A critical alarm pauses only the affected area until it recovers.
+    try:
+        health_result = nerd.silent_failure_check(store, cycle_started, alert=alerts.send)
+        if health_result["alarms"]:
+            print("health alarms:", json.dumps(health_result["alarms"], default=str))
+    except Exception as exc:
+        logging.warning("silent-failure check failed: %s", exc)
     store.set_kv("last_run_ts", time.time())
     if time.time() - store.get_kv("last_compact", 0) >= 86400:
         store.compact()
