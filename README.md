@@ -36,6 +36,14 @@ on unseen data** (crypto).
 
 - The fleet's fast coverage scan runs over the full eligible event set. Expensive per-market history and research is capped by `SPORTS_SCAN_EVENT_BUDGET` (default 150 events) and `SPORTS_SCAN_MARKET_BUDGET` (default 100 markets) so the scheduled job can finish and persist memory. Increase budgets only after observing runtime; held events bypass the deep-market cap.
 
+## Crypto microstructure and chart diagnostics
+- The existing BTC/ETH/SOL 15-minute Kalshi workflow is extended in place; sports discovery, event research, risk gates, execution, storage, and the existing dashboard are not replaced.
+- A public Coinbase Level-2 order book is sampled through the existing market-data context and cached for 5 seconds. It records spread, top-10-level bid/ask depth imbalance, and microprice displacement. This is explicitly a **cross-venue proxy**, not Kalshi liquidity; it contributes only a capped, low-confidence auxiliary reading and is never a standalone trade trigger.
+- The existing stable OHLCV feature pipeline already calculates multi-timeframe returns, RSI, EMA trend, MACD histogram, ADX, Bollinger bands, ATR, VWAP distance, OBV slope, volume spikes, and volatility regime. Those features remain unchanged so the training/live feature schema does not silently drift. A compact indicator snapshot is exposed alongside the existing crypto research info.
+- Crypto research info includes a TradingView chart link for the matching Coinbase spot pair. This is a chart hand-off, not a claim that TradingView supplies an official free market-data API to this bot.
+- Order-book failures are non-fatal and fail closed; stale or missing depth never becomes a fabricated signal. No API key is required for this public Coinbase endpoint. The existing OpenRouter key/configuration is reused only for the existing AI research features; no additional secret is required for the order book.
+- These are research features, not a profit guarantee. Cross-venue depth can be spoofed or differ from Kalshi's settlement index. They must be judged in time-split/out-of-sample tests before any weight increase. Paper mode and existing execution/risk controls remain authoritative.
+
 ## OpenRouter research brain
 - OmniRoute remains the preferred general-purpose gateway when configured; OpenRouter remains the fallback. The existing LLM budget and model panel are reused rather than adding another agent stack.
 - When `OPENROUTER_API_KEY` is configured, the existing sports news analysis can add bounded OpenRouter web search for event-specific news and official updates. Evidence is cached per event (30 minutes by default), with source URLs and a research-health record.
