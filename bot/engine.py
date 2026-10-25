@@ -701,7 +701,7 @@ class Engine:
                     # market), and merge rule text only; never replace the fresh price snapshot.
                     rule_keys = ("rules_primary", "rules_secondary", "early_close_condition",
                                  "settlement_value", "settlement_source", "custom_strike")
-                    if not any(best[0].get(key) for key in rule_keys):
+                    if not best[0].get("rules_primary") and not best[0].get("settlement_source"):
                         try:
                             details = self.data.market(best[0]["ticker"])
                             for key in rule_keys:
