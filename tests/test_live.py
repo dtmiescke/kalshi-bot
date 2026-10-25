@@ -3,6 +3,7 @@ import os
 import tempfile
 import time
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 
 from bot.config import Settings
@@ -188,7 +189,11 @@ class TestRunner(unittest.TestCase):
                 a.mids.append((now - i, 100300 + (i % 7) * 3 - 9))
             r.discover()
             r.poll_books()
-            r.refresh_context()                 # background refresh, as the live loop does
+            # background refresh, as the live loop does, but offline: real
+            # marketdata calls made this test depend on network speed (a slow
+            # fetch aged the book past the 5 s recheck and no bet was placed)
+            with mock.patch("bot.live.runner.marketdata.context", return_value={}):
+                r.refresh_context()
             got = list(r.tick(now))
             self.assertEqual(len(got), 1)
             ticker, readings, ctx, plan = got[0]
