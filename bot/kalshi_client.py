@@ -223,6 +223,17 @@ class KalshiClient:
     def market(self, ticker):
         return self._req("GET", f"/markets/{ticker}").get("market", {})
 
+    def series(self, ticker):
+        """Read one series' official settlement sources, prohibitions and rule-document URLs.
+
+        Uses the existing client and its short metadata cache; this is read-only and
+        deliberately does not create a second Kalshi/MCP execution path.
+        """
+        ticker = str(ticker or "").strip()
+        if not ticker or "/" in ticker or "?" in ticker:
+            raise ValueError("invalid Kalshi series ticker")
+        return self._req("GET", f"/series/{ticker}").get("series", {})
+
     def orderbook(self, ticker, depth=20):
         """Returns {'yes': [(price, qty), ...], 'no': [...]} as bids, best first."""
         data = self._req("GET", f"/markets/{ticker}/orderbook", params={"depth": depth})
