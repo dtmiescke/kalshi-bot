@@ -283,7 +283,7 @@ class TestLLMReviewFallback(Base):
             def budget_left(self):
                 return 6
             def ask_json(self, prompt, model):
-                if "skeptic" in prompt.lower():
+                if prompt.startswith("You are the skeptic on a trading council"):
                     return {"severe_issue": False, "issues": []}, model
                 return {"chair": {"decision": "reject", "reason": "edge too thin"}}, model
         with mock.patch.dict(os.environ, {"COUNCIL_MODE": "required"}):
