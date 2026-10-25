@@ -199,6 +199,18 @@ def run_scheduled(s, store, data):
         print(ml.text(m))
         if m.get("promoted"):
             alerts.send("New model promoted", ml.text(m)[:1500], tags=["brain"])
+    # Daily: re-fit each coin's tail model from 14 days of free Coinbase minutes.
+    # A fit is used for pricing only if it beat current pricing on newer windows.
+    if s.crypto_enabled and time.time() - float(store.get_kv("tail_model_last_fit", 0) or 0) >= 86400:
+        try:
+            from . import history
+            report = history.vol_check(store, days=14, fit=True)
+            store.set_kv("tail_model_last_fit", time.time())
+            print("tail models:", json.dumps({c: {k: v.get("tail_model", {}).get(k) for k in
+                                                  ("accepted", "df", "vol_scale")}
+                                              for c, v in report["coins"].items()}))
+        except Exception as exc:
+            logging.warning("tail model fit failed; pricing unchanged: %s", exc)
     print(build(store))
     if s.ai_enabled() and briefing.due(store):
         text = briefing.write(store, LLM(s.openrouter_key, store, max_per_run=2))
@@ -332,9 +344,11 @@ def main(argv=None):
         return
     if cmd == "vol-check":
         # read-only: is the volatility forecast the right size? (history.vol_check)
+        #   vol-check 7        report only
+        #   vol-check 14 fit   also fit each coin's tail model (kept only if it wins)
         days = float(argv[1]) if len(argv) > 1 else 7
         from . import history
-        print(json.dumps(history.vol_check(store, days=days), indent=2))
+        print(json.dumps(history.vol_check(store, days=days, fit="fit" in argv[2:]), indent=2))
         return
     if cmd == "compact":
         store.compact()

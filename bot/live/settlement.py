@@ -72,24 +72,39 @@ def contract_terms(mkt):
 
 
 def prob_above(spot, strike, vol_per_min, seconds_left, avg_seconds=60,
-               realized_avg=None, tail_shrink=0.9, proxy_bps=None):
+               realized_avg=None, tail_shrink=0.9, proxy_bps=None, tail_df=None, vol_scale=1.0):
     """P(settlement value > strike), where settlement = average price over the
     final `avg_seconds`. Works in log space under a driftless random walk.
 
     realized_avg: average price already observed inside the window, if we're
     already in it (needed for an exact answer in the last minute).
+
+    Shape of the move: with tail_df set (a fitted tail model, vol.tail_model),
+    a unit-variance Student-t with that many degrees of freedom and the
+    volatility multiplied by vol_scale; tail_shrink is then not used. Without
+    it, a normal with z multiplied by tail_shrink.
     """
     try:
-        shrink = float(tail_shrink)
+        shrink, scale = float(tail_shrink), float(vol_scale)
+        df = None if tail_df is None else float(tail_df)
     except (TypeError, ValueError):
         return None
-    if not math.isfinite(shrink) or shrink < 0:
+    if not math.isfinite(shrink) or shrink < 0 or not math.isfinite(scale) or scale <= 0:
         return None
-    z = z_above(spot, strike, vol_per_min, seconds_left, avg_seconds, realized_avg, proxy_bps)
+    if df is not None and (not math.isfinite(df) or df <= 2):
+        return None
+    try:
+        vol = float(vol_per_min) * scale
+    except (TypeError, ValueError):
+        return None
+    z = z_above(spot, strike, vol, seconds_left, avg_seconds, realized_avg, proxy_bps)
     if z is None:
         return None
     if math.isinf(z):
         return 1.0 if z > 0 else 0.0
+    if df is not None:
+        from scipy.special import stdtr
+        return float(stdtr(df, z * math.sqrt(df / (df - 2))))
     return _norm_cdf(shrink * z)
 
 

@@ -183,6 +183,78 @@ def learn_tail_shrink(store, coin, rows, now=None):
     return details
 
 
+# --- tail model: a fitted Student-t shape + volatility scale -----------------------------
+# The 0.9 shrink fattens tails everywhere, but settled 15-minute moves are
+# PEAKED: thinner than normal at 1-2 sd (where 5-30c long shots live) and fatter
+# only beyond ~2.5 sd (history.vol_check). A unit-variance Student-t has exactly
+# that shape; vol_scale corrects a forecast that runs too wide or too narrow.
+TAIL_DF_GRID = (3, 4, 5, 6, 8, 10, 15, 30)
+VOL_SCALE_GRID = tuple(round(0.70 + 0.02 * i, 2) for i in range(21))   # 0.70 .. 1.10
+
+
+def tail_model(store, coin):
+    """Accepted (df, vol_scale) for this coin, or None to keep the normal + shrink."""
+    m = store.get_kv(f"tail_model_{coin}") or {}
+    try:
+        df, scale = float(m["df"]), float(m["vol_scale"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (m.get("accepted") and math.isfinite(df) and min(TAIL_DF_GRID) <= df <= max(TAIL_DF_GRID)
+            and math.isfinite(scale) and min(VOL_SCALE_GRID) <= scale <= max(VOL_SCALE_GRID)):
+        return None
+    return df, scale
+
+
+def _t_loglik(zs, df, scale):
+    """Mean log density of z when z / scale is unit-variance Student-t(df)."""
+    from scipy.stats import t as student_t
+    k = math.sqrt(df / (df - 2))
+    x = np.asarray(zs) * k / scale
+    return float(np.mean(student_t.logpdf(x, df) + math.log(k / scale)))
+
+
+def _normal_loglik(zs, shrink):
+    """Mean log density of z under today's pricing: Phi(shrink * z)."""
+    x = np.asarray(zs) * shrink
+    return float(np.mean(-0.5 * x * x - 0.5 * math.log(2 * math.pi) + math.log(shrink)))
+
+
+def learn_tail_model(store, coin, samples, now=None):
+    """samples: [(window_close_ts, z)], z = un-shrunk move in the forecast's sd
+    (history.vol_check). Fit (df, vol_scale) on older windows; store it only if
+    it beats today's pricing (normal with the current tail_shrink) on the newest
+    held-out windows (HOLDOUT_FRACTION, at least MIN_HOLDOUT_WINDOWS). Details go
+    to kv tail_model_<coin> either way, for the app."""
+    now = int(time.time() if now is None else now)
+    clean = sorted((int(w), float(z)) for w, z in samples
+                   if z is not None and math.isfinite(float(z)))
+    windows = sorted({w for w, _ in clean})
+    n_hold = max(MIN_HOLDOUT_WINDOWS, int(len(windows) * HOLDOUT_FRACTION))
+    current = tail_shrink(store, coin)
+    details = {"ts": now, "coin": coin, "windows": len(windows), "accepted": False,
+               "current_shrink": current}
+    if len(windows) - n_hold < MIN_FIT_WINDOWS:
+        details["reason"] = f"not enough windows: {len(windows)}"
+        store.set_kv(f"tail_model_{coin}", details)
+        return details
+    cut = windows[-n_hold]
+    fit = [z for w, z in clean if w < cut]
+    hold = [z for w, z in clean if w >= cut]
+    df, scale = max(((d, v) for d in TAIL_DF_GRID for v in VOL_SCALE_GRID),
+                    key=lambda dv: _t_loglik(fit, *dv))
+    ll_model, ll_current = _t_loglik(hold, df, scale), _normal_loglik(hold, current)
+    accepted = ll_model > ll_current
+    details.update({
+        "df": df, "vol_scale": scale, "fit_windows": len(windows) - n_hold,
+        "holdout_windows": n_hold, "holdout_loglik_model": round(ll_model, 5),
+        "holdout_loglik_current": round(ll_current, 5), "accepted": accepted,
+        "reason": ("beat current pricing on newer windows" if accepted
+                   else "did not beat current pricing on newer windows"),
+    })
+    store.set_kv(f"tail_model_{coin}", details)
+    return details
+
+
 def learn_blend(store, coin, samples, lr=0.05):
     """samples: [(parts_dict, realized_move_per_sqrt_min)]. Shift blend weight
     toward whichever view predicted the realized move best (squared error)."""

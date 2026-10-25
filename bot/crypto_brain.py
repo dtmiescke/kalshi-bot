@@ -52,8 +52,11 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
         return readings, info
 
     shrink = volmod.tail_shrink(store, coin)
+    # a fitted tail model (Student-t shape + vol scale), once one has proven itself
+    tm = volmod.tail_model(store, coin)
+    shape = {"tail_df": tm[0], "vol_scale": tm[1]} if tm else {}
     p = settlement.prob_above(spot, terms["strike"], sigma, secs, terms["avg_seconds"],
-                              tail_shrink=shrink)
+                              tail_shrink=shrink, **shape)
     if p is None:
         return readings, info
     # the exact z this price came from, so the tail fit uses the same calculation
@@ -63,11 +66,14 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
                             {"spot": spot, "strike": terms["strike"], "secs_left": round(secs),
                              "sigma": round(sigma, 7), "avg_s": terms["avg_seconds"],
                              "season": parts.get("season"), "event_mult": parts.get("event_mult"),
-                             "tail_shrink": shrink, "z": None if info["live_z"] is None
+                             "tail_shrink": shrink, "tail_df": shape.get("tail_df"),
+                             "vol_scale": shape.get("vol_scale", 1.0),
+                             "z": None if info["live_z"] is None
                              else round(info["live_z"], 5)}))
     if dv:
         pi = settlement.prob_above(spot, terms["strike"], iv.dvol_to_per_minute(dv), secs,
-                                   terms["avg_seconds"], tail_shrink=shrink)
+                                   terms["avg_seconds"], tail_shrink=shrink,
+                                   tail_df=shape.get("tail_df"))
         if pi is not None:
             readings.append(Reading("crypto_model_iv", clamp(pi, 0.02, 0.98), 0.6, {"dvol": dv}))
     if len(closes) > 6:
