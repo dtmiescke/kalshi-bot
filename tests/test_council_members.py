@@ -128,6 +128,12 @@ class TestStandings(Base):
         self.assertEqual(table["situationist"]["seat"], len(council.MEMBERS))
         self.assertEqual(table["sharp"]["seat"], 1)
 
+    def test_members_without_votes_sit_behind_graded_ones(self):
+        seed(self.st, "stats", [1, 0, 0, 0])                          # 25% but has a record
+        table = council.standings(self.st, self.s)
+        self.assertEqual(table["stats"]["seat"], 1)
+        self.assertGreater(table["sharp"]["seat"], 1)
+
     def test_power_is_earned_and_lost(self):
         seed(self.st, "sharp", [1, 0] * 60)                           # 120 votes, beats market
         self.assertEqual(council.standings(self.st, self.s)["sharp"]["stage"], "veto")
