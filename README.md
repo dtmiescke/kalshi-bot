@@ -122,7 +122,7 @@ can verify AI connectivity without placing trades. LiteLLM is optional; leave it
 to preserve the existing OmniRoute → OpenRouter behavior.
 
 ## Integration choices from the open-source review
-- **Keep one execution authority.** Do not connect a third-party MCP trading server with order-write
+- **Contract-rule review:** `bot/market_rules.py` compacts the exact rule fields already present in a Kalshi market payload, preserves bounded source text, and flags missing settlement source, early-close terms, cancellation/void language, and other review cues for sports counsel. It does not scrape or invent terms; missing rules are explicitly marked unavailable. This adopts the useful read-only research idea from Kalshi MCP servers without adding a second exchange client or order-write tool.\n- **Keep one execution authority.** Do not connect a third-party MCP trading server with order-write
   access alongside `KalshiClient`; that would duplicate order paths and bypass the current final
   risk recheck, ledger, and reconciliation guard. A future Kalshi MCP adapter should be read-only
   for contract rules, market metadata, and research until it can be proven to use the same guarded
