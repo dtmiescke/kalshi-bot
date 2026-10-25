@@ -33,7 +33,8 @@ _EXECUTION_LOCK = threading.RLock()
 
 
 def _rotating_event_batch(events, cursor="", budget=150, held=()):
-    """Select a deterministic rotating batch while always retaining held events."""
+    """Prioritize imminent games while preserving rotation and held-event coverage."""
+    from .event_clock import event_start_ts
     unique = {}
     for event in events:
         ticker = str(event.get("event_ticker") or event.get("ticker") or "")
@@ -46,11 +47,26 @@ def _rotating_event_batch(events, cursor="", budget=150, held=()):
     limit = max(0, int(budget))
     if not eligible or limit == 0:
         return [event for _, event in held_rows], str(cursor or "")
+    now = time.time()
+    priority = []
+    for ticker, event in eligible:
+        start = event_start_ts(event)
+        if start is None:
+            continue
+        delta = start - now
+        if -3 * 3600 <= delta <= 90 * 60:
+            priority.append((0 if delta >= 0 else 1, abs(delta), ticker, event))
+    priority.sort(key=lambda item: (item[0], item[1], item[2]))
+    urgent_count = min(len(priority), max(1, limit // 3)) if priority else 0
+    urgent = [(ticker, event) for _, _, ticker, event in priority[:urgent_count]]
+    urgent_tickers = {ticker for ticker, _ in urgent}
+    rotating = [(ticker, event) for ticker, event in eligible if ticker not in urgent_tickers]
     cursor = str(cursor or "")
-    after = [(ticker, event) for ticker, event in eligible if ticker > cursor]
-    before = [(ticker, event) for ticker, event in eligible if ticker <= cursor]
-    selected = (after + before)[:limit]
-    next_cursor = selected[-1][0] if selected else cursor
+    after = [(ticker, event) for ticker, event in rotating if ticker > cursor]
+    before = [(ticker, event) for ticker, event in rotating if ticker <= cursor]
+    rotating_selected = (after + before)[:max(0, limit - len(urgent))]
+    selected = urgent + rotating_selected
+    next_cursor = rotating_selected[-1][0] if rotating_selected else cursor
     return [event for _, event in held_rows + selected], next_cursor
 
 
@@ -390,6 +406,7 @@ class Engine:
                                     "season_series": item.get("season_series"),
                                     "game_info": item.get("game_info"),
                                     "football_matchup_profile": item.get("football_matchup_profile"),
+                                    "event_evidence_profile": item.get("event_evidence_profile"),
                                     "public_odds": item.get("odds", []), "predictor": item.get("predictor"),
                                 })
                     if stat_rows:
@@ -525,6 +542,24 @@ class Engine:
                 events_by_series, scanner_health, live_watch = scan_fleet(
                     events_by_series, now=now, workers=8)
                 self.store.set_kv("sports_scanner_health", scanner_health)
+                catalog_health = self.store.get_kv("sports_catalog_health", {}) or {}
+                self.store.set_kv("sports_coverage_audit", {
+                    "ts": now, "scanner_ok": bool(scanner_health.get("ok")),
+                    "events_unique": scanner_health.get("events_unique", 0),
+                    "events_with_start_time": scanner_health.get("events_with_start_time", 0),
+                    "events_missing_start_time": scanner_health.get("events_missing_start_time", 0),
+                    "events_without_markets": scanner_health.get("events_without_markets", 0),
+                    "active_markets": scanner_health.get("active_markets", 0),
+                    "active_markets_with_quotes": scanner_health.get("active_markets_with_quotes", 0),
+                    "active_markets_missing_quotes": scanner_health.get("active_markets_missing_quotes", 0),
+                    "series_coverage": scanner_health.get("series_coverage", {}),
+                    "catalog_coverage_warning": bool(catalog_health.get("coverage_warning")),
+                    "catalog_events_seen": catalog_health.get("open_events_seen"),
+                    "catalog_series_discovered": catalog_health.get("series_discovered"),
+                    "coverage_status": ("catalog_truncated_or_at_limit" if catalog_health.get("coverage_warning")
+                                        else "observed_catalog; upstream completeness not guaranteed"),
+                    "execution_enabled": False,
+                })
                 self.store.set_kv("sports_live_watch", live_watch[:500])
             except Exception as e:
                 log.exception("sports scanner fleet failed: %s", e)
@@ -683,6 +718,15 @@ class Engine:
                 "markets_deferred": sports_markets_deferred,
                 "full_event_scan": True, "held_events_prioritized": True}
             self.store.set_kv("sports_deep_scan_health", {"ts": now, **summary["sports_deep_scan"]})
+            coverage = self.store.get_kv("sports_coverage_audit", {}) or {}
+            deep_budget = self.store.get_kv("sports_deep_scan_budget", {}) or {}
+            coverage.update({
+                "deep_scan": dict(summary["sports_deep_scan"]),
+                "events_available_for_deep_scan": deep_budget.get("events_available"),
+                "events_selected_for_deep_scan": deep_budget.get("events_selected"),
+                "event_rotation_cursor": deep_budget.get("event_cursor"),
+            })
+            self.store.set_kv("sports_coverage_audit", coverage)
         if self.s.crypto_enabled:
             self.run_crypto(watch, brain.get_weights(self.store, "crypto"), summary, now)
         log.info("cycle: %s", summary)
