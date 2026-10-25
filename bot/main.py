@@ -330,6 +330,12 @@ def main(argv=None):
             report = settlement_gap(store, data, max_fetch=int(argv[1]) if len(argv) > 1 else 150)
         print(json.dumps(report, indent=2))
         return
+    if cmd == "vol-check":
+        # read-only: is the volatility forecast the right size? (history.vol_check)
+        days = float(argv[1]) if len(argv) > 1 else 7
+        from . import history
+        print(json.dumps(history.vol_check(store, days=days), indent=2))
+        return
     if cmd == "compact":
         store.compact()
         print("compacted")
