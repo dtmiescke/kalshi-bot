@@ -687,30 +687,32 @@ class Engine:
                     book_team = mapping.get(team) if mapping else None
                     opp = next((v for k, v in (mapping or {}).items() if k != team), None)
 
-                    if not ev_match:
-                        # Classify missing event matches before research returns
-                        # an empty reading set, otherwise the root cause is hidden.
-                        self._skip(summary, "no sportsbook event match")
-                        continue
-                    start = iso_to_ts(ev_match.get("commence_time"))
-                    if not start:
-                        self._skip(summary, "matched event missing start time")
-                        continue
-                    if start <= now:
-                        # In-game prices move faster than our book data; only
-                        # pre-game opportunities are eligible for paper execution.
-                        self._skip(summary, "sportsbook event already started")
-                        continue
+                    if ev_match:
+                        start = iso_to_ts(ev_match.get("commence_time"))
+                        if not start:
+                            self._skip(summary, "matched event missing start time")
+                            continue
+                        if start <= now:
+                            # In-game prices move faster than book data; preserve the
+                            # existing pre-game-only rule when sportsbook data is used.
+                            self._skip(summary, "sportsbook event already started")
+                            continue
+                    # A sportsbook match enriches the model but is not mandatory.
+                    # In Kalshi-only mode, use market price, observed trade flow,
+                    # prior settled-market training/calibration, and any available
+                    # non-sportsbook research. Never invent missing matchup facts.
                     readings = self.research(snap, ev_match, book_team, opp, sport, now)
                     if not readings:
-                        self._skip(summary, "no usable sportsbook research")
+                        self._skip(summary, "no usable Kalshi or external research")
                         continue
                     if not self.betting_ok or benched:
                         self._skip(summary, "league benched" if benched else "betting paused")
                         continue
                     # Apply league-specific learned weights when the series is identifiable.
                     league_weights = brain.get_weights(self.store, brain.learning_domain_of(series))
-                    c = self.evaluate(snap, readings, league_weights, summary)
+                    c = self.evaluate(
+                        snap, readings, league_weights, summary,
+                        required="book_consensus" if ev_match else None)
                     if c:
                         candidates.append(c)
                 if candidates:
@@ -1238,9 +1240,13 @@ class Engine:
 
     def evaluate(self, snap, readings, weights, summary, required="book_consensus",
                  min_edge=None, max_per_bet=None):
-        if not any(r.name == required for r in readings):
-            self._record_decision(snap, readings, "rejected", "no outside signal")
-            self._skip(summary, "no outside signal")
+        if required and not any(r.name == required for r in readings):
+            self._record_decision(snap, readings, "rejected", "required outside signal unavailable")
+            self._skip(summary, "required outside signal unavailable")
+            return None
+        if not required and not any(r.name in ("kalshi_market", "trade_flow") for r in readings):
+            self._record_decision(snap, readings, "rejected", "no usable Kalshi-native signal")
+            self._skip(summary, "no usable Kalshi-native signal")
             return None
         bc = next((r for r in readings if r.name == "book_consensus"), None)
         if bc and bc.detail.get("age_min", 0) > self.odds_max_age * 1.5:
