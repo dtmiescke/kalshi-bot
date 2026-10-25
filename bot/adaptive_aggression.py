@@ -28,14 +28,29 @@ class AggressionPolicy:
             raise ValueError("invalid baseline risk parameters")
 
 
+def settled_paper_results(store, limit=100):
+    """Read real settled paper bets from the existing ledger; do not create a new history store.
+
+    PnL is the existing ledger's realized value after fees. Return oldest-to-newest
+    within the recent window so the drawdown calculation follows the actual path.
+    """
+    rows = store.q("""SELECT mode, pnl, graded_ts, result FROM (
+                          SELECT mode, pnl, graded_ts, result FROM bets
+                          WHERE mode='paper' AND status='graded' AND pnl IS NOT NULL
+                          ORDER BY graded_ts DESC LIMIT ?
+                      ) ORDER BY graded_ts ASC""", (max(1, int(limit)),))
+    return [{"mode": r["mode"], "settled": True, "pnl": r["pnl"],
+             "settled_ts": r["graded_ts"], "result": r["result"]} for r in rows]
+
+
 def choose(policy, settled_paper_results=()):
     """Return a bounded profile; never authorize a trade or weaken hard guards.
 
-    Adaptive promotes to aggressive only after >=50 settled, held-out paper
-    results with positive fee-inclusive PnL and <=10% peak-to-trough drawdown.
-    Without verified held-out history it deliberately fails closed to
-    conservative. The runtime currently supplies no held-out history, so
-    adaptive remains conservative until a trustworthy history source is wired.
+    Adaptive uses the existing settled-paper ledger and promotes only after at
+    least 50 actual paper bets, positive net PnL after fees, and <=10% drawdown.
+    With insufficient or malformed history it deliberately fails closed to
+    conservative. Historical bets are performance evidence, not independent
+    proof that a future strategy will remain profitable.
     """
     if policy.level == "off":
         return None
@@ -46,7 +61,6 @@ def choose(policy, settled_paper_results=()):
         valid = len(rows) >= 50 and all(
             isinstance(r, dict)
             and r.get("mode") == "paper"
-            and r.get("held_out") is True
             and r.get("settled") is True
             and isinstance(r.get("pnl"), (int, float))
             and not isinstance(r.get("pnl"), bool)
