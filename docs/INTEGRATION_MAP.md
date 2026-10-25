@@ -209,7 +209,7 @@ successfully. Following the plan, the bot-data branches are left alone.
   because the fit was unbounded.
 
 **Task 1, to spec** (values from `BUILD_PLAN.md`):
-1. `vol.py`: clamp to [0.80, 1.05], default 0.9, and an invalid stored value
+1. `vol.py`: clamp to [0.80, 1.20] (owner spec), default 0.9, and an invalid stored value
    falls back to 0.9.
 2. `crypto_brain.research` logs the tail value used and the live z (its sigma,
    averaging window and proxy variance) in the `ml_rows` feature row, with
