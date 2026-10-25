@@ -21,9 +21,17 @@ class KalshiBook:
         self.gaps = 0
         self.needs_resync = False
 
+    @staticmethod
+    def _levels(msg, side):
+        # Kalshi WS docs (websockets/orderbook-updates): snapshots carry
+        # yes_dollars_fp / no_dollars_fp as [price_dollars, count_fp] pairs, and
+        # an empty side is simply absent. Older shapes are kept as fallbacks.
+        return (msg.get(f"{side}_dollars_fp") or msg.get(f"{side}_dollars")
+                or msg.get(side) or [])
+
     def snapshot(self, msg, seq=None):
-        self.yes = {_px(p): float(q) for p, q in (msg.get("yes_dollars") or msg.get("yes") or [])}
-        self.no = {_px(p): float(q) for p, q in (msg.get("no_dollars") or msg.get("no") or [])}
+        self.yes = {_px(p): float(q) for p, q in self._levels(msg, "yes")}
+        self.no = {_px(p): float(q) for p, q in self._levels(msg, "no")}
         self.seq = seq
         self.needs_resync = False
         self.last_update = time.time()
