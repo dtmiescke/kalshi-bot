@@ -4,11 +4,13 @@
 set -euo pipefail
 
 mkdir -p data/models
-rm -f data/.memory_restored
+rm -f data/.memory_restored data/.memory_base
 
 if git fetch -q origin bot-data; then
   rm -rf /tmp/bd
   git worktree add -q /tmp/bd origin/bot-data
+  # save.sh refuses to overwrite bot-data if it moved after this restore
+  git rev-parse origin/bot-data > data/.memory_base
 
   if [ -s /tmp/bd/bot.sqlite.gz ]; then
     gzip -dc /tmp/bd/bot.sqlite.gz > data/bot.sqlite
@@ -36,6 +38,7 @@ fi
 # allowing the application to initialize a genuinely new database.
 if remote_refs=$(git ls-remote --heads origin refs/heads/bot-data 2>/dev/null); then
   if [ -z "$remote_refs" ]; then
+    echo none > data/.memory_base
     touch data/.memory_restored
     echo "No bot-data branch exists on the reachable remote; allowing first-run initialization."
     exit 0

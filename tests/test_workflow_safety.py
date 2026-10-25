@@ -83,6 +83,83 @@ class TestWorkflowSafety(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("was not verified", result.stderr)
 
+    # --- stale-base guard: never overwrite memory another job saved meanwhile --------
+    def _memory_remote(self, root):
+        """Bare remote with main + a bot-data branch holding a valid gzipped DB."""
+        import gzip
+        import sqlite3
+        bare = self._seed_remote(root)
+        seed = root / "seed"
+        self._git(seed, "checkout", "-q", "--orphan", "bot-data")
+        self._git(seed, "rm", "-rfq", ".")
+        db = root / "seed.sqlite"
+        sqlite3.connect(db).execute("CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT)").connection.commit()
+        (seed / "bot.sqlite.gz").write_bytes(gzip.compress(db.read_bytes()))
+        self._git(seed, "add", "bot.sqlite.gz")
+        self._git(seed, "commit", "-qm", "memory")
+        self._git(seed, "push", "-q", "origin", "bot-data")
+        return bare, seed
+
+    def _job(self, root, bare, name):
+        cwd = root / name
+        cwd.mkdir()
+        self._git(cwd, "init", "-q")
+        self._git(cwd, "remote", "add", "origin", str(bare))
+        env = dict(os.environ, MEMORY_REMOTE=str(bare), PYTHONPATH=str(ROOT), NTFY_TOPIC="")
+        load = subprocess.run(["bash", str(ROOT / ".github" / "load.sh")], cwd=cwd, env=env,
+                              capture_output=True, text=True, timeout=60)
+        self.assertEqual(load.returncode, 0, load.stdout + load.stderr)
+        return cwd, env
+
+    def _save(self, cwd, env):
+        return subprocess.run(["bash", str(ROOT / ".github" / "save.sh")], cwd=cwd, env=env,
+                              capture_output=True, text=True, timeout=120)
+
+    def _remote_head(self, bare):
+        return self._git(bare, "rev-parse", "bot-data").stdout.strip()
+
+    def test_save_updates_memory_and_allows_a_second_save_in_the_same_job(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bare, _ = self._memory_remote(root)
+            cwd, env = self._job(root, bare, "job")
+            restored = (cwd / "data" / ".memory_base").read_text().strip()
+            self.assertEqual(restored, self._remote_head(bare))
+            first = self._save(cwd, env)
+            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            saved = self._remote_head(bare)
+            self.assertNotEqual(saved, restored)
+            self.assertEqual((cwd / "data" / ".memory_base").read_text().strip(), saved)
+            second = self._save(cwd, env)             # e.g. a mid-session save
+            self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+
+    def test_save_refuses_when_another_job_saved_meanwhile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bare, seed = self._memory_remote(root)
+            cwd, env = self._job(root, bare, "bot")
+            # the trainer saves newer memory while the bot is still running
+            (seed / "TRAINER.txt").write_text("newer memory\n")
+            self._git(seed, "add", "TRAINER.txt")
+            self._git(seed, "commit", "-qm", "trainer save")
+            self._git(seed, "push", "-q", "origin", "bot-data")
+            newer = self._remote_head(bare)
+            result = self._save(cwd, env)
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("refusing to overwrite newer memory", result.stderr)
+            self.assertEqual(self._remote_head(bare), newer)      # newer copy kept
+
+    def test_save_refuses_without_a_recorded_base(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bare, _ = self._memory_remote(root)
+            cwd, env = self._job(root, bare, "job")
+            (cwd / "data" / ".memory_base").unlink()
+            before = self._remote_head(bare)
+            result = self._save(cwd, env)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(self._remote_head(bare), before)
+
 
 if __name__ == "__main__":
     unittest.main()
