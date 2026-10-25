@@ -129,8 +129,9 @@ def _scan_event(event, now, role):
         else:
             try:
                 b, a = float(bid), float(ask)
-                if "yes_bid_dollars" not in market and "yes_ask_dollars" not in market and (b > 1 or a > 1):
+                if "yes_bid_dollars" not in market and "yes_bid_fp" not in market and b > 1:
                     b /= 100.0
+                if "yes_ask_dollars" not in market and "yes_ask_fp" not in market and a > 1:
                     a /= 100.0
                 if role == "quote_quality":
                     stats["priced_markets"] += 1
