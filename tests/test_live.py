@@ -66,6 +66,9 @@ class TestSettlement(unittest.TestCase):
             "rules_primary": "Resolves using the CF Benchmarks RTI average of the 60 seconds before close."})
         self.assertEqual((t["avg_seconds"], t["avg_source"], t["benchmark"]),
                          (60, "rules", "CF Benchmarks"))
+        self.assertIn("rules_audit", t)
+        self.assertIn("status", t["rules_audit"])
+        self.assertNotIn("terms", t["rules_audit"])
 
     def test_averaging_reduces_uncertainty(self):
         # same spot/strike/time: an averaged settlement is MORE certain than a single print
