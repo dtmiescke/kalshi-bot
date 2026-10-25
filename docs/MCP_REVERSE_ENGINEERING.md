@@ -6,7 +6,7 @@ Reviewed 2026-10-25. This is an integration decision record for the existing bot
 
 | Source | Useful idea | Fit with this bot | Decision |
 |---|---|---|---|
-| [9crusher/mcp-server-kalshi](https://github.com/9crusher/mcp-server-kalshi) | Market/event discovery, order-book/trade reads, exact contract terms and rules-PDF text | The bot already has one rate-limited KalshiClient, market_rules.summarize_rules, and sports-counsel checks for missing or ambiguous terms. | Reuse read-only rules normalization. This change accepts native market objects and common market / result / data envelopes, plus consolidated rules/PDF text when supplied. Do not launch another API client or add an MCP runtime dependency. |
+| [9crusher/mcp-server-kalshi](https://github.com/9crusher/mcp-server-kalshi) | Market/event discovery, order-book/trade reads, exact contract terms and rules-PDF text | The bot already has one rate-limited KalshiClient, market_rules.summarize_rules, and sports-counsel checks for missing or ambiguous terms. | Reuse read-only rules normalization. Accept native market objects, common market / result / data envelopes, and bounded consolidated rules/PDF text or common rule aliases when supplied. Do not launch another API client or add an MCP runtime dependency. |
 | [BrainDAO/mcp-kalshi](https://github.com/BrainDAO/mcp-kalshi) | Market search, order book, portfolio and trading tool schema | Market reads and portfolio/execution already have owners in KalshiClient and engine; this MCP also exposes order-write tools. | Do not connect a second order writer. Any future tool bridge must be read-only or call the existing guarded execution path. |
 | [OctagonAI/kalshi-trading-bot-cli](https://github.com/OctagonAI/kalshi-trading-bot-cli) | Independent probability estimates, edge against live book, risk gates and fractional-Kelly sizing | risk.decide, fee calculations, book-aware fill planning, caps, guard, calibrated signals and held-out model promotion already implement these responsibilities. | Keep those owners. Treat external formulas as candidates for offline comparative tests only; never replace current sizing or caps by copying another bot. |
 | [rodlaf/KalshiMarketMaker](https://github.com/rodlaf/KalshiMarketMaker) | Inventory-skewed quotes and Avellaneda–Stoikov market-making math | This project is a directional sports / 15-minute crypto strategy, not a two-sided inventory market maker. | Do not import its order loop. Its inventory and quote concepts only become relevant if a separately approved market-making strategy is built and backtested. |
@@ -16,10 +16,11 @@ Reviewed 2026-10-25. This is an integration decision record for the existing bot
 
 ## Changes in this PR
 
-- bot/market_rules.py now normalizes direct Kalshi market objects and common read-only MCP response envelopes (market, result, data).
-- It accepts bounded consolidated rule text fields (rules_text, rules_pdf_text, contract_terms_text) and series prohibitions when an upstream read-only source supplies them.
-- Missing rule text remains explicitly unavailable. The helper does not fetch third-party data, assert a PDF was verified, infer missing settlement rules, or authorize an order.
-- Tests cover nested envelopes, consolidated text, size bounds and fail-closed behavior.
+- bot/market_rules.py normalizes direct Kalshi market objects and common read-only MCP response envelopes (market, result, data).
+- It accepts bounded native and consolidated rule text fields, including rules_text, rules_pdf_text, contract_terms_text, rules, contract_terms, series_prohibitions, and prohibitions when an upstream read-only source supplies them.
+- All retained text is capped at 3,000 characters per field. Missing primary rule/source text remains explicitly unavailable or review-required; aliases do not bypass the missing-terms check when they are only prohibitions.
+- The helper does not fetch third-party data, assert a PDF was verified, infer missing settlement rules, or authorize an order.
+- Tests cover nested envelopes, consolidated text, third-party aliases, size bounds and fail-closed behavior.
 
 ## Integration boundaries
 
