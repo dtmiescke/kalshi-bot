@@ -22,7 +22,7 @@ ALLOWED_HOSTS = {
 MAX_PDF_BYTES = 8 * 1024 * 1024
 MAX_PAGES = 30
 MAX_TEXT_CHARS = 6000
-CACHE_SECONDS = 7 * 86400
+CACHE_SECONDS = 86400  # Revalidate official settlement terms at least daily
 
 
 def is_trusted_contract_url(url):
