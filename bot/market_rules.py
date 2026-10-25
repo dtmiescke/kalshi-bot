@@ -90,8 +90,8 @@ def summarize_rules(market, series=None):
     for name, pattern in patterns:
         if re.search(pattern, lower):
             flags.append(name)
-    if (terms.get("additional_prohibitions") or terms.get("series_prohibitions")) \
-            and "series_prohibition" not in flags:
+    if (terms.get("additional_prohibitions") or terms.get("series_prohibitions")
+            or terms.get("prohibitions")) and "series_prohibition" not in flags:
         flags.append("series_prohibition")
 
     doc_urls = []
