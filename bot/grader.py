@@ -219,11 +219,15 @@ def grade_combo_predictions(store, client, max_fetch=150):
 
 
 def grade(store, client):
+    from .kalshi_history import GradingClient
+    # live first, then Kalshi's archive (settled markets move there after a cutoff)
+    client = GradingClient(client)
     n_bets = settle_bets(store, client)
     n_mkts, changes = learn_from_markets(store, client)
     n_decisions = grade_decision_audits(store, client)
     n_combos = grade_combo_predictions(store, client)
     monitor_model(store)
+    store.set_kv("grading_lookup_health", dict(client.health(), ts=int(time.time())))
     log.info("graded %d bets, %d markets, %d decision snapshots, %d combo forecasts, weight changes: %s", n_bets, n_mkts, n_decisions, n_combos,
              json.dumps({k: [round(a, 3), round(b, 3)] for k, (a, b) in changes.items()}))
     return {"bets": n_bets, "markets": n_mkts, "combo_forecasts": n_combos, "weight_changes": changes}
