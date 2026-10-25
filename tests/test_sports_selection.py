@@ -12,11 +12,23 @@ class TestSportsSelection(unittest.TestCase):
             settings = Settings()
         self.assertEqual(settings.sports_mode, "configured")
         self.assertEqual(settings.selected_series(), {
-            "KXNFLGAME", "KXNBAGAME", "KXMLBGAME", "KXNHLGAME", "KXNCAAFGAME"})
+            "KXNFLGAME", "KXNBAGAME", "KXMLBGAME", "KXNHLGAME", "KXNCAAFGAME",
+            "KXEPLGAME", "KXLALIGAGAME", "KXBUNDESLIGAGAME", "KXSERIEAGAME",
+            "KXLIGUE1GAME", "KXUCLGAME", "KXUELGAME", "KXUECLGAME",
+            "KXEREDIVISIEGAME", "KXLIGAMXGAME", "KXBRASILEIROGAME",
+            "KXSAUDIPLGAME"})
         self.assertFalse(settings.combos_enabled)
         self.assertTrue(settings.combo_research_enabled)
         self.assertEqual(settings.combo_min_legs, 3)
         self.assertEqual(settings.combo_max_legs, 8)
+
+    def test_soccer_series_are_classified_as_soccer(self):
+        for series in ("KXEPLGAME", "KXUCLGAME", "KXLIGAMXGAME"):
+            with self.subTest(series=series):
+                self.assertEqual(_series_sport(series), {
+                    "KXEPLGAME": "soccer_epl",
+                    "KXUCLGAME": "soccer_uefa_champs_league",
+                    "KXLIGAMXGAME": "soccer_mexico_ligamx"}[series])
 
     def test_all_sports_mode_remains_an_explicit_opt_in(self):
         with patch.dict(os.environ, {"SPORTS_MODE": "all"}, clear=True):
