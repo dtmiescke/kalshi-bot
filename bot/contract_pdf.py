@@ -60,3 +60,28 @@ def extract_contract_pdf_text(url, get=requests.get):
     except Exception:
         # A bad/unsupported PDF is an unknown rule source, never a reason to trade.
         return None
+
+
+def load_series_contract_pdf(data_client, store, series_ticker, now):
+    """Resolve and cache a series contract PDF through the existing Kalshi client."""
+    if not series_ticker:
+        return None
+    cache_key = f"contract_rules_pdf_{series_ticker}"
+    try:
+        cached = store.get_kv(cache_key)
+        if (isinstance(cached, dict) and cached.get("text")
+                and 0 <= int(now) - int(cached.get("ts", 0) or 0) < 7 * 86400):
+            return cached
+        series = data_client.series(series_ticker)
+        if not isinstance(series, dict):
+            return None
+        url = series.get("contract_terms_url") or series.get("contract_url")
+        extracted = extract_contract_pdf_text(url) if url else None
+        if not extracted:
+            return None
+        result = {"ts": int(now), **extracted}
+        store.set_kv(cache_key, result)
+        return result
+    except Exception:
+        # Metadata/PDF failures are unknown evidence, never permission to bypass counsel.
+        return None
