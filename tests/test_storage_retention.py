@@ -83,6 +83,23 @@ class TestStorageRetention(unittest.TestCase):
             self.store.db.commit()
         self.assertEqual(deleted["flow_trades"], 1)
 
+    def test_big_trim_compacts_right_away(self):
+        from bot import maintenance
+        old = maintenance.COMPACT_AFTER_ROWS
+        maintenance.COMPACT_AFTER_ROWS = 3
+        try:
+            for i in range(5):
+                self._flow(f"old{i}", 3 * DAY)
+            result = maintenance.run_janitors(self.store, now=self.now, force=True)
+            self.assertEqual(result["compacted_after_rows"], 5)
+            self.assertEqual(self.store.get_kv("last_compact"), self.now)
+            self._flow("old-again", 3 * DAY)          # a small trim does not compact
+            result = maintenance.run_janitors(self.store, now=self.now + 1, force=True)
+            self.assertNotIn("compacted_after_rows", result)
+            self.assertEqual(self.store.get_kv("last_compact"), self.now)
+        finally:
+            maintenance.COMPACT_AFTER_ROWS = old
+
     def test_save_script_alerts_before_github_file_limit(self):
         script = (ROOT / ".github" / "save.sh").read_text(encoding="utf-8")
         self.assertIn("80000000", script)

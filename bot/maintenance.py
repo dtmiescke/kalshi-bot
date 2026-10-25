@@ -79,6 +79,12 @@ def janitor_retention(store, now=None):
             "ts": now}
 
 
+# Deleting rows frees pages but doesn't shrink the file until VACUUM. After a
+# big trim (e.g. a tighter retention window taking effect) compact at once
+# instead of waiting up to a day for the scheduled compaction.
+COMPACT_AFTER_ROWS = 100_000
+
+
 def run_janitors(store, now=None, force=False, every_hours=6):
     """Run both janitors at a bounded cadence; never hide cleanup exceptions."""
     now = float(time.time() if now is None else now)
@@ -89,6 +95,11 @@ def run_janitors(store, now=None, force=False, every_hours=6):
     a = janitor_dedupe(store, now=now)
     b = janitor_retention(store, now=now)
     result = {"ok": True, "janitor_a": a, "janitor_b": b, "ts": int(now)}
+    trimmed = sum(b["before"][t] - b["after"].get(t, b["before"][t]) for t in b["before"])
+    if trimmed >= COMPACT_AFTER_ROWS:
+        store.compact()
+        store.set_kv("last_compact", now)
+        result["compacted_after_rows"] = trimmed
     store.set_kv("janitors_last_result", result)
     store.set_kv("janitors_last_run", now)
     return result
