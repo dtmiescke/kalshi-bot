@@ -71,22 +71,25 @@ def review(llm, store, ticker, summary, cooldown_s=180):
         return cached["result"]
 
     # A failed/unavailable LLM must not turn every mathematically qualified setup
-    # into an automatic no-trade. The numeric risk gate has already approved this
-    # candidate; when the AI service cannot vote, let the existing rule-based
-    # council record its vote at the execution boundary instead of deadlocking.
-    if llm is None:
-        reason = "LLM unavailable; numeric risk gate decides and rule-based council still votes"
+    # into an automatic no-trade. Cache the fallback for the same cooldown as an
+    # AI vote, so a provider outage cannot trigger repeated orders every tick.
+    def numeric_fallback(reason):
+        result = {"decision": "approve", "by": "numbers", "reason": reason}
+        store.set_kv(f"council_{ticker}", {"ts": time.time(), "result": result})
         log.warning("council %s fallback: %s", ticker, reason)
-        return {"decision": "approve", "by": "numbers", "reason": reason}
+        return result
+
+    if llm is None:
+        return numeric_fallback(
+            "LLM unavailable; numeric risk gate decides and rule-based council still votes")
     try:
         budget = llm.budget_left()
     except Exception:
         budget = 0
         log.exception("council %s could not read LLM budget", ticker)
     if budget < 2:
-        reason = f"LLM budget unavailable (budget_left={budget}); numeric risk gate decides"
-        log.warning("council %s fallback: %s", ticker, reason)
-        return {"decision": "approve", "by": "numbers", "reason": reason}
+        return numeric_fallback(
+            f"LLM budget unavailable (budget_left={budget}); numeric risk gate decides")
 
     text = json.dumps(summary, default=str)[:5000]
     models = [m for m in llm.models if m not in llm.dead]
