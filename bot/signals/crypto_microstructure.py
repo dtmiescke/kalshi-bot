@@ -80,6 +80,30 @@ def orderbook(store, coin, get=requests.get, now=None, timeout=4):
     return None
 
 
+
+def summarize_kalshi_book(book, depth=10):
+    """Summarize Kalshi YES/NO bid depth returned by KalshiClient.orderbook."""
+    if not isinstance(book, dict):
+        return None
+    try:
+        yes = [(float(p), float(q)) for p, q in (book.get("yes") or [])[:depth]
+               if float(p) >= 0 and float(q) > 0]
+        no = [(float(p), float(q)) for p, q in (book.get("no") or [])[:depth]
+              if float(p) >= 0 and float(q) > 0]
+        yes_depth, no_depth = sum(q for _, q in yes), sum(q for _, q in no)
+        total = yes_depth + no_depth
+        if not total:
+            return None
+        return {
+            "venue": "kalshi", "yes_bid_depth": yes_depth, "no_bid_depth": no_depth,
+            "depth_imbalance": (yes_depth - no_depth) / total,
+            "yes_levels": len(yes), "no_levels": len(no),
+            "best_yes_bid": yes[0][0] if yes else None,
+            "best_no_bid": no[0][0] if no else None,
+        }
+    except (TypeError, ValueError, IndexError, ZeroDivisionError):
+        return None
+
 def indicator_snapshot(features):
     """Compact diagnostic snapshot from the existing, stable feature pipeline."""
     if not isinstance(features, dict):
