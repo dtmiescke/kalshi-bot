@@ -4,7 +4,7 @@ Inspired by the research-only features of third-party Kalshi MCP servers.
 No external MCP runtime, trading credentials, or order route is installed.
 """
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from bot.contract_pdf import (
     MAX_PDF_BYTES, is_trusted_contract_url, extract_contract_pdf_text,
@@ -72,10 +72,12 @@ class TestReadOnlyMCPCompatibility(unittest.TestCase):
         })
         client = Mock()
         # Network failure must not silently substitute old rules for changed terms.
-        result = load_series_contract_pdf(
-            client, store, "KXNFLGAME", 101,
-            series_metadata={"contract_terms_url": "https://kalshi.com/new.pdf"},
-        )
+        with patch("bot.contract_pdf.extract_contract_pdf_text", return_value=None) as download:
+            result = load_series_contract_pdf(
+                client, store, "KXNFLGAME", 101,
+                series_metadata={"contract_terms_url": "https://kalshi.com/new.pdf"},
+            )
+        download.assert_called_once_with("https://kalshi.com/new.pdf")
         self.assertIsNone(result)
         client.series.assert_not_called()
 
