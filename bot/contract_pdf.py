@@ -106,7 +106,8 @@ def load_series_contract_pdf(data_client, store, series_ticker, now, series_meta
             series = data_client.series(series_ticker)
         if not isinstance(series, dict):
             return None
-        url = series.get("contract_terms_url") or series.get("contract_url")
+        url = (series.get("rules_pdf_url") or series.get("contract_terms_url")
+               or series.get("contract_url"))
         if not is_trusted_contract_url(url):
             return None
         cached = store.get_kv(cache_key)
