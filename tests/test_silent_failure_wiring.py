@@ -91,3 +91,20 @@ class TestSilentFailureCheck(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNerdReportSurvivesPostflight(unittest.TestCase):
+    def test_postflight_recheck_keeps_cycle_sections(self):
+        with tempfile.TemporaryDirectory() as d:
+            st = Store(os.path.join(d, "t.db"))
+            now = int(time.time())
+            nerd.record_success(st, {"ts": now, "ok": True,
+                                     "checks": {"quick_check": ["ok"], "source_structure": {"ok": True}}})
+            nerd.silent_failure_check(st, now - 60, now=now)
+            # the workflow's `nerd-check` postflight records a narrower report
+            nerd.record_success(st, nerd.inspect_store(st))
+            report = st.get_kv("nerd_last_health")
+            self.assertIn("silent_failures", report)
+            self.assertEqual(report["checks"]["source_structure"], {"ok": True})
+            self.assertEqual(report["checks"]["quick_check"], ["ok"])
+            st.db.close()

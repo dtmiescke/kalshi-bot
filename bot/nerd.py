@@ -97,6 +97,16 @@ def inspect_store(store, full_integrity=False):
 
 
 def record_success(store, report):
+    """Save a healthy report. Sections only the scheduled cycle produces (the
+    silent-failure result, the source-structure check) are carried over when a
+    narrower recheck such as the workflow's nerd-check postflight omits them."""
+    previous = store.get_kv("nerd_last_health") or {}
+    report = dict(report)
+    if "silent_failures" not in report and "silent_failures" in previous:
+        report["silent_failures"] = previous["silent_failures"]
+    prev_structure = (previous.get("checks") or {}).get("source_structure")
+    if prev_structure is not None and "source_structure" not in (report.get("checks") or {}):
+        report["checks"] = dict(report.get("checks") or {}, source_structure=prev_structure)
     store.set_kv("nerd_last_health", report)
     store.set_kv("nerd_last_healthy_ts", report.get("ts", int(time.time())))
 
