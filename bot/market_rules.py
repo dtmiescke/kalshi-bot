@@ -9,23 +9,56 @@ from __future__ import annotations
 import re
 
 
-_RULE_FIELDS = ("rules_primary", "rules_secondary", "early_close_condition",
-                "settlement_value", "settlement_source", "custom_strike")
+_RULE_FIELDS = (
+    "rules_primary", "rules_secondary", "early_close_condition",
+    "settlement_value", "settlement_source", "custom_strike",
+    # Read-only MCP/PDF extractors sometimes expose a consolidated text field
+    # instead of Kalshi's native rules_primary/rules_secondary fields.
+    "rules_text", "rules_pdf_text", "contract_terms_text",
+    "series_prohibitions",
+)
+
+
+def _unwrap_market(payload):
+    """Accept native Kalshi market objects and common read-only tool envelopes.
+
+    Only unwrap known response containers. Inner market fields take precedence,
+    while useful outer rule metadata is retained. This is normalization only:
+    it does not fetch PDFs or treat a third-party summary as authoritative.
+    """
+    if not isinstance(payload, dict):
+        return {}
+    market = dict(payload)
+    for key in ("result", "data", "market"):
+        nested = market.get(key)
+        if isinstance(nested, dict):
+            market = {**market, **nested}
+    return market
 
 
 def summarize_rules(market):
-    """Return bounded, auditable settlement context from a Kalshi market object.
+    """Return bounded, auditable settlement context from a market/tool payload.
 
     This helper does not fetch data, authorize orders, or infer that absent terms
-    are safe. It is useful with nested market payloads and direct market lookups.
+    are safe. It accepts direct Kalshi market lookups and common read-only MCP
+    response wrappers, including consolidated contract/PDF text when supplied.
     """
-    market = market if isinstance(market, dict) else {}
-    terms = {key: str(market.get(key) or "").strip()[:3000]
-             for key in _RULE_FIELDS if str(market.get(key) or "").strip()}
+    market = _unwrap_market(market)
+    terms = {}
+    for key in _RULE_FIELDS:
+        value = market.get(key)
+        if isinstance(value, (dict, list, tuple)):
+            value = str(value)
+        value = str(value or "").strip()
+        if value:
+            terms[key] = value[:3000]
+
     combined = " ".join(terms.values())
     lower = combined.lower()
     missing = []
-    if not terms.get("rules_primary") and not terms.get("settlement_source"):
+    if not terms.get("rules_primary") and not terms.get("settlement_source") \
+            and not terms.get("rules_text") and not terms.get("rules_pdf_text") \
+            and not terms.get("contract_terms_text"):
         missing.append("primary settlement rules/source not present in supplied market data")
     flags = []
     patterns = (
@@ -52,5 +85,5 @@ def summarize_rules(market):
         "flags": flags,
         "terms": terms,
         "text_chars": len(combined),
-        "note": "Extracted from supplied Kalshi fields only; verify the official contract before relying on it."
+        "note": "Extracted from supplied fields only; verify official contract terms before relying on them."
     }
