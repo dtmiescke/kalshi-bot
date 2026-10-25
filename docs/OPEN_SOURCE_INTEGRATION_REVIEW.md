@@ -9,7 +9,7 @@ any future reuse of implementation code.
 
 | Reference | Useful mechanism | Decision in this repository |
 |---|---|---|
-| [9crusher/mcp-server-kalshi](https://github.com/9crusher/mcp-server-kalshi) | Read market/event metadata, order books, and the actual contract settlement terms; normalize YES/NO concepts | Reuse the existing `KalshiClient` and `bot/market_rules.py`. Candidate snapshots now preserve bounded rule fields, and the shortlisted sports candidate gets one direct market-detail lookup if nested event data omitted the rules. Missing rules fail closed. No MCP process or PDF-download dependency is added. |
+| [9crusher/mcp-server-kalshi](https://github.com/9crusher/mcp-server-kalshi) | Read market/event metadata, order books, and the actual contract settlement terms; normalize YES/NO concepts | Reuse the existing `KalshiClient` and `bot/market_rules.py`. Candidate snapshots preserve bounded native rule fields; when these are missing, the shortlisted candidate gets one direct market-detail lookup and then a cached, size-limited extraction from the official series contract PDF if Kalshi exposes a trusted URL. Missing/failed PDF extraction remains unknown and fails closed. No MCP process or second exchange client is added. |
 | [BrainDAO/mcp-kalshi](https://github.com/BrainDAO/mcp-kalshi) | Market/order-book/portfolio read tools | The existing client already owns public market data and the signed portfolio/order API. Do not add a second authenticated client: it would create duplicate rate-limit state, stale cache behavior, credentials, and potentially conflicting order-state tracking. Trading tools from this MCP remain excluded. |
 | [OctagonAI/kalshi-trading-bot-cli](https://github.com/OctagonAI/kalshi-trading-bot-cli) | Independent probability estimate, edge calculation, liquidity checks, risk gates, auditability | Existing model/fees/risk/guard/counsel flow already covers these responsibilities. Do not copy its Half-Kelly defaults or external research dependency. Any new sizing method must beat the existing sizing in fee-aware, time-ordered out-of-sample tests before it can affect sizing. |
 | [rodlaf/KalshiMarketMaker](https://github.com/rodlaf/KalshiMarketMaker) | Binary-market eligibility, liquidity selection, inventory limits, cancellation/worker lifecycle | Useful operational concepts, but its two-sided resting market-making loop is not the current sports/crypto strategy. Do not add competing resting-order workers or autonomous quote placement. |
@@ -33,11 +33,12 @@ any future reuse of implementation code.
    change size, or bypass the numeric risk gate.
 4. Added offline tests for rule-field preservation, bounded context, missing-rule behavior,
    and unavailable AI counsel. No live order was sent.
+5. Added an optional read-only contract-PDF fallback based on the 9crusher MCP's `get_market_rules` / `fetch_rules_pdf` flow: reuse the existing Kalshi client to resolve series metadata, allow only HTTPS links on Kalshi/public-doc hosts, cap downloads at 8 MiB and extracted text at 6,000 characters, cache by series for seven days, and pass at most 3,000 characters into existing counsel. The extracted text is evidence only; it cannot authorize an order.
 
 ## Deliberately not added
 
 - No separate MCP server with order-write access.
-- No new API credentials, external SDKs, or always-on service.
+- No new API credentials, MCP runtime, external exchange client, or always-on service. `pypdf` is used only for bounded PDF text extraction.
 - No NWS/GFS/FRED feeds in unrelated market categories.
 - No market-making strategy, Half-Kelly replacement, or FIX transport.
 - No automatic source-code modification based on web research.
