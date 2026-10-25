@@ -54,9 +54,12 @@ def main():
                 contracts, avg_price = fill_plan(asks[side], max_dollars=5, limit_price=0.99)
                 assert contracts >= 0
                 assert avg_price is None or 0 < avg_price <= 1
-        if sampled >= 5:
+        if quoted > 0 and sampled >= 5:
+            break
+        if sampled >= 100:
             break
     assert sampled > 0, "No real orderbooks available for paper fill simulation"
+    assert quoted > 0, "No quoted liquidity found; cannot certify real-data paper fill simulation"
     assert all(not path.startswith("/portfolio/") for path in calls)
     print(f"REAL-DATA PAPER SMOKE PASS: open_markets={len(markets)} books={sampled} quoted_sides={quoted} GETs={len(calls)} exchange_writes=0")
 
