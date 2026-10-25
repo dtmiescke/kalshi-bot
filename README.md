@@ -108,11 +108,36 @@ movement (hook), Kalshi trade flow, rest / back-to-back / road-trip spots, AI ne
 - **Learned order style**: if resting orders rarely fill (<25%), it switches to taking the ask.
 - **Phone alerts** (`alerts.py`): bets, sales, arbitrage, pauses, new models — via free ntfy.
 
-## AI: OpenRouter and/or OmniRoute
-Every AI feature (news panel, council, briefings) speaks the OpenAI-compatible format, so it
-works with OpenRouter (default) or a self-hosted OmniRoute gateway. With `OMNIROUTE_URL`
-set, OmniRoute is tried first; if it's unreachable, calls fall back to OpenRouter.
-`python -m bot.main check` sends a one-word test to confirm which one answered.
+## AI gateway routing: OmniRoute, LiteLLM, and OpenRouter
+Every AI feature (news panel, council, briefings) keeps using the existing OpenAI-compatible
+client and shared call budgets. The route order is **OmniRoute → LiteLLM Proxy → OpenRouter**:
+- `OMNIROUTE_URL`, `OMNIROUTE_API_KEY`, `OMNIROUTE_MODELS`: existing preferred gateway.
+- `LITELLM_URL`, `LITELLM_API_KEY`, `LITELLM_MODELS`: optional LiteLLM Proxy fallback; model
+  names must be aliases actually configured in that proxy.
+- `OPENROUTER_API_KEY`, `OPENROUTER_MODELS`: existing fallback and OpenRouter-only web search.
+No second LLM SDK is required for the proxy path; both gateways use the existing HTTP client.
+All calls still share `LLM_DAILY_LIMIT` / `LLM_MAX_CALLS_PER_RUN` and the concise-output policy.
+If a gateway is unreachable, it is skipped for the rest of that run. `python -m bot.main check`
+can verify AI connectivity without placing trades. LiteLLM is optional; leave its settings blank
+to preserve the existing OmniRoute → OpenRouter behavior.
+
+## Integration choices from the open-source review
+- **Keep one execution authority.** Do not connect a third-party MCP trading server with order-write
+  access alongside `KalshiClient`; that would duplicate order paths and bypass the current final
+  risk recheck, ledger, and reconciliation guard. A future Kalshi MCP adapter should be read-only
+  for contract rules, market metadata, and research until it can be proven to use the same guarded
+  execution path.
+- **Do not copy another bot's sizing or market-making loop blindly.** Existing fee-aware fractional
+  Kelly, liquidity-aware fill planning, caps, and circuit breakers remain authoritative. Half-Kelly
+  or Avellaneda–Stoikov market making requires independent out-of-sample validation and is not
+  enabled by this integration.
+- **Keep data sources matched to enabled markets.** The current bot focuses on sports and crypto.
+  NWS/GFS weather feeds and FRED macro series are candidates only if weather/macro Kalshi markets
+  are added with explicit settlement-source and freshness rules; they are not injected into sports
+  probabilities. The existing ESPN, sportsbook, Kalshi, and crypto feeds stay in place.
+- **FIX is not switched on by assumption.** It needs official account/API eligibility, protocol
+  support, order-state reconciliation, and benchmarked latency/failure tests. REST remains the
+  existing execution path until that work is separately validated.
 
 ## Mobile dashboard (free, GitHub Pages)
 After each run the bot writes `index.html` + `bets.csv` to the `bot-data` branch. Turn on
