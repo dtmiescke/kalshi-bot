@@ -1249,11 +1249,8 @@ class Engine:
             # independent forecast. Without a sportsbook match, require at
             # least one additional signal from observed flow, current research,
             # or a trained model before claiming edge or proposing a bet.
-            independent = {
-                "trade_flow", "ai_news", "schedule_spot", "ml_model",
-                "line_movement", "reverse_line_movement",
-            }
-            if not any(r.name in independent for r in readings):
+            if not any(r.name not in ("kalshi_market", "book_consensus")
+                       for r in readings):
                 self._record_decision(
                     snap, readings, "rejected",
                     "insufficient independent Kalshi-only evidence")
