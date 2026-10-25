@@ -2,7 +2,7 @@
 
 ## Concise response policy
 
-The existing `bot/llm.py` adds a short system instruction to ordinary OpenRouter/OmniRoute calls and OpenRouter web-search calls. It asks models to avoid filler and repetition while preserving decision-critical evidence, uncertainty, citations, requested JSON fields, probabilities, votes, and risk rules.
+The existing `bot/llm.py` adds a short system instruction to natural-language OpenRouter/OmniRoute calls and OpenRouter web-search calls. Schema-driven JSON calls skip the extra instruction to avoid adding tokens where the response format is already tightly constrained. It asks models to avoid filler and repetition while preserving decision-critical evidence, uncertainty, citations, requested JSON fields, probabilities, votes, and risk rules.
 
 - Controlled by `LLM_MINIMALISM_ENABLED=yes` (default).
 - Set `LLM_MINIMALISM_ENABLED=no` to disable the extra system message if a provider/model has a format compatibility issue.
