@@ -41,6 +41,19 @@ SPORTS = {
     "KXMLBGAME": "baseball_mlb",
     "KXNHLGAME": "icehockey_nhl",
     "KXNCAAFGAME": "americanfootball_ncaaf",
+    # Verified Kalshi soccer game series; these remain ordinary configured sports.
+    "KXEPLGAME": "soccer_epl",
+    "KXLALIGAGAME": "soccer_spain_la_liga",
+    "KXBUNDESLIGAGAME": "soccer_germany_bundesliga",
+    "KXSERIEAGAME": "soccer_italy_serie_a",
+    "KXLIGUE1GAME": "soccer_france_ligue_one",
+    "KXUCLGAME": "soccer_uefa_champs_league",
+    "KXUELGAME": "soccer_uefa_europa_league",
+    "KXUECLGAME": "soccer_uefa_europa_conference_league",
+    "KXEREDIVISIEGAME": "soccer_netherlands_eredivisie",
+    "KXLIGAMXGAME": "soccer_mexico_ligamx",
+    "KXBRASILEIROGAME": "soccer_brazil_campeonato",
+    "KXSAUDIPLGAME": "soccer_saudi_professional_league",
 }
 
 # Kalshi 15-minute crypto Up/Down series -> Coinbase spot pair.
