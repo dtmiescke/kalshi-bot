@@ -76,6 +76,36 @@ class TestMarketRules(unittest.TestCase):
         )
         self.assertEqual(result["official_rule_document_urls"], [])
 
+    def test_third_party_mcp_rules_aliases_are_normalized(self):
+        result = summarize_rules({
+            "data": {
+                "market": {
+                    "ticker": "KXTEST",
+                    "rules": "The market resolves using the official index.",
+                    "contract_terms": "A canceled event may be void.",
+                    "prohibitions": ["Trading prohibited after close."],
+                }
+            }
+        })
+        self.assertTrue(result["available"])
+        self.assertEqual(result["status"], "review_required")
+        self.assertIn("rules", result["terms"])
+        self.assertIn("contract_terms", result["terms"])
+        self.assertIn("prohibitions", result["terms"])
+        self.assertIn("source_or_index", result["flags"])
+        self.assertIn("void_or_cancellation", result["flags"])
+        self.assertIn("series_prohibition", result["flags"])
+
+    def test_alias_fields_are_bounded_and_prohibitions_alone_do_not_count_as_rules(self):
+        result = summarize_rules({
+            "contract_terms": "C" * 5000,
+            "prohibitions": ["P" * 5000],
+        })
+        self.assertLessEqual(len(result["terms"]["contract_terms"]), 3000)
+        self.assertLessEqual(len(result["terms"]["prohibitions"]), 3000)
+        self.assertTrue(result["missing"])
+        self.assertEqual(result["status"], "review_required")
+
     def test_non_dict_or_empty_mcp_result_fails_closed(self):
         for payload in (None, [], "not a market", {"result": None}):
             result = summarize_rules(payload)
