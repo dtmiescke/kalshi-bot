@@ -1,13 +1,15 @@
 name: kalshi-train
 
-# Weekly: download the last 7 days of REAL settled Kalshi 15-minute windows,
-# add them to the training set, retrain, and promote only if the new model
-# beats Kalshi AND the current champion on unseen data. Run it by hand
-# (Actions -> kalshi-train -> Run workflow) right after setup to start trained.
+# Daily at 09:07 UTC: download the last 14 days of REAL settled Kalshi
+# 15-minute windows, add them to the training set, retrain, and promote only if
+# the new model beats Kalshi AND the current champion on unseen data. Then a
+# backtest, the regression tests and the report go to the log (read-only).
+# Shares the bot's concurrency group, so it never runs alongside a trading run.
+# Run it by hand (Actions -> kalshi-train -> Run workflow) any time.
 
 on:
   schedule:
-    - cron: "17 4 * * 0"        # Sundays 04:17 UTC
+    - cron: "7 9 * * *"         # daily 09:07 UTC; UTC avoids DST-dependent local-time claims
   workflow_dispatch:
     inputs:
       days:
@@ -39,7 +41,7 @@ jobs:
       - name: Download history + train
         id: train-cycle
         env:
-          DAYS: ${{ github.event.inputs.days || '7' }}
+          DAYS: ${{ github.event.inputs.days || '14' }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           ML_MIN_WINDOWS: ${{ vars.ML_MIN_WINDOWS || '300' }}
           ML_MIN_TEST_WINDOWS: ${{ vars.ML_MIN_TEST_WINDOWS || '100' }}
@@ -59,6 +61,26 @@ jobs:
           fi
           python -m bot.main history "$DAYS"
           python -m bot.main train
+      - name: Backtest (read-only audit)
+        if: steps.train-cycle.outcome == 'success'
+        continue-on-error: true
+        run: python -m bot.main backtest
+      - name: Contract rules and MCP-adapter regression tests
+        # Exercises the existing read-only normalization and official PDF safety
+        # boundaries; no MCP server or second trading client is launched.
+        if: steps.train-cycle.outcome == 'success'
+        continue-on-error: true
+        run: |
+          python -m unittest tests.test_market_rules tests.test_contract_pdf tests.test_kalshi_series_metadata tests.test_snapshot_contract_rules -q
+      - name: Full regression suite
+        # Runs independently even if backtest or focused integration tests fail.
+        if: steps.train-cycle.outcome == 'success'
+        continue-on-error: true
+        run: python -m unittest discover -s tests -q
+      - name: Report (read-only audit)
+        if: steps.train-cycle.outcome == 'success'
+        continue-on-error: true
+        run: python -m bot.main report
       - name: Save memory
         # Keep the last known-good snapshot if history download or training fails.
         if: steps.train-cycle.outcome == 'success'

@@ -99,6 +99,28 @@ class TestWorkflowWiring(unittest.TestCase):
         self.assertIn("if: always()", step)
         self.assertIn("run: bash .github/chain_next.sh after-training", step)
 
+    def test_trainer_runs_daily_and_audits_without_blocking_save(self):
+        wf = self.load("train.yml")
+        self.assertIn('cron: "7 9 * * *"', wf)
+        self.assertIn("cancel-in-progress: false", wf)
+        steps = (
+            ("Backtest (read-only audit)", "bot.main backtest"),
+            ("Contract rules and MCP-adapter regression tests", "tests.test_market_rules"),
+            ("Full regression suite", "unittest discover"),
+            ("Report (read-only audit)", "bot.main report"),
+        )
+        for name, command in steps:
+            step = _step(wf, name)
+            self.assertIn("continue-on-error: true", step)
+            self.assertIn(command, step)
+            self.assertLess(wf.index(name), wf.index("Save memory"))
+        # Keep all audits independent: one failure must not skip later checks or persistence.
+        positions = [wf.index(name) for name, _ in steps]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("tests.test_contract_pdf", _step(wf, "Contract rules and MCP-adapter regression tests"))
+        self.assertIn("tests.test_kalshi_series_metadata", _step(wf, "Contract rules and MCP-adapter regression tests"))
+        self.assertIn("tests.test_snapshot_contract_rules", _step(wf, "Contract rules and MCP-adapter regression tests"))
+
     def test_paper_mode_gate_unchanged(self):
         self.assertIn("LIVE_TRADING_OPERATIONAL_APPROVED != 'yes' && 'paper'",
                       _step(self.load("bot.yml"), "Run"))
