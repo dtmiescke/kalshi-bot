@@ -33,6 +33,25 @@ class ReadOnlyResearchTests(unittest.TestCase):
         self.assertTrue(result["available"])
         self.client.series.assert_called_once_with("KXNFLGAME")
 
+    def test_pdf_tool_reuses_existing_trusted_loader_and_store(self):
+        from unittest.mock import patch
+        store = Mock()
+        with patch("bot.mcp_readonly.load_series_contract_pdf",
+                   return_value={"text": "Official terms"}) as load:
+            result = research_tool(self.client, "rules_pdf", "KXNFLGAME",
+                                   store=store, now=1234)
+        self.assertEqual(result["text"], "Official terms")
+        load.assert_called_once_with(self.client, store, "KXNFLGAME", 1234)
+        self.client.market.assert_not_called()
+        self.client.place_limit_buy.assert_not_called()
+
+    def test_pdf_tool_requires_explicit_cache_and_clock(self):
+        with self.assertRaises(ValueError):
+            research_tool(self.client, "rules_pdf", "KXNFLGAME")
+        with self.assertRaises(ValueError):
+            research_tool(self.client, "rules_pdf", "KXNFLGAME", store=Mock())
+        self.client.series.assert_not_called()
+
     def test_no_order_write_or_dynamic_method_dispatch(self):
         for name in ("place_limit_buy", "cancel", "positions", "balance",
                      "place_resting_buy", "__getattribute__", "trades"):
