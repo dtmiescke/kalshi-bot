@@ -1,7 +1,7 @@
 name: kalshi-train
 
-# Daily at midnight UTC: download the last 14 days of REAL settled Kalshi
-# 15-minute windows, add them to the training set, retrain, and promote only if
+# Daily at 09:07 UTC (4am Central, when no US games are on): download the
+# last 14 days of REAL settled Kalshi 15-minute windows, add them to the training set, retrain, and promote only if
 # the new model beats Kalshi AND the current champion on unseen data. Then a
 # backtest, the regression tests and the report go to the log (read-only).
 # Shares the bot's concurrency group, so it never runs alongside a trading run.
@@ -9,7 +9,7 @@ name: kalshi-train
 
 on:
   schedule:
-    - cron: "0 0 * * *"         # daily, midnight UTC
+    - cron: "7 9 * * *"         # daily 09:07 UTC = 4am Central: no US games, so the trading pause misses them
   workflow_dispatch:
     inputs:
       days:

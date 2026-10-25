@@ -101,7 +101,7 @@ class TestWorkflowWiring(unittest.TestCase):
 
     def test_trainer_runs_daily_and_audits_without_blocking_save(self):
         wf = self.load("train.yml")
-        self.assertIn('cron: "0 0 * * *"', wf)
+        self.assertIn('cron: "7 9 * * *"', wf)
         self.assertIn("cancel-in-progress: false", wf)
         audit = _step(wf, "Backtest, regression tests and report")
         self.assertIn("continue-on-error: true", audit)
