@@ -28,6 +28,37 @@ class TestMarketRules(unittest.TestCase):
         self.assertEqual(result["status"], "terms_found")
         self.assertNotIn("settlement_source", result["terms"])
 
+    def test_nested_kalshi_market_envelope_is_unwrapped(self):
+        result = summarize_rules({
+            "market": {
+                "ticker": "KXTEST",
+                "rules_primary": "Settles from the official index.",
+                "settlement_source": "Official index",
+            },
+            "series_prohibitions": ["No trading after event cancellation."],
+        })
+        self.assertTrue(result["available"])
+        self.assertIn("rules_primary", result["terms"])
+        self.assertIn("series_prohibitions", result["terms"])
+        self.assertIn("source_or_index", result["flags"])
+
+    def test_mcp_consolidated_contract_text_is_supported(self):
+        result = summarize_rules({
+            "result": {
+                "rules_pdf_text": "Contract settles at the official source unless postponed.",
+            }
+        })
+        self.assertTrue(result["available"])
+        self.assertEqual(result["status"], "terms_found")
+        self.assertIn("rules_pdf_text", result["terms"])
+        self.assertIn("void_or_cancellation", result["flags"])
+
+    def test_non_dict_or_empty_mcp_result_fails_closed(self):
+        for payload in (None, [], "not a market", {"result": None}):
+            result = summarize_rules(payload)
+            self.assertFalse(result["available"])
+            self.assertEqual(result["status"], "unavailable")
+
 
 if __name__ == "__main__":
     unittest.main()
