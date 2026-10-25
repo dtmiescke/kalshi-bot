@@ -13,23 +13,25 @@ import re
 _RULE_FIELDS = (
     "rules_primary", "rules_secondary", "early_close_condition",
     "settlement_value", "settlement_source", "custom_strike",
-    # Read-only MCP/PDF extractors sometimes expose a consolidated text field
-    # instead of Kalshi's native rules_primary/rules_secondary fields.
     "rules_text", "rules_pdf_text", "contract_terms_text",
-    # Conservative aliases used by third-party read-only MCP responses.
     "rules", "contract_terms", "series_prohibitions", "prohibitions",
     "settlement_sources", "additional_prohibitions",
 )
+_MAX_DEPTH = 8
+_MAX_NODES = 64
+_MAX_TEXT_BLOCKS = 8
+_MAX_PLAIN_TEXT_CHARS = 6000
+_MAX_JSON_ENVELOPE_CHARS = 20000
 
 
 def _unwrap_market(payload):
     """Normalize native Kalshi objects and nested read-only MCP envelopes.
 
     MCP SDKs may put structuredContent, JSON text blocks, and result/data/market
-    envelopes at multiple levels. Walk only those known containers with a strict
-    depth bound. Any MCP error fails closed; plain text is retained only as
-    bounded, non-authoritative evidence and cannot satisfy the native settlement
-    source gate.
+    envelopes at multiple levels. Walk only those known containers with strict
+    depth, node, and text bounds. Any MCP error or resource-limit violation fails
+    closed. Plain text is retained only as bounded evidence and cannot satisfy
+    the native settlement-source gate.
     """
     if not isinstance(payload, dict):
         return {}
@@ -39,12 +41,20 @@ def _unwrap_market(payload):
     pending = [(payload, 0)]
     visited = set()
     plain_text = []
-    max_depth = 8
+    plain_text_chars = 0
+    text_blocks = 0
+    nodes_seen = 0
 
     while pending:
         node, depth = pending.pop(0)
-        if not isinstance(node, dict) or depth > max_depth:
+        if not isinstance(node, dict):
             continue
+        if depth > _MAX_DEPTH:
+            return {}
+        nodes_seen += 1
+        if nodes_seen > _MAX_NODES:
+            return {}
+
         identity = id(node)
         if identity in visited:
             continue
@@ -53,14 +63,23 @@ def _unwrap_market(payload):
         if node.get("isError") is True:
             return {}
 
-        # Deeper payload fields override wrapper metadata, but wrappers themselves
-        # are not promoted to contract facts.
         merged.update({k: v for k, v in node.items() if k not in envelope_keys})
 
         for key in ("structuredContent", "result", "data", "market"):
             nested = node.get(key)
             if isinstance(nested, dict):
                 pending.append((nested, depth + 1))
+            elif isinstance(nested, str):
+                # Some adapters serialize the result/data object instead of
+                # returning structuredContent. Parse only known envelope fields.
+                candidate_text = nested.strip()
+                if candidate_text.startswith("{") and len(candidate_text) <= _MAX_JSON_ENVELOPE_CHARS:
+                    try:
+                        candidate = json.loads(candidate_text)
+                    except (TypeError, ValueError):
+                        candidate = None
+                    if isinstance(candidate, dict):
+                        pending.append((candidate, depth + 1))
 
         blocks = node.get("content")
         if isinstance(blocks, list):
@@ -70,17 +89,27 @@ def _unwrap_market(payload):
                 text = str(block.get("text", "")).strip()
                 if not text:
                     continue
-                try:
-                    candidate = json.loads(text)
-                except (TypeError, ValueError):
-                    candidate = None
+                text_blocks += 1
+                if text_blocks > _MAX_TEXT_BLOCKS:
+                    return {}
+                candidate = None
+                if len(text) <= _MAX_JSON_ENVELOPE_CHARS:
+                    try:
+                        candidate = json.loads(text)
+                    except (TypeError, ValueError):
+                        candidate = None
                 if isinstance(candidate, dict):
                     pending.append((candidate, depth + 1))
                 else:
-                    plain_text.append(text[:6000])
+                    remaining = _MAX_PLAIN_TEXT_CHARS - plain_text_chars
+                    if remaining <= 0:
+                        break
+                    bounded = text[:remaining]
+                    plain_text.append(bounded)
+                    plain_text_chars += len(bounded)
 
     if plain_text and not merged.get("rules_pdf_text"):
-        merged["rules_pdf_text"] = "\n".join(plain_text)[:6000]
+        merged["rules_pdf_text"] = "\n".join(plain_text)[:_MAX_PLAIN_TEXT_CHARS]
     return merged
 
 
@@ -102,8 +131,6 @@ def summarize_rules(market, series=None):
         if value:
             terms[key] = value[:3000]
 
-    # Series endpoints own legal settlement sources and prohibitions. Preserve
-    # market-specific text first, adding series terms only when not already present.
     for key in ("settlement_sources", "additional_prohibitions", "series_prohibitions",
                 "rules_primary", "rules_secondary"):
         value = series.get(key)
@@ -141,9 +168,6 @@ def summarize_rules(market, series=None):
             or terms.get("prohibitions")) and "series_prohibition" not in flags:
         flags.append("series_prohibition")
 
-    # Reuse the PDF reader's single strict URL policy: only exact official
-    # document hosts, HTTPS, standard port, and no embedded credentials.
-    # A broad *.kalshi.com or *.amazonaws.com suffix is not sufficient trust.
     from .contract_pdf import is_trusted_contract_url
 
     doc_urls = []
@@ -152,7 +176,6 @@ def summarize_rules(market, series=None):
         if is_trusted_contract_url(url) and url not in doc_urls:
             doc_urls.append(url[:1000])
 
-    # No text means unavailable, not a generic review-required result.
     if not terms:
         status = "unavailable"
     elif missing or "early_close" in flags or "series_prohibition" in flags:
