@@ -104,7 +104,7 @@ def review(llm, store, ticker, summary, cooldown_s=180):
     except Exception as exc:
         reason = f"LLM review error ({type(exc).__name__}); numeric risk gate decides"
         log.exception("council %s model review failed", ticker)
-        return {"decision": "approve", "by": "numbers", "reason": reason}
+        return numeric_fallback(reason)
 
     reasons = []
     valid_chair = bool(council and isinstance(council.get("chair"), dict)
