@@ -238,6 +238,14 @@ class Engine:
             "open_interest": num(m, "open_interest"),
             "close_time": m.get("close_time"), "status": m.get("status"),
         }
+        # Keep the original, bounded contract terms in the in-memory candidate
+        # context for sports counsel. Store.add_market_snapshot persists only its
+        # established schema, so this does not alter the database or dashboard.
+        for key in ("rules_primary", "rules_secondary", "early_close_condition",
+                    "settlement_value", "settlement_source", "custom_strike"):
+            value = m.get(key)
+            if value not in (None, ""):
+                row[key] = str(value)[:3000]
         self.store.add_market_snapshot(row)
         return row
 
