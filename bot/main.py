@@ -89,6 +89,18 @@ def run_scheduled(s, store, data):
     nerd.record_success(store, health)
     if full_check_due:
         store.set_kv("nerd_last_full_check_ts", time.time())
+    # Kalshi fee type/multiplier per traded series, re-read at most daily (fees.py).
+    try:
+        from . import fees
+        from .config import CRYPTO_15M
+        fee_series = list(CRYPTO_15M) + os.environ.get("CRYPTO_LADDER_SERIES", "KXBTCD,KXETHD").split(",")
+        fee_series += sorted(s.selected_series() or SPORTS.keys())
+        changed = fees.refresh(store, data, fee_series)
+        if changed:
+            print("fee changes:", json.dumps(changed))
+            alerts.send("Kalshi fees changed", json.dumps(changed)[:500], tags=["warning"])
+    except Exception as exc:
+        logging.getLogger("bot").warning("fee table refresh failed; keeping last known fees: %s", exc)
     # Free-first public sports intelligence collection; data only, never order authority.
     if os.environ.get("SPORTS_INTEL_ENABLED", "yes").lower() in ("yes", "true", "1"):
         try:

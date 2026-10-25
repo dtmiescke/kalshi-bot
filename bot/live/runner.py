@@ -19,7 +19,7 @@ import subprocess
 import shlex
 import time
 
-from .. import alerts, brain, briefing, council, crypto_brain, guard, ml, risk
+from .. import alerts, brain, briefing, council, crypto_brain, fees, guard, ml, risk
 from .. import marketdata, vol as volmod
 from ..engine import Engine
 from ..grader import grade
@@ -486,7 +486,7 @@ class LiveRunner:
             return None
         prob, _ = brain.blend(readings, brain.get_weights(self.store, "crypto"))
         p_side = prob if side == "yes" else 1 - prob
-        return p_side - price - risk.taker_fee(100, price, self.s.maker_fee_rate) / 100
+        return p_side - price - risk.taker_fee(100, price, fees.rate(ticker, self.s, maker=True)) / 100
 
     def _maker_edge_gone(self, ticker, plan, now):
         e = self._side_edge(ticker, plan["side"], plan["limit"], now)
@@ -512,7 +512,7 @@ class LiveRunner:
             n = int(min(b["contracts"], levels[0][1]))
             if n < 1:
                 continue
-            exit_fee = risk.taker_fee(n, bid, self.s.taker_fee_rate)
+            exit_fee = risk.taker_fee(n, bid, fees.rate(t, self.s))
             # holding is worth p_side per contract; selling is worth the bid minus fees
             if bid - exit_fee / n <= p_side + self.s.exit_margin:
                 continue
@@ -543,7 +543,7 @@ class LiveRunner:
                     continue
                 if n < 1:
                     continue
-                exit_fee = risk.taker_fee(n, bid, self.s.taker_fee_rate)
+                exit_fee = risk.taker_fee(n, bid, fees.rate(t, self.s))
             bet_id = b["id"] if n == b["contracts"] else self.store.split_bet(b["id"], n)
             entry_fee = b["fee"] * n / b["contracts"]
             pnl = n * (bid - b["price"]) - entry_fee - exit_fee

@@ -5,13 +5,13 @@ import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from . import brain
+from . import brain, fees
 
 
 
 def taker_fee(contracts, price, rate):
-    """Kalshi-style taker fee in dollars, rounded up to the cent."""
-    return math.ceil(rate * contracts * price * (1 - price) * 100 - 1e-9) / 100
+    """Kalshi fee in dollars at `rate`, rounded up to the cent (see fees.py)."""
+    return fees.fee_at_rate(contracts, price, rate)
 
 
 def asks_from_book(book):
@@ -140,10 +140,11 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
         if not asks[side]:
             continue
         best_ask = asks[side][0][0]
-        price, rate, style = best_ask, s.taker_fee_rate, "taker"
+        series = mkt.get("series") or mkt.get("ticker")
+        price, rate, style = best_ask, fees.rate(series, s), "taker"
         bid = bid_for(book, side)
         if maker and bid is not None and round(bid + 0.01, 2) < best_ask:
-            price, rate, style = round(bid + 0.01, 2), s.maker_fee_rate, "maker"
+            price, rate, style = round(bid + 0.01, 2), fees.rate(series, s, maker=True), "maker"
         if not (s.min_price <= price <= s.max_price):
             continue
         fee_per = taker_fee(100, price, rate) / 100
