@@ -406,13 +406,22 @@ function category(b){return /BTC|ETH|SOL/.test(b.series)?(/15M/.test(b.series)?"
 
 /* ================= the bot's own database (bot.sqlite.gz or legacy bot.sqlite on bot-data) ================= */
 // Real council verdicts live in the kv table as council_<ticker>; model results in model_runs.
-let council=[], model=null, lessons=[], audit=[], combos=[], dbNote="";
+let council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={};
 const ROLE_KEY={crypto:"crypto_analyst",liquidity:"liquidity_analyst",prob:"probability_check",risk:"risk_controller"};
 function loadScript(src){return new Promise((ok,bad)=>{const t=document.createElement("script");t.src=src;t.onload=ok;t.onerror=()=>bad(new Error("couldn’t load "+src));document.head.appendChild(t)})}
 let SQLlib=null;
 async function loadDB(){
   if(demo)return;
   let list;try{list=await gh("/contents/?ref="+DATA_BRANCH)}catch(e){dbNote=e.status===404?"No saved bot data yet.":explain(e);return}
+  // Small summary the bot writes on every save: no database download needed.
+  const sf=(list||[]).find(x=>x.name==="summary.json");
+  if(sf){
+    if(sf.sha===loadDB.sha)return;
+    try{const s=JSON.parse(await file("summary.json"));
+      council=s.council||[];model=s.model||null;lessons=s.lessons||[];audit=s.audit||[];combos=s.combos||[];
+      summaryKV=s.kv||{};loadDB.sha=sf.sha;dbNote="";return}
+    catch(e){/* fall back to the full database below */}
+  }
   const f=(list||[]).find(x=>x.name==="bot.sqlite.gz")||(list||[]).find(x=>x.name==="bot.sqlite");
   if(!f){dbNote="No bot database saved yet.";return}
   if(f.sha===loadDB.sha)return;

@@ -232,8 +232,66 @@ td div.mut{{white-space:normal}}.mut{{color:var(--mut);font-size:12px}}a{{color:
 </body></html>"""
 
 
+# kv keys the phone app's Data Floor and health views read directly.
+SUMMARY_KV = ("janitors_last_result", "janitors_last_run", "nerd_last_health",
+              "nerd_last_healthy_ts", "health_paused_areas", "grading_lookup_health",
+              "kalshi_health", "live_discovery_health", "sports_intel_health",
+              "sports_scanner_health", "settle_gap_report", "last_run_ts", "last_train_status")
+
+
+def summary(store):
+    """The small JSON the phone app reads instead of downloading the whole
+    database (known problem 11). Same queries the app runs on the database, so
+    both paths show the same numbers."""
+    def q(sql):
+        try:
+            return [dict(r) for r in store.q(sql)]
+        except Exception:
+            return []
+    council = []
+    for r in q("SELECT k, v FROM kv WHERE k LIKE 'council_%'"):
+        try:
+            v = json.loads(r["v"])
+        except (TypeError, ValueError):
+            continue
+        res = (v or {}).get("result") or {}
+        if res.get("by") != "council":
+            continue
+        council.append({"ticker": r["k"][8:], "ts": (v.get("ts") or 0) * 1000,
+                        "decision": res.get("decision"), "reason": res.get("reason") or "",
+                        "roles": res.get("roles") or {}, "skeptic": res.get("skeptic") or {}})
+    council.sort(key=lambda c: -c["ts"])
+    model = None
+    run = q("SELECT * FROM model_runs ORDER BY ts DESC LIMIT 1")
+    if run:
+        try:
+            mt = json.loads(run[0].get("metrics") or "{}")
+        except (TypeError, ValueError):
+            mt = {}
+        model = {"ts": run[0]["ts"] * 1000, "promoted": bool(run[0].get("promoted")),
+                 "status": mt.get("status"), "conf": mt.get("bootstrap_confidence"),
+                 "windows": mt.get("test_windows") or mt.get("n_test")}
+    kv = {k: store.get_kv(k) for k in SUMMARY_KV}
+    kv.update({k: store.get_kv(k) for k in (f"tail_model_{c}" for c in ("BTC", "ETH", "SOL"))})
+    return {
+        "version": 1, "ts": int(time.time()),
+        "council": council[:50], "model": model,
+        "lessons": q("SELECT ts, text FROM lessons ORDER BY ts DESC LIMIT 5"),
+        "audit": q("""SELECT decision, COUNT(brier) AS n, AVG(brier) AS brier,
+                      AVG(hypothetical_pnl) AS pnl FROM decision_audit
+                      WHERE outcome IS NOT NULL GROUP BY decision ORDER BY decision"""),
+        "combos": q("""SELECT leg_count AS legs, COUNT(*) AS n, AVG(brier) AS brier,
+                       AVG(market_proxy_brier) AS mkt, SUM(hypothetical_pnl) AS pnl
+                       FROM combo_prediction_audit WHERE outcome IS NOT NULL
+                       GROUP BY leg_count ORDER BY leg_count"""),
+        "kv": {k: v for k, v in kv.items() if v is not None},
+    }
+
+
 def write(store, settings, out_dir="data/site"):
     os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "summary.json"), "w") as f:
+        json.dump(summary(store), f, separators=(",", ":"), default=str)
     with open(os.path.join(out_dir, "index.html"), "w") as f:
         f.write(build(store, settings))
     with open(os.path.join(out_dir, "bets.csv"), "w") as f:
