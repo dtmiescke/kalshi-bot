@@ -57,14 +57,26 @@ def review(llm, store, event, snap, plan, readings, prob, confidence, now=None):
     if plan.get("side") not in ("yes", "no") or not 0 < float(plan.get("price", 0)) < 1:
         return {"decision": "reject", "by": "rules", "reason": "invalid side or price"}
 
+    # Contract settlement safety is a deterministic gate, not an LLM opinion.
+    # MCP-inspired research tools emphasize exact settlement terms; do not let
+    # advisory/off modes bypass missing or ambiguous contract rules.
+    from .market_rules import summarize_rules
+    contract_rules = summarize_rules(snap)
+    if not contract_rules["available"] or contract_rules["status"] == "review_required":
+        return {
+            "decision": "wait", "by": "contract_rules",
+            "reason": "contract settlement terms are missing or need manual review",
+            "contract_rule_status": contract_rules["status"],
+            "contract_rule_flags": contract_rules["flags"],
+        }
+
     mode = os.environ.get("COUNCIL_MODE", "advisory").strip().lower()
     if mode == "off":
-        return {"decision": "approve", "by": "rules", "reason": "sports counsel disabled; numeric checks passed"}
+        return {"decision": "approve", "by": "rules", "reason": "sports counsel disabled; numeric and contract-rule checks passed"}
     cache_key = f"sports_counsel_{ticker}"
     cached = store.get_kv(cache_key)
     if cached and now - int(cached.get("ts", 0)) < 180:
         return cached.get("result", result)
-    from .market_rules import summarize_rules
     payload = {
         "sport_series": snap.get("series"), "event_ticker": snap.get("event_ticker"),
         "event_title": event.get("title") or event.get("subtitle"),
@@ -72,7 +84,7 @@ def review(llm, store, event, snap, plan, readings, prob, confidence, now=None):
         "team": snap.get("team"), "side": plan.get("side"), "price": plan.get("price"),
         "edge": plan.get("edge"), "model_probability": prob,
         "confidence": confidence, "signals": _reading_payload(readings),
-        "contract_rules": summarize_rules(snap),
+        "contract_rules": contract_rules,
         "note": "Only supplied evidence is available. Treat settlement rules as authoritative; if absent or ambiguous, wait for manual verification. Never assume missing lineups or live stats.",
     }
     if llm is None or llm.budget_left() < 2:
