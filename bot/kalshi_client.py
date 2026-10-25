@@ -223,6 +223,10 @@ class KalshiClient:
     def market(self, ticker):
         return self._req("GET", f"/markets/{ticker}").get("market", {})
 
+    def series(self, ticker):
+        """Read-only series metadata, including official contract-terms PDF links."""
+        return self._req("GET", f"/series/{ticker}").get("series", {})
+
     def orderbook(self, ticker, depth=20):
         """Returns {'yes': [(price, qty), ...], 'no': [...]} as bids, best first."""
         data = self._req("GET", f"/markets/{ticker}/orderbook", params={"depth": depth})
