@@ -24,7 +24,7 @@ MAX_TEXT_CHARS = 6000
 CACHE_SECONDS = 7 * 86400
 
 
-def _trusted_url(url):
+def is_trusted_contract_url(url):
     try:
         parsed = urlparse(str(url or ""))
         return (
@@ -41,7 +41,7 @@ def _trusted_url(url):
 
 def extract_contract_pdf_text(url, get=requests.get):
     """Return bounded extracted text and provenance, or None on uncertainty."""
-    if not _trusted_url(url):
+    if not is_trusted_contract_url(url):
         return None
     response = None
     try:
