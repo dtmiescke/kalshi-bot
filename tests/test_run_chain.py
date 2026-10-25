@@ -99,6 +99,16 @@ class TestWorkflowWiring(unittest.TestCase):
         self.assertIn("if: always()", step)
         self.assertIn("run: bash .github/chain_next.sh after-training", step)
 
+    def test_trainer_runs_daily_and_audits_without_blocking_save(self):
+        wf = self.load("train.yml")
+        self.assertIn('cron: "0 0 * * *"', wf)
+        self.assertIn("cancel-in-progress: false", wf)
+        audit = _step(wf, "Backtest, regression tests and report")
+        self.assertIn("continue-on-error: true", audit)
+        for cmd in ("bot.main backtest", "unittest discover", "bot.main report"):
+            self.assertIn(cmd, audit)
+        self.assertLess(wf.index("Backtest, regression tests and report"), wf.index("Save memory"))
+
     def test_paper_mode_gate_unchanged(self):
         self.assertIn("LIVE_TRADING_OPERATIONAL_APPROVED != 'yes' && 'paper'",
                       _step(self.load("bot.yml"), "Run"))

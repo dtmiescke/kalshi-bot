@@ -1,13 +1,15 @@
 name: kalshi-train
 
-# Weekly: download the last 7 days of REAL settled Kalshi 15-minute windows,
-# add them to the training set, retrain, and promote only if the new model
-# beats Kalshi AND the current champion on unseen data. Run it by hand
-# (Actions -> kalshi-train -> Run workflow) right after setup to start trained.
+# Daily at midnight UTC: download the last 14 days of REAL settled Kalshi
+# 15-minute windows, add them to the training set, retrain, and promote only if
+# the new model beats Kalshi AND the current champion on unseen data. Then a
+# backtest, the regression tests and the report go to the log (read-only).
+# Shares the bot's concurrency group, so it never runs alongside a trading run.
+# Run it by hand (Actions -> kalshi-train -> Run workflow) any time.
 
 on:
   schedule:
-    - cron: "17 4 * * 0"        # Sundays 04:17 UTC
+    - cron: "0 0 * * *"         # daily, midnight UTC
   workflow_dispatch:
     inputs:
       days:
@@ -39,7 +41,7 @@ jobs:
       - name: Download history + train
         id: train-cycle
         env:
-          DAYS: ${{ github.event.inputs.days || '7' }}
+          DAYS: ${{ github.event.inputs.days || '14' }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           ML_MIN_WINDOWS: ${{ vars.ML_MIN_WINDOWS || '300' }}
           ML_MIN_TEST_WINDOWS: ${{ vars.ML_MIN_TEST_WINDOWS || '100' }}
@@ -59,6 +61,15 @@ jobs:
           fi
           python -m bot.main history "$DAYS"
           python -m bot.main train
+      - name: Backtest, regression tests and report
+        # Read-only audit for the log; a failure here never blocks saving the
+        # freshly trained model.
+        if: steps.train-cycle.outcome == 'success'
+        continue-on-error: true
+        run: |
+          python -m bot.main backtest
+          python -m unittest discover -s tests -q
+          python -m bot.main report
       - name: Save memory
         # Keep the last known-good snapshot if history download or training fails.
         if: steps.train-cycle.outcome == 'success'
