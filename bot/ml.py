@@ -222,7 +222,16 @@ def fresh_test_mask(groups, ts, champion_trained_at):
     return np.array([first[group] > champion_trained_at for group in groups], dtype=bool)
 
 
-def train(store, min_windows=300, fee_rate=0.07):
+def train(store, min_windows=300, fee_rate=0.07, deadline_ts=None):
+    """Train, test and maybe promote. deadline_ts (epoch seconds): stop cleanly
+    with status "time limit" at the next checkpoint after it, promoting nothing
+    and keeping the current champion, instead of being killed mid-run."""
+    def out_of_time(stage):
+        if deadline_ts is not None and time.time() > float(deadline_ts):
+            log.warning("training stopped at %s: time limit reached", stage)
+            return {"status": "time limit", "stage": stage, "promoted": False}
+        return None
+
     from sklearn.ensemble import HistGradientBoostingClassifier
     from sklearn.linear_model import LogisticRegression
     from sklearn.inspection import permutation_importance
@@ -247,6 +256,9 @@ def train(store, min_windows=300, fee_rate=0.07):
         ll = logloss(m.predict_proba(X[va])[:, 1], y[va], w[va])
         if ll < best_ll:
             best, best_ll = m, ll
+        stop = out_of_time(f"model search ({iters} trees)")
+        if stop:
+            return stop
     mi = cols.index("model_prob")
     stack = LogisticRegression(C=1.0)
     stack.fit(stack_inputs(best, X[va], li, mi), y[va], sample_weight=w[va])
@@ -262,6 +274,9 @@ def train(store, min_windows=300, fee_rate=0.07):
         "test_trades": sim_trades(p_test, X[te], cols, y[te], groups[te], fee_rate),
         "stack_weights": iso.weights(), "tail_shrink": tails,
     }
+    stop = out_of_time("before feature importance")
+    if stop:
+        return stop
     # which tools actually matter (on unseen test data)
     sub = np.where(te)[0][:6000]
     try:
@@ -272,6 +287,9 @@ def train(store, min_windows=300, fee_rate=0.07):
     except Exception as e:
         metrics["top_features"] = [["error", str(e)]]
 
+    stop = out_of_time("before champion comparison")
+    if stop:
+        return stop
     champ = load_meta()
     champ_path = os.path.join(MODEL_DIR, "crypto_model.joblib")
     if os.path.exists(champ_path):
@@ -450,6 +468,8 @@ def predict(feats, coin):
 
 
 def text(m):
+    if m.get("status") == "time limit":
+        return f"Model training stopped at its time limit ({m.get('stage')}); current champion kept."
     if m.get("status"):
         return f"Model training skipped: {m['status']} ({m.get('windows')} windows, need {m.get('needed')})."
     lines = ["=== MODEL TRAINING (walk-forward, newest 15% held out) ===",

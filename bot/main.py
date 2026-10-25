@@ -54,7 +54,7 @@ def training_due(store, now, every_hours=24.0, retry_hours=6.0):
     if now - last_attempt < max(0.25, float(retry_hours)) * 3600:
         return False
     status = store.get_kv("last_train_status")
-    if status in (None, "", "not enough data", "error", "running"):
+    if status in (None, "", "not enough data", "error", "running", "time limit"):
         return True
     last_success = float(store.get_kv("last_train", 0) or 0)
     return now - last_success >= max(0.25, float(every_hours)) * 3600
@@ -190,11 +190,13 @@ def run_scheduled(s, store, data):
         from . import ml
         store.set_kv("last_train_attempt", train_now)
         store.set_kv("last_train_status", "running")
+        # bounded so a slow fit can't push the scheduled job past its timeout
+        limit_min = float(os.environ.get("TRAIN_TIME_LIMIT_MINUTES_SCHEDULED", 8))
         m = ml.train(store, min_windows=int(os.environ.get("ML_MIN_WINDOWS", 300)),
-                     fee_rate=s.taker_fee_rate)
+                     fee_rate=s.taker_fee_rate, deadline_ts=time.time() + limit_min * 60)
         status = m.get("status") or "trained"
         store.set_kv("last_train_status", status)
-        if status != "not enough data":
+        if status not in ("not enough data", "time limit"):
             store.set_kv("last_train", train_now)
         print(ml.text(m))
         if m.get("promoted"):
@@ -307,9 +309,19 @@ def main(argv=None):
         return
     if cmd == "train":
         from . import ml
+        limit_min = float(os.environ.get("TRAIN_TIME_LIMIT_MINUTES", 45))
         m = ml.train(store, min_windows=int(os.environ.get("ML_MIN_WINDOWS", 300)),
-                     fee_rate=s.taker_fee_rate)
+                     fee_rate=s.taker_fee_rate, deadline_ts=time.time() + limit_min * 60)
         print(ml.text(m))
+        if m.get("status") == "time limit":
+            # Stop cleanly and exit 0 so the downloaded history is still saved;
+            # the status makes the scheduler retry on the short backoff.
+            store.set_kv("last_train_attempt", time.time())
+            store.set_kv("last_train_status", "time limit")
+            alerts.send("Training hit its time limit",
+                        f"Stopped at {m.get('stage')} after {limit_min:g} min; champion kept.",
+                        tags=["warning"])
+            return
         if m.get("status") == "not enough data":
             # A green workflow must not imply training succeeded when no model
             # evaluation was possible.
