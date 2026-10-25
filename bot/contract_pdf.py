@@ -7,6 +7,7 @@ text is evidence for existing counsel only; it never authorizes an order.
 from __future__ import annotations
 
 import io
+import re
 from urllib.parse import urlparse
 
 import requests
@@ -49,6 +50,8 @@ def extract_contract_pdf_text(url, get=requests.get):
             url, timeout=(3, 12), stream=True, allow_redirects=False,
             headers={"User-Agent": "kalshi-bot/1.0 (public contract rules)"},
         )
+        if response.status_code != 200:
+            return None
         response.raise_for_status()
         length = response.headers.get("Content-Length")
         if length:
@@ -94,14 +97,10 @@ def extract_contract_pdf_text(url, get=requests.get):
 def load_series_contract_pdf(data_client, store, series_ticker, now, series_metadata=None):
     """Load/cached PDF text for one series using metadata from the existing client."""
     series_ticker = str(series_ticker or "").strip()
-    if not series_ticker or "/" in series_ticker or "?" in series_ticker:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", series_ticker):
         return None
     cache_key = f"contract_rules_pdf_{series_ticker}"
     try:
-        cached = store.get_kv(cache_key)
-        age = int(now) - int((cached or {}).get("ts", 0) or 0) if isinstance(cached, dict) else -1
-        if isinstance(cached, dict) and cached.get("text") and 0 <= age < CACHE_SECONDS:
-            return cached
         series = series_metadata
         if not isinstance(series, dict):
             series = data_client.series(series_ticker)
@@ -110,6 +109,12 @@ def load_series_contract_pdf(data_client, store, series_ticker, now, series_meta
         url = series.get("contract_terms_url") or series.get("contract_url")
         if not is_trusted_contract_url(url):
             return None
+        cached = store.get_kv(cache_key)
+        age = int(now) - int((cached or {}).get("ts", 0) or 0) if isinstance(cached, dict) else -1
+        # Updated settlement terms must invalidate previously cached evidence.
+        if (isinstance(cached, dict) and cached.get("text")
+                and cached.get("url") == url and 0 <= age < CACHE_SECONDS):
+            return cached
         extracted = extract_contract_pdf_text(url)
         if not extracted:
             return None
