@@ -6,6 +6,8 @@ the existing Engine remains the single strategy/risk/execution authority.
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+from .event_clock import event_start_ts
+
 
 SCANNER_ROLES = (
     "schedule_and_status", "market_coverage", "quote_quality", "liquidity_watch",
@@ -92,7 +94,7 @@ def _scan_event(event, now, role):
     start = event.get("start_time") or event.get("commence_time") or event.get("date")
     if role in ("schedule_and_status", "live_state_watch") and live:
         stats["live_events"] = 1
-    if role == "schedule_and_status" and not start:
+    if role == "schedule_and_status" and not (start or event_start_ts(event)):
         stats["missing_start_times"] = 1
     if role == "matchup_evidence_watch" and not (event.get("title") or event.get("subtitle")):
         stats["missing_event_titles"] = 1
@@ -111,7 +113,8 @@ def _scan_event(event, now, role):
             stats["duplicate_market_tickers"] += 1
         seen.add(ticker)
         stats["active_markets"] += 1
-        bid, ask = market.get("yes_bid"), market.get("yes_ask")
+        bid = market.get("yes_bid_dollars", market.get("yes_bid_fp", market.get("yes_bid")))
+        ask = market.get("yes_ask_dollars", market.get("yes_ask_fp", market.get("yes_ask")))
         if role == "liquidity_watch":
             stats["markets_with_volume"] += int(market.get("volume") is not None)
             stats["markets_with_open_interest"] += int(market.get("open_interest") is not None)
@@ -124,8 +127,10 @@ def _scan_event(event, now, role):
         else:
             try:
                 b, a = float(bid), float(ask)
-                if b > 1: b /= 100.0
-                if a > 1: a /= 100.0
+                if "yes_bid_dollars" not in market and "yes_bid_fp" not in market and b > 1:
+                    b /= 100.0
+                if "yes_ask_dollars" not in market and "yes_ask_fp" not in market and a > 1:
+                    a /= 100.0
                 if role == "quote_quality":
                     stats["priced_markets"] += 1
                     if not (0 <= b <= 1 and 0 <= a <= 1):
@@ -194,10 +199,47 @@ def scan_fleet(events_by_series, now=None, workers=8):
     for result in results:
         for row in result["live_watch_markets"]:
             live.setdefault(row["ticker"], row)
+    series_coverage = {}
+    active_markets = active_with_quotes = active_missing_quotes = events_without_markets = 0
+    events_with_clock = 0
+    for series in sorted(normalized):
+        rows = normalized[series]
+        series_active = series_priced = series_missing_quotes = 0
+        for event in rows:
+            markets = event.get("markets") or []
+            if not markets:
+                events_without_markets += 1
+            if event_start_ts(event) is not None or event.get("start_time") or event.get("commence_time") or event.get("date"):
+                events_with_clock += 1
+            for market in markets:
+                if str(market.get("status") or "").lower() not in ("active", "open"):
+                    continue
+                series_active += 1
+                bid = market.get("yes_bid_dollars", market.get("yes_bid_fp", market.get("yes_bid")))
+                ask = market.get("yes_ask_dollars", market.get("yes_ask_fp", market.get("yes_ask")))
+                if bid is not None and ask is not None:
+                    series_priced += 1
+                else:
+                    series_missing_quotes += 1
+        active_markets += series_active
+        active_with_quotes += series_priced
+        active_missing_quotes += series_missing_quotes
+        series_coverage[series] = {
+            "events": len(rows), "active_markets": series_active,
+            "active_markets_with_quotes": series_priced,
+            "active_markets_missing_quotes": series_missing_quotes,
+        }
     summary = {
         "ts": now, "ok": sum(r.get("scan_errors", 0) for r in results) == 0, "scanner_count": workers,
         "events_unique": len(events),
+        "events_with_start_time": events_with_clock,
+        "events_missing_start_time": max(0, len(events) - events_with_clock),
+        "events_without_markets": events_without_markets,
         "markets_unique": sum(len(e.get("markets") or []) for e in events),
+        "active_markets": active_markets,
+        "active_markets_with_quotes": active_with_quotes,
+        "active_markets_missing_quotes": active_missing_quotes,
+        "series_coverage": series_coverage,
         "live_events_seen": sum(r["live_events"] for r in results if r["role"] == "live_state_watch"),
         "scan_errors": sum(r.get("scan_errors", 0) for r in results),
         "error_samples": [sample for r in results for sample in r.get("error_samples", [])][:10],
