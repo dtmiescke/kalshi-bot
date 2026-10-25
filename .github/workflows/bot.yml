@@ -48,6 +48,13 @@ jobs:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENROUTER_MODELS: ${{ vars.OPENROUTER_MODELS }}
+          # Bounded current-web research; OpenRouter server-tool calls may incur usage charges.
+          SPORTS_AI_WEB_SEARCH: ${{ vars.SPORTS_AI_WEB_SEARCH || 'yes' }}
+          SPORTS_AI_WEB_SEARCH_TTL_SECONDS: ${{ vars.SPORTS_AI_WEB_SEARCH_TTL_SECONDS || '1800' }}
+          OPENROUTER_WEB_SEARCH_MODEL: ${{ vars.OPENROUTER_WEB_SEARCH_MODEL }}
+          OPENROUTER_WEB_SEARCH_MAX_PER_RUN: ${{ vars.OPENROUTER_WEB_SEARCH_MAX_PER_RUN || '2' }}
+          OPENROUTER_WEB_SEARCH_DAILY_LIMIT: ${{ vars.OPENROUTER_WEB_SEARCH_DAILY_LIMIT || '6' }}
+          OPENROUTER_TECH_SCOUT_ENABLED: ${{ vars.OPENROUTER_TECH_SCOUT_ENABLED || 'yes' }}
           OMNIROUTE_URL: ${{ secrets.OMNIROUTE_URL }}
           OMNIROUTE_API_KEY: ${{ secrets.OMNIROUTE_API_KEY }}
           OMNIROUTE_MODELS: ${{ vars.OMNIROUTE_MODELS }}
