@@ -47,7 +47,7 @@ def _unwrap_market(payload):
             and str(block.get("text", "")).strip()
         ]
         if text_parts:
-            combined_text = "\\n".join(text_parts)
+            combined_text = "\n".join(text_parts)
             parsed = None
             try:
                 candidate = json.loads(combined_text)
