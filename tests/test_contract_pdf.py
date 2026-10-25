@@ -1,8 +1,7 @@
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from bot.contract_pdf import extract_contract_pdf_text, load_series_contract_pdf
-from unittest.mock import patch
 
 
 class TestContractPdf(unittest.TestCase):
