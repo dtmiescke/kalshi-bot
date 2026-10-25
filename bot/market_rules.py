@@ -29,7 +29,7 @@ def summarize_rules(market):
         missing.append("primary settlement rules/source not present in supplied market data")
     flags = []
     patterns = (
-        ("early_close", r"early close|close early|may close before"),
+        ("early_close", r"early close|close early|may close early|may close before"),
         ("settlement_exception", r"exception|subject to change|at kalshi.s discretion"),
         ("source_or_index", r"index|official source|settlement source|published by"),
         ("void_or_cancellation", r"cancelled|canceled|void|no contest|postponed|abandoned"),
