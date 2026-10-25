@@ -65,10 +65,12 @@ class TestMarketRulesEnvelopeHardening(unittest.TestCase):
         self.assertEqual(result["status"], "unavailable")
 
     def test_too_many_envelope_nodes_fail_closed(self):
-        payload = {"rules_primary": "Must not be trusted past the traversal bound."}
-        for _ in range(70):
-            payload = {"result": payload}
-        result = summarize_rules(payload)
+        def tree(depth):
+            if depth == 0:
+                return {"rules_primary": "Must not be trusted past the traversal bound."}
+            return {"result": tree(depth - 1), "data": tree(depth - 1)}
+
+        result = summarize_rules(tree(6))
         self.assertFalse(result["available"])
         self.assertEqual(result["status"], "unavailable")
 
