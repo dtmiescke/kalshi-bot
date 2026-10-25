@@ -7,14 +7,16 @@ Third-party MCP tools may inform research, but cannot acquire order authority.
 from __future__ import annotations
 
 import re
+import time
 
 from .market_rules import summarize_rules
+from .contract_pdf import load_series_contract_pdf
 
 _TICKER = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
-_ALLOWED = frozenset({"market", "series", "orderbook", "rules"})
+_ALLOWED = frozenset({"market", "series", "orderbook", "rules", "rules_pdf"})
 
 
-def research_tool(client, tool, ticker):
+def research_tool(client, tool, ticker, *, store=None, now=None):
     """Execute only explicitly allowlisted public reads; no arbitrary dispatch.
 
     Results are advisory and must never be treated as permission to trade.
@@ -31,6 +33,13 @@ def research_tool(client, tool, ticker):
         return client.series(ticker)
     if tool == "orderbook":
         return client.orderbook(ticker)
+    if tool == "rules_pdf":
+        if store is None:
+            raise ValueError("rules_pdf requires the existing store")
+        series = client.series(ticker)
+        return load_series_contract_pdf(client, store, ticker,
+                                        int(time.time() if now is None else now),
+                                        series_metadata=series)
     market = client.market(ticker)
     if not isinstance(market, dict):
         return summarize_rules({})
