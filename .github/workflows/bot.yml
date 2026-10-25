@@ -17,6 +17,7 @@ concurrency:
 
 permissions:
   contents: write
+  actions: write   # queue the next cycle (see "Queue the next run")
 
 jobs:
   run:
@@ -93,6 +94,7 @@ jobs:
           BOT_DB: data/bot.sqlite
         run: python -m bot.main nerd-check
       - name: Save memory
+        id: save-memory
         # Never overwrite the last known-good persistent snapshot after a failed cycle or failed postflight.
         if: steps.run.outcome == 'success' && steps.nerd-postflight.outcome == 'success'
         env:
@@ -105,3 +107,15 @@ jobs:
           DAILY_LOSS_LIMIT: ${{ vars.DAILY_LOSS_LIMIT || '30' }}
           BOT_TIMEZONE: ${{ vars.BOT_TIMEZONE || 'America/Chicago' }}
         run: bash .github/save.sh
+      - name: Queue the next run
+        # GitHub's cron skips most */12 runs (about 37 of ~240 fired in two days),
+        # so each successful cycle queues the next one on main. The cron stays as
+        # the fallback that restarts the chain. A run started with this token via
+        # workflow_dispatch is allowed to trigger a new run.
+        # Set the repository variable CHAIN_RUNS=no to stop chaining.
+        if: >-
+          always() && steps.save-memory.outcome == 'success' &&
+          github.ref == 'refs/heads/main' && vars.CHAIN_RUNS != 'no'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/chain_next.sh
