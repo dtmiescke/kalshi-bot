@@ -35,6 +35,11 @@ class TestOddsBudget(unittest.TestCase):
                   {"markets": [{"status": "settled", "occurrence_datetime": iso(NOW + 60)}]}]
         self.assertEqual(odds.next_game_ts(events, NOW), NOW + 3600)
         self.assertIsNone(odds.next_game_ts([], NOW))
+        self.assertEqual(odds.next_game_ts(
+            [{"start_time": iso(NOW + 1800), "markets": []}], NOW), NOW + 1800)
+        self.assertEqual(odds.next_game_ts(
+            [{"markets": [{"status": "active", "close_time": iso(NOW + 2400)}]}], NOW),
+            NOW + 2400)
 
     def test_no_game_soon_means_no_spend(self):
         self.assertEqual(self.plan(NOW + 48 * 3600), (False, "no game soon"))
@@ -44,6 +49,16 @@ class TestOddsBudget(unittest.TestCase):
         self.assertEqual(self.plan(NOW + 10 * 3600), (False, "fresh"))        # 2h < 4h
         self.assertEqual(self.plan(NOW + 2 * 3600), (True, "near game"))      # 2h > 1h
         self.assertEqual(self.plan(None), (False, "fresh"))                   # unknown: 4h rule
+        # An empty cache must retry after a prior empty/failed response, even
+        # inside the normal refresh interval; monthly/daily limits still apply.
+        self.assertEqual(
+            odds.refresh_plan(self.st, "basketball_nba", NOW, NOW + 2 * 3600,
+                              240, cache_empty=True),
+            (True, "near game"))
+        self.assertEqual(
+            odds.refresh_plan(self.st, "basketball_nba", NOW, None, 240,
+                              cache_empty=True),
+            (True, "scheduled"))
 
     def test_daily_pacing_and_hard_stop(self):
         self.st.set_kv("odds_quota", {"remaining": 70})                       # 70 / 7 days = 10 a day
