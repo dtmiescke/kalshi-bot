@@ -38,10 +38,12 @@ class FakeKalshi:
                  "title": "Boston at New York", "markets": [
             {"ticker": "KXNBAGAME-26OCT20BOSNYK-BOS", "yes_sub_title": "Boston",
              "status": "active", "yes_bid": 49, "yes_ask": 50, "last_price": 50,
-             "volume": 5000, "expected_expiration_time": iso(self.start + timedelta(hours=3))},
+             "volume": 5000, "rules_primary": "Resolves YES if the named team wins the scheduled game; otherwise NO.",
+             "expected_expiration_time": iso(self.start + timedelta(hours=3))},
             {"ticker": "KXNBAGAME-26OCT20BOSNYK-NYK", "yes_sub_title": "New York",
              "status": "active", "yes_bid": 50, "yes_ask": 51, "last_price": 50,
-             "volume": 5000, "expected_expiration_time": iso(self.start + timedelta(hours=3))},
+             "volume": 5000, "rules_primary": "Resolves YES if the named team wins the scheduled game; otherwise NO.",
+             "expected_expiration_time": iso(self.start + timedelta(hours=3))},
         ]}]
 
     def trades(self, ticker, min_ts=None):

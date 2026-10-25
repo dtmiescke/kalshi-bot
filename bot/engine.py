@@ -238,6 +238,14 @@ class Engine:
             "open_interest": num(m, "open_interest"),
             "close_time": m.get("close_time"), "status": m.get("status"),
         }
+        # Keep the original, bounded contract terms in the in-memory candidate
+        # context for sports counsel. Store.add_market_snapshot persists only its
+        # established schema, so this does not alter the database or dashboard.
+        for key in ("rules_primary", "rules_secondary", "early_close_condition",
+                    "settlement_value", "settlement_source", "custom_strike"):
+            value = m.get(key)
+            if value not in (None, ""):
+                row[key] = str(value)[:3000]
         self.store.add_market_snapshot(row)
         return row
 
@@ -688,6 +696,21 @@ class Engine:
                         candidates.append(c)
                 if candidates:
                     best = max(candidates, key=lambda c: c[1]["edge"])
+                    # Contract rules often are omitted from nested event payloads.
+                    # Fetch the full market only for the shortlisted candidate (not every
+                    # market), and merge rule text only; never replace the fresh price snapshot.
+                    rule_keys = ("rules_primary", "rules_secondary", "early_close_condition",
+                                 "settlement_value", "settlement_source", "custom_strike")
+                    if not best[0].get("rules_primary") and not best[0].get("settlement_source"):
+                        try:
+                            details = self.data.market(best[0]["ticker"])
+                            for key in rule_keys:
+                                value = details.get(key) if isinstance(details, dict) else None
+                                if value not in (None, ""):
+                                    best[0][key] = str(value)[:3000]
+                        except Exception as exc:
+                            log.debug("contract-rule lookup unavailable for %s: %s",
+                                      best[0].get("ticker"), exc)
                     # Sport-specific counsel is a veto/wait layer only; it cannot
                     # create candidates, alter sizing, or bypass the existing risk gate.
                     from . import sports_counsel

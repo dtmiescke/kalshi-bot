@@ -57,14 +57,24 @@ def review(llm, store, event, snap, plan, readings, prob, confidence, now=None):
     if plan.get("side") not in ("yes", "no") or not 0 < float(plan.get("price", 0)) < 1:
         return {"decision": "reject", "by": "rules", "reason": "invalid side or price"}
 
+    from .market_rules import summarize_rules
+    contract_rules = summarize_rules(snap)
+    # Settlement terms are a hard data dependency for sports contracts. A missing
+    # rules payload must not silently turn into approval when AI counsel is disabled
+    # or its token budget is exhausted.
+    if contract_rules.get("status") == "unavailable":
+        return {"decision": "wait", "by": "rules",
+                "reason": "official settlement rules unavailable; refresh contract details"}
     mode = os.environ.get("COUNCIL_MODE", "advisory").strip().lower()
     if mode == "off":
-        return {"decision": "approve", "by": "rules", "reason": "sports counsel disabled; numeric checks passed"}
+        if contract_rules.get("status") == "review_required":
+            return {"decision": "wait", "by": "rules",
+                    "reason": "contract has settlement terms that require review"}
+        return {"decision": "approve", "by": "rules", "reason": "sports counsel disabled; numeric and contract-rule checks passed"}
     cache_key = f"sports_counsel_{ticker}"
     cached = store.get_kv(cache_key)
     if cached and now - int(cached.get("ts", 0)) < 180:
         return cached.get("result", result)
-    from .market_rules import summarize_rules
     payload = {
         "sport_series": snap.get("series"), "event_ticker": snap.get("event_ticker"),
         "event_title": event.get("title") or event.get("subtitle"),
@@ -72,13 +82,17 @@ def review(llm, store, event, snap, plan, readings, prob, confidence, now=None):
         "team": snap.get("team"), "side": plan.get("side"), "price": plan.get("price"),
         "edge": plan.get("edge"), "model_probability": prob,
         "confidence": confidence, "signals": _reading_payload(readings),
-        "contract_rules": summarize_rules(snap),
+        "contract_rules": contract_rules,
         "note": "Only supplied evidence is available. Treat settlement rules as authoritative; if absent or ambiguous, wait for manual verification. Never assume missing lineups or live stats.",
     }
     if llm is None or llm.budget_left() < 2:
-        decision = ({"decision": "wait", "by": "rules", "reason": "required sports counsel unavailable"}
-                   if mode == "required" else
-                   {"decision": "approve", "by": "numbers", "reason": "numeric gates passed; AI counsel unavailable"})
+        if contract_rules.get("status") == "review_required":
+            decision = {"decision": "wait", "by": "rules",
+                        "reason": "contract settlement terms need review; AI counsel unavailable"}
+        else:
+            decision = ({"decision": "wait", "by": "rules", "reason": "required sports counsel unavailable"}
+                       if mode == "required" else
+                       {"decision": "approve", "by": "numbers", "reason": "numeric and contract-rule checks passed; AI counsel unavailable"})
         store.set_kv(cache_key, {"ts": now, "result": decision})
         return decision
     models = [m for m in llm.models if m not in llm.dead]
