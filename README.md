@@ -36,6 +36,14 @@ on unseen data** (crypto).
 
 - The fleet's fast coverage scan runs over the full eligible event set. Expensive per-market history and research is capped by `SPORTS_SCAN_EVENT_BUDGET` (default 150 events) and `SPORTS_SCAN_MARKET_BUDGET` (default 100 markets) so the scheduled job can finish and persist memory. Increase budgets only after observing runtime; held events bypass the deep-market cap.
 
+## OpenRouter research brain
+- OmniRoute remains the preferred general-purpose gateway when configured; OpenRouter remains the fallback. The existing LLM budget and model panel are reused rather than adding another agent stack.
+- When `OPENROUTER_API_KEY` is configured, the existing sports news analysis can add bounded OpenRouter web search for event-specific news and official updates. Evidence is cached per event (30 minutes by default), with source URLs and a research-health record.
+- The scheduled job also runs a weekly public-source technology scout. It can search and fetch public GitHub/docs/paper pages on approved domains, then stores up to five candidate engineering ideas in `openrouter_tech_scout_latest`. Ideas are recommendations only; the scout cannot edit code, execute downloaded code, alter model weights, or enable trading.
+- Web search is enabled by default when an OpenRouter key is present. Default limits are 2 search requests per scheduled run and 6 per UTC day; actual charges depend on OpenRouter's selected search engine and model. Disable with `SPORTS_AI_WEB_SEARCH=no`, `OPENROUTER_TECH_SCOUT_ENABLED=no`, or set the search caps to `0`.
+- Useful repository variables: `OPENROUTER_WEB_SEARCH_MODEL`, `OPENROUTER_WEB_SEARCH_MAX_PER_RUN`, `OPENROUTER_WEB_SEARCH_DAILY_LIMIT`, `SPORTS_AI_WEB_SEARCH_TTL_SECONDS`.
+- Search results and fetched pages are untrusted evidence. The bot requires provenance and freshness, and research cannot override its single engine, paper-mode defaults, execution guards, or risk limits.
+
 ## Smart research
 **Crypto (`crypto_brain.py`, used by snapshot AND live modes):**
 - Exact contract model: strike, seconds left, settlement averaging window from the rules
