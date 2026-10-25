@@ -166,7 +166,8 @@ class TestTrainingSafety(unittest.TestCase):
         obj = engine.Engine.__new__(engine.Engine)
         obj.s = SimpleNamespace(mode="demo", taker_fee_rate=0.07, maker_fee_rate=0.0175)
         obj.store = SimpleNamespace(add_bet=lambda row: saved.append(row))
-        snap = {"ticker": "T", "event_ticker": "E", "series": "KXBTC15M", "team": "BTC"}
+        # A series that charges maker fees, so the fee on the filled part is visible.
+        snap = {"ticker": "T", "event_ticker": "E", "series": "KXNBAGAME", "team": "BOS"}
         plan = {"side": "yes", "price": 0.50, "limit": 0.50, "style": "maker",
                 "contracts": 5, "stake": 2.50, "fee": 0.05, "edge": 0.10}
         with mock.patch("bot.engine.alerts.send"):
@@ -175,6 +176,13 @@ class TestTrainingSafety(unittest.TestCase):
         self.assertEqual(saved[0]["contracts"], 2)
         self.assertEqual(saved[0]["stake"], 1.00)
         self.assertEqual(saved[0]["fee"], 0.01)
+        # Kalshi's crypto series are fee_type "quadratic": resting fills are free.
+        saved.clear()
+        snap = {"ticker": "T", "event_ticker": "E", "series": "KXBTC15M", "team": "BTC"}
+        with mock.patch("bot.engine.alerts.send"):
+            obj.place(snap, dict(plan), [], 0.60, 0.80, {"bets": 0}, 123,
+                      executed={"order_id": "ORDER", "contracts": 2})
+        self.assertEqual(saved[0]["fee"], 0.0)
 
     def test_sports_arbitrage_fails_closed_for_unverified_or_draw_capable_series(self):
         book_a = {"yes": [(0.40, 10)], "no": [(0.65, 10)]}
