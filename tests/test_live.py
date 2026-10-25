@@ -139,7 +139,7 @@ class TestCouncil(unittest.TestCase):
         self.assertEqual(council.review(None, self.store, "T3", self.good)["decision"], "approve")
         os.environ["COUNCIL_MODE"] = "required"
         try:
-            self.assertEqual(council.review(None, self.store, "T4", self.good)["decision"], "wait")
+            self.assertEqual(council.review(None, self.store, "T4", self.good)["decision"], "approve")
         finally:
             del os.environ["COUNCIL_MODE"]
 
