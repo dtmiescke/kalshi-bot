@@ -102,6 +102,7 @@ class OddsClient:
             return []
         r.raise_for_status()
         self.last_remaining = r.headers.get("x-requests-remaining")
+        self.last_used = r.headers.get("x-requests-used")
         return r.json()
 
 
@@ -109,3 +110,84 @@ def odds_due(store, sport, refresh_minutes):
     """Respect the free-tier credit budget: only refetch odds when stale."""
     last = store.get_kv(f"odds_last_{sport}", 0)
     return time.time() - last >= refresh_minutes * 60
+
+
+# --- free-tier budget (known problem 8) -----------------------------------------------
+# One h2h call costs one credit per region. Plan: every 4 hours, hourly close to
+# game time, only leagues with a game soon, pace the month, hard stop near zero.
+NEAR_GAME_HOURS = 3
+HORIZON_HOURS = 36
+RESERVE_CREDITS = 10
+
+
+def _ts(value):
+    if not value:
+        return None
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def next_game_ts(events, now):
+    """Soonest game time among open markets (Kalshi puts it on each market as
+    occurrence_datetime; expected_expiration_time is the fallback). Games that
+    started over 3 hours ago are ignored."""
+    best = None
+    for ev in events or []:
+        for m in ev.get("markets") or []:
+            if m.get("status") not in ("active", "open", None):
+                continue
+            t = _ts(m.get("occurrence_datetime")) or _ts(m.get("expected_expiration_time"))
+            if t and t >= now - 3 * 3600 and (best is None or t < best):
+                best = t
+    return best
+
+
+def _month_days_left(now):
+    from datetime import datetime, timezone
+    import calendar
+    d = datetime.fromtimestamp(now, timezone.utc)
+    return calendar.monthrange(d.year, d.month)[1] - d.day + 1
+
+
+def refresh_plan(store, sport, now, next_game, base_minutes, regions="us",
+                 monthly_credits=500):
+    """(due, reason) for re-pulling one sport's odds within the free budget."""
+    cost = max(1, len([r for r in str(regions).split(",") if r.strip()]))
+    if next_game is not None and next_game - now > HORIZON_HOURS * 3600:
+        return False, "no game soon"
+    near = next_game is not None and next_game - now <= NEAR_GAME_HOURS * 3600
+    interval = 60 if near else base_minutes
+    if now - float(store.get_kv(f"odds_last_{sport}", 0) or 0) < interval * 60:
+        return False, "fresh"
+    quota = store.get_kv("odds_quota") or {}
+    remaining = quota.get("remaining")
+    remaining = monthly_credits if remaining is None else float(remaining)
+    if remaining - cost < RESERVE_CREDITS:
+        return False, "quota exhausted"
+    allowance = remaining / _month_days_left(now)
+    spent = float(store.get_kv(f"odds_spent_{time.strftime('%Y%m%d', time.gmtime(now))}", 0) or 0)
+    # near-game lines are worth the most: they may use up to twice the day's share
+    if spent + cost > allowance * (2 if near else 1):
+        return False, "daily budget used"
+    return True, "near game" if near else "scheduled"
+
+
+def record_spend(store, client, now, regions="us", monthly_credits=500, alert=None):
+    """Book one fetch against today's budget and keep the provider's own counts."""
+    cost = max(1, len([r for r in str(regions).split(",") if r.strip()]))
+    day = f"odds_spent_{time.strftime('%Y%m%d', time.gmtime(now))}"
+    store.set_kv(day, float(store.get_kv(day, 0) or 0) + cost)
+    try:
+        remaining = float(getattr(client, "last_remaining", None))
+    except (TypeError, ValueError):
+        return
+    used = getattr(client, "last_used", None)
+    store.set_kv("odds_quota", {"remaining": remaining, "used": used, "ts": int(now)})
+    month = f"odds_quota_alerted_{time.strftime('%Y%m', time.gmtime(now))}"
+    if remaining <= 0.2 * monthly_credits and not store.get_kv(month) and alert:
+        alert("Odds API credits low", f"{remaining:.0f} of {monthly_credits} free credits left "
+              "this month; refreshing only near game time.", tags=["warning"])
+        store.set_kv(month, True)

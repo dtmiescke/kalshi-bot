@@ -13,7 +13,7 @@ from .llm import LLM
 from .config import CRYPTO_15M, SPORTS
 from .kalshi_client import KalshiClient, num, price
 from .matching import match_event
-from .odds import OddsClient, consensus, odds_due
+from .odds import OddsClient, consensus, next_game_ts as odds_next_game, record_spend, refresh_plan
 from . import crypto_brain
 from .live import settlement
 from .signals import crypto as crypto_sig
@@ -180,15 +180,21 @@ class Engine:
             log.exception("could not send order reconciliation alert")
 
     # --- data collection -------------------------------------------------------
-    def refresh_odds(self, sport):
-        """Pull books when the credit budget allows, store vig-free consensus."""
-        # Sports scans run every few hours, so always refresh lines older than
-        # ODDS_MAX_AGE_MINUTES: comparing a live Kalshi price with a stale
-        # sportsbook line manufactures fake edges.
-        if not odds_due(self.store, sport, min(self.s.odds_refresh_minutes, self.odds_max_age)):
+    def refresh_odds(self, sport, next_game=None):
+        """Pull books when the free credit budget allows (odds.refresh_plan:
+        only with a game within 36 h, hourly near game time, every
+        ODDS_REFRESH_MINUTES otherwise, the month's credits paced by day), and
+        store vig-free consensus. Stale lines never trade: evaluate() refuses
+        consensus older than 1.5 x ODDS_MAX_AGE_MINUTES."""
+        now = int(time.time())
+        due, why = refresh_plan(self.store, sport, now, next_game, self.s.odds_refresh_minutes,
+                                self.s.odds_regions, int(os.environ.get("ODDS_MONTHLY_CREDITS", 500)))
+        if not due:
+            log.debug("odds %s not refreshed: %s", sport, why)
             return
         events = self.odds.fetch(sport, self.s.odds_regions)
-        now = int(time.time())
+        record_spend(self.store, self.odds, now, self.s.odds_regions,
+                     int(os.environ.get("ODDS_MONTHLY_CREDITS", 500)), alert=alerts.send)
         slim = []
         for ev in events:
             for team, (p, n, spread) in consensus(ev).items():
@@ -558,7 +564,7 @@ class Engine:
             supported_odds = sport in set(SPORTS.values())
             if supported_odds:
                 try:
-                    self.refresh_odds(sport)
+                    self.refresh_odds(sport, odds_next_game(events, now))
                 except Exception as e:
                     log.warning("odds %s: %s", sport, e)
                 odds_events = self.store.get_kv(f"odds_events_{sport}", [])

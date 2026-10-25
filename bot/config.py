@@ -120,7 +120,7 @@ class Settings:
     # adds Pinnacle, the sharpest book. Default keeps a free key under budget.
     odds_regions: str = field(default_factory=lambda: _env("ODDS_REGIONS", "us"))
     odds_refresh_minutes: int = field(
-        default_factory=lambda: _env_int("ODDS_REFRESH_MINUTES", 360))
+        default_factory=lambda: _env_int("ODDS_REFRESH_MINUTES", 240))
     odds_max_age_minutes: float = field(
         default_factory=lambda: _env_float("ODDS_MAX_AGE_MINUTES", 60))
 
