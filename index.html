@@ -344,6 +344,7 @@ const BOT_WF="bot.yml", TRAIN_WF="train.yml", DATA_BRANCH="bot-data";
 const $=id=>document.getElementById(id);
 const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
 const SETTINGS=[
+  {name:"AGGRESSION_LEVEL",label:"Paper trading aggression (manual / adaptive)",type:"select",opts:["off","conservative","balanced","aggressive","adaptive"],def:"aggressive"},
   {name:"FIXED_BET",label:"Fixed bet ($, blank = auto sizing)",type:"number"},
   {name:"MAX_PER_BET",label:"Max per bet ($)",type:"number",def:"25"},
   {name:"MAX_PER_DAY",label:"Max per day ($)",type:"number",def:"150"},

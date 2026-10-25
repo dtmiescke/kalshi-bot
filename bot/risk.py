@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from . import brain, fees
+from .adaptive_aggression import AggressionPolicy, choose, settled_paper_results
 
 
 
@@ -119,8 +120,22 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
     """
     min_edge = s.min_edge if min_edge is None else min_edge
     max_per_bet = s.max_per_bet if max_per_bet is None else max_per_bet
-    if confidence < s.min_confidence:
-        return None, f"confidence {confidence:.0%} below {s.min_confidence:.0%}"
+    min_confidence = s.min_confidence
+    effective_kelly_fraction = s.kelly_fraction
+    if s.mode == "paper":
+        policy = choose(AggressionPolicy(
+            level=getattr(s, "aggression_level", "off"),
+            min_edge=s.min_edge, min_confidence=s.min_confidence,
+            kelly_fraction=s.kelly_fraction),
+            settled_paper_results=settled_paper_results(store)
+            if getattr(s, "aggression_level", "off") == "adaptive" else ())
+        if policy:
+            if min_edge == s.min_edge:
+                min_edge = max(s.min_edge, policy["min_edge"])
+            min_confidence = policy["min_confidence"]
+            effective_kelly_fraction = min(s.kelly_fraction, policy["kelly_fraction"])
+    if confidence < min_confidence:
+        return None, f"confidence {confidence:.0%} below {min_confidence:.0%}"
     if store.has_open_event_bet(mkt["event_ticker"], mode=s.mode):
         # YES on Boston and NO on New York are the same bet; never double up
         return None, "already holding this game"
@@ -176,7 +191,7 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
     else:   # fractional Kelly on the FEE-INCLUSIVE cost, scaled by confidence
         cost = price + taker_fee(100, price, rate) / 100
         kelly = max(0.0, (p_win - cost) / (1 - cost))
-        want = s.bankroll * s.kelly_fraction * kelly * confidence * earned
+        want = s.bankroll * effective_kelly_fraction * kelly * confidence * earned
 
     acct = store.account(s.bankroll, mode=s.mode)
     if acct["open_positions"] >= s.max_open_positions:
