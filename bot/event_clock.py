@@ -20,11 +20,14 @@ def _parse_timestamp(value):
 
 def event_start_ts(event):
     """Return the earliest reliable occurrence time for an open market event."""
+    event = event if isinstance(event, dict) else {}
     markets = event.get("markets") or []
     occurrence = []
     expiration = []
     for market in markets:
-        if market.get("status") not in ("active", "open", None):
+        if not isinstance(market, dict):
+            continue
+        if str(market.get("status") or "").lower() not in ("active", "open", ""):
             continue
         start = _parse_timestamp(market.get("occurrence_datetime"))
         if start is not None:
@@ -33,5 +36,12 @@ def event_start_ts(event):
         end = _parse_timestamp(market.get("expected_expiration_time"))
         if end is not None:
             expiration.append(end)
-    values = occurrence or expiration
-    return min(values) if values else None
+    # Prefer market occurrence timestamps, then event-level schedule fields,
+    # then expiration as a last-resort clock when the upstream event lacks a start.
+    if occurrence:
+        return min(occurrence)
+    for key in ("start_time", "commence_time", "scheduled_start_time", "date"):
+        value = _parse_timestamp(event.get(key))
+        if value is not None:
+            return value
+    return min(expiration) if expiration else None
