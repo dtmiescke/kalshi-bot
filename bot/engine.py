@@ -1244,10 +1244,21 @@ class Engine:
             self._record_decision(snap, readings, "rejected", "required outside signal unavailable")
             self._skip(summary, "required outside signal unavailable")
             return None
-        if not required and not any(r.name in ("kalshi_market", "trade_flow") for r in readings):
-            self._record_decision(snap, readings, "rejected", "no usable Kalshi-native signal")
-            self._skip(summary, "no usable Kalshi-native signal")
-            return None
+        if not required:
+            # Kalshi's own price is the market-implied probability, not an
+            # independent forecast. Without a sportsbook match, require at
+            # least one additional signal from observed flow, current research,
+            # or a trained model before claiming edge or proposing a bet.
+            independent = {
+                "trade_flow", "ai_news", "schedule_spot", "ml_model",
+                "line_movement", "reverse_line_movement",
+            }
+            if not any(r.name in independent for r in readings):
+                self._record_decision(
+                    snap, readings, "rejected",
+                    "insufficient independent Kalshi-only evidence")
+                self._skip(summary, "insufficient independent Kalshi-only evidence")
+                return None
         bc = next((r for r in readings if r.name == "book_consensus"), None)
         if bc and bc.detail.get("age_min", 0) > self.odds_max_age * 1.5:
             self._record_decision(snap, readings, "rejected", "sportsbook odds too old")
