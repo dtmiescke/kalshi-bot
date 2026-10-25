@@ -2,6 +2,8 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
+import requests
 from datetime import datetime, timezone
 
 from bot import odds
@@ -52,6 +54,18 @@ class TestOddsBudget(unittest.TestCase):
         self.assertEqual(self.plan(NOW + 3600), (False, "daily budget used"))
         self.st.set_kv("odds_quota", {"remaining": 10})
         self.assertEqual(self.plan(NOW + 3600), (False, "quota exhausted"))
+
+    @patch("bot.odds.requests.get")
+    def test_auth_and_invalid_sport_errors_raise_instead_of_looking_like_empty_odds(self, get):
+        for status in (401, 422):
+            response = Mock()
+            response.status_code = status
+            response.raise_for_status.side_effect = requests.HTTPError(f"HTTP {status}")
+            get.return_value = response
+            with self.subTest(status=status):
+                with self.assertRaises(requests.HTTPError):
+                    odds.OddsClient("configured-key").fetch("basketball_nba")
+        self.assertEqual(get.call_count, 2)
 
     def test_record_spend_tracks_provider_counts_and_alerts_once_at_80_percent(self):
         class Client:

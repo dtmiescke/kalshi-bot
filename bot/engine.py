@@ -677,14 +677,23 @@ class Engine:
                     book_team = mapping.get(team) if mapping else None
                     opp = next((v for k, v in (mapping or {}).items() if k != team), None)
 
+                    if not ev_match:
+                        # Classify missing event matches before research returns
+                        # an empty reading set, otherwise the root cause is hidden.
+                        self._skip(summary, "no sportsbook event match")
+                        continue
+                    start = iso_to_ts(ev_match.get("commence_time"))
+                    if not start:
+                        self._skip(summary, "matched event missing start time")
+                        continue
+                    if start <= now:
+                        # In-game prices move faster than our book data; only
+                        # pre-game opportunities are eligible for paper execution.
+                        self._skip(summary, "sportsbook event already started")
+                        continue
                     readings = self.research(snap, ev_match, book_team, opp, sport, now)
                     if not readings:
-                        continue
-                    start = iso_to_ts(ev_match["commence_time"]) if ev_match else None
-                    if not start or start <= now:
-                        # in-game prices move faster than our book data: research
-                        # and log, but only bet pre-game for now
-                        self._skip(summary, "not pre-game or unmatched")
+                        self._skip(summary, "no usable sportsbook research")
                         continue
                     if not self.betting_ok or benched:
                         self._skip(summary, "league benched" if benched else "betting paused")

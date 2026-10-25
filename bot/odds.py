@@ -98,8 +98,10 @@ class OddsClient:
         r = requests.get(ODDS_URL.format(sport=sport), params={
             "apiKey": self.api_key, "regions": regions, "markets": "h2h",
             "oddsFormat": "american"}, timeout=self.timeout)
-        if r.status_code in (401, 422):
-            return []
+        # Authentication and unsupported-market errors are not valid empty
+        # schedules. Raise so callers preserve the last known-good odds cache and
+        # emit a source-health warning instead of silently treating every game as
+        # unmatched.
         r.raise_for_status()
         self.last_remaining = r.headers.get("x-requests-remaining")
         self.last_used = r.headers.get("x-requests-used")
