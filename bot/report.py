@@ -108,7 +108,7 @@ def build(store):
                 p_model = float(row["model_prob"])
                 p_market = float(row["market_price"])
                 grouped[domain].append(((p_model - y) ** 2, (p_market - y) ** 2))
-        lines.append(f"\\n-- Forecast scorecard: {label} (settled predictions only) --")
+        lines.append(f"\n-- Forecast scorecard: {label} (settled predictions only) --")
         if not grouped:
             lines.append("No eligible settled audit forecasts in this window.")
         for domain, pairs in sorted(grouped.items()):
