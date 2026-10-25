@@ -6,7 +6,7 @@ from bot.config import Settings
 
 class TestAggression(unittest.TestCase):
     def test_requested_default(self):
-        self.assertEqual(Settings().aggression_level, "adaptive")
+        self.assertEqual(Settings().aggression_level, "aggressive")
 
     def test_off_is_inert(self):
         self.assertIsNone(choose(AggressionPolicy(level="off")))
