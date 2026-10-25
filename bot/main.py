@@ -73,7 +73,7 @@ def run_scheduled(s, store, data):
     s.validate()
     cycle_started = int(time.time())
     # The Nerd watchdog runs before market work and fails closed on schema/database
-    # damage. Two janitors run on a six-hour cadence; only raw observations are
+    # damage. Two janitors run on an hourly cadence; only raw observations are
     # deduplicated/trimmed. Bets, model weights, grades and audit history are kept.
     from . import nerd, maintenance
     code_health = nerd.inspect_code()

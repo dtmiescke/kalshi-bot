@@ -112,6 +112,12 @@ class TestAgentMaintenance(unittest.TestCase):
         self.assertTrue(report["ok"])
         self.assertEqual(report["checks"]["quick_check"], ["ok"])
 
+    def test_janitors_run_hourly(self):
+        now = int(time.time())
+        self.store.set_kv("janitors_last_run", now - 3601)
+        self.assertNotIn("skipped", run_janitors(self.store, now=now))
+        self.assertEqual(run_janitors(self.store, now=now + 600)["skipped"], "not_due")
+
     def test_janitors_respect_six_hour_cadence(self):
         now = int(time.time())
         self.store.set_kv("janitors_last_run", now)
