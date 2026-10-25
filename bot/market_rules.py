@@ -57,7 +57,7 @@ def summarize_rules(market, series=None):
     # Series endpoints own legal settlement sources and prohibitions. Preserve
     # market-specific text first, adding series terms only when not already present.
     for key in ("settlement_sources", "additional_prohibitions", "series_prohibitions",
-                "contract_terms_url", "contract_url", "rules_primary", "rules_secondary"):
+                "rules_primary", "rules_secondary"):
         value = series.get(key)
         if value in (None, "", [], {}):
             continue
