@@ -6,6 +6,7 @@ never let an LLM override missing or contradictory settlement terms.
 """
 from __future__ import annotations
 
+import json
 import re
 
 
@@ -22,15 +23,44 @@ _RULE_FIELDS = (
 
 
 def _unwrap_market(payload):
-    """Accept native Kalshi market objects and common read-only tool envelopes.
+    """Normalize native Kalshi objects and common read-only MCP result envelopes.
 
-    Only unwrap known response containers. Inner market fields take precedence,
-    while useful outer rule metadata is retained. This is normalization only:
-    it does not fetch PDFs or treat a third-party summary as authoritative.
+    MCP SDKs can expose tool output as structuredContent or as a list of text
+    content blocks. Parse only JSON objects from those known containers; plain
+    text is retained as PDF-like evidence and cannot satisfy the native
+    settlement-source gate. Tool errors and malformed results fail closed.
     """
-    if not isinstance(payload, dict):
+    if not isinstance(payload, dict) or payload.get("isError") is True:
         return {}
     market = dict(payload)
+
+    structured = market.get("structuredContent")
+    if isinstance(structured, dict):
+        market = {**market, **structured}
+
+    blocks = market.get("content")
+    if isinstance(blocks, list):
+        text_parts = [
+            str(block.get("text", "")).strip()
+            for block in blocks
+            if isinstance(block, dict) and block.get("type") == "text"
+            and str(block.get("text", "")).strip()
+        ]
+        if text_parts:
+            combined_text = "\n".join(text_parts)
+            parsed = None
+            try:
+                candidate = json.loads(combined_text)
+                if isinstance(candidate, dict):
+                    parsed = candidate
+            except (TypeError, ValueError):
+                pass
+            if parsed is not None:
+                market = {**market, **parsed}
+            else:
+                # Do not promote arbitrary prose/errors to authoritative rules.
+                market.setdefault("rules_pdf_text", combined_text[:6000])
+
     for key in ("result", "data", "market"):
         nested = market.get(key)
         if isinstance(nested, dict):
