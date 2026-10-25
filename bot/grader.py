@@ -42,6 +42,9 @@ def _rotating_tickers(store, source, cursor_key, max_fetch):
     elif source == "combo_prediction_audit":
         after_sql = "SELECT DISTINCT ticker FROM combo_prediction_audit WHERE outcome IS NULL AND ticker>? ORDER BY ticker LIMIT ?"
         wrap_sql = "SELECT DISTINCT ticker FROM combo_prediction_audit WHERE outcome IS NULL AND ticker<=? ORDER BY ticker LIMIT ?"
+    elif source == "council_votes":
+        after_sql = "SELECT DISTINCT ticker FROM council_votes WHERE outcome IS NULL AND ticker>? ORDER BY ticker LIMIT ?"
+        wrap_sql = "SELECT DISTINCT ticker FROM council_votes WHERE outcome IS NULL AND ticker<=? ORDER BY ticker LIMIT ?"
     else:
         raise ValueError(f"unknown grading source: {source}")
     rows = store.q(after_sql, (cursor, limit))
@@ -159,6 +162,28 @@ def grade_decision_audits(store, client, max_fetch=150):
         graded += store.grade_decision_audit(
             ticker, 1 if result == "yes" else 0, cutoff_ts=cutoff)
     _advance_cursor(store, "decision_grade_cursor_ticker", tickers)
+    return graded
+
+
+COUNCIL_VOTE_KEEP_DAYS = 180
+
+
+def grade_council_votes(store, client, max_fetch=60, now=None):
+    """Score council member votes from real Kalshi settlements (drives seating,
+    the doghouse and earned power). Old graded votes are dropped after 180 days."""
+    tickers = _rotating_tickers(store, "council_votes", "members_grade_cursor_ticker", max_fetch)
+    graded = 0
+    for ticker in tickers:
+        try:
+            result = client.market(ticker).get("result")
+        except Exception as e:
+            log.debug("council vote market lookup %s: %s", ticker, e)
+            continue
+        if result in ("yes", "no"):
+            graded += store.grade_council_votes(ticker, 1 if result == "yes" else 0, settled_ts=now)
+    _advance_cursor(store, "members_grade_cursor_ticker", tickers)
+    cutoff = int(now or time.time()) - COUNCIL_VOTE_KEEP_DAYS * 86400
+    store.x("DELETE FROM council_votes WHERE outcome IS NOT NULL AND settled_ts < ?", (cutoff,))
     return graded
 
 
@@ -363,8 +388,10 @@ def grade(store, client):
     n_mkts, changes = learn_from_markets(store, client)
     n_decisions = grade_decision_audits(store, client)
     n_combos = grade_combo_predictions(store, client)
+    n_votes = grade_council_votes(store, client)
     monitor_model(store)
     store.set_kv("grading_lookup_health", dict(client.health(), ts=int(time.time())))
     log.info("graded %d bets, %d markets, %d decision snapshots, %d combo forecasts, weight changes: %s", n_bets, n_mkts, n_decisions, n_combos,
              json.dumps({k: [round(a, 3), round(b, 3)] for k, (a, b) in changes.items()}))
-    return {"bets": n_bets, "markets": n_mkts, "combo_forecasts": n_combos, "weight_changes": changes}
+    return {"bets": n_bets, "markets": n_mkts, "combo_forecasts": n_combos,
+            "council_votes": n_votes, "weight_changes": changes}

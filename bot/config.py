@@ -142,6 +142,20 @@ class Settings:
     max_open_cost: float = field(default_factory=lambda: _env_float("MAX_OPEN_COST", 200.0))
     daily_loss_limit: float = field(default_factory=lambda: _env_float("DAILY_LOSS_LIMIT", 30.0))
 
+    # --- council (DON_THEO_SPEC): members start advisory and EARN power ---------
+    # Veto: >= COUNCIL_VETO_MIN_VOTES graded votes with a Brier better than the
+    # market's on the same contracts. Full vote: more votes and a clear margin.
+    # Judged on each member's last COUNCIL_POWER_WINDOW graded votes, so a member
+    # whose record drops is demoted. Doghouse: <= COUNCIL_DOGHOUSE_MAX_RIGHT right
+    # in the last COUNCIL_DOGHOUSE_WINDOW (doghouse members lose their power).
+    council_veto_min_votes: int = field(default_factory=lambda: _env_int("COUNCIL_VETO_MIN_VOTES", 100))
+    council_full_min_votes: int = field(default_factory=lambda: _env_int("COUNCIL_FULL_MIN_VOTES", 300))
+    council_full_margin: float = field(default_factory=lambda: _env_float("COUNCIL_FULL_MARGIN", 0.005))
+    council_power_window: int = field(default_factory=lambda: _env_int("COUNCIL_POWER_WINDOW", 300))
+    council_doghouse_window: int = field(default_factory=lambda: _env_int("COUNCIL_DOGHOUSE_WINDOW", 9))
+    council_doghouse_max_right: int = field(
+        default_factory=lambda: _env_int("COUNCIL_DOGHOUSE_MAX_RIGHT", 2))
+
     # --- crypto 15-minute markets ----------------------------------------------
     crypto_enabled: bool = field(default_factory=lambda: _env("CRYPTO_ENABLED", "yes") == "yes")
     crypto_min_edge: float = field(default_factory=lambda: _env_pct("CRYPTO_MIN_EDGE", 5))
@@ -297,6 +311,14 @@ class Settings:
                 raise ValueError(f"{name} must be greater than 0 and less than 1")
         if not math.isfinite(self.crypto_longshot_price) or not 0 <= self.crypto_longshot_price < 0.5:
             raise ValueError("CRYPTO_LONGSHOT_PRICE must be a dollar price from 0 up to 0.50")
+        if not 1 <= self.council_veto_min_votes <= self.council_full_min_votes:
+            raise ValueError("COUNCIL_VETO_MIN_VOTES must be at least 1 and at most COUNCIL_FULL_MIN_VOTES")
+        if self.council_power_window < self.council_full_min_votes:
+            raise ValueError("COUNCIL_POWER_WINDOW must be at least COUNCIL_FULL_MIN_VOTES")
+        if not math.isfinite(self.council_full_margin) or self.council_full_margin < 0:
+            raise ValueError("COUNCIL_FULL_MARGIN must be a non-negative Brier margin")
+        if not 0 <= self.council_doghouse_max_right < self.council_doghouse_window:
+            raise ValueError("COUNCIL_DOGHOUSE_MAX_RIGHT must be below COUNCIL_DOGHOUSE_WINDOW")
         if not math.isfinite(self.min_confidence) or not 0 < self.min_confidence <= 1:
             raise ValueError("MIN_CONFIDENCE must be greater than 0 and at most 1")
         for name, value in (("TAKER_FEE_RATE", self.taker_fee_rate),

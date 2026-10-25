@@ -252,6 +252,8 @@ class LiveRunner:
                 continue
             plan = self.plan_for(ticker, readings, weights)
             if plan:
+                snap, p, prob, conf = plan
+                council.convene(self.store, self.s, snap, p, readings, prob, conf, now=now)
                 self.pending.add(ticker)
                 yield ticker, readings, ctx, plan
 
@@ -309,6 +311,10 @@ class LiveRunner:
                 self._skip("recheck: edge gone")
                 return
             snap, p, prob, conf = again
+            members = council.convene(self.store, self.s, snap, p, fresh, prob, conf)
+            if members.get("binding") and members.get("decision") == "pass":
+                self._skip("council veto")
+                return
             p["council"] = verdict.get("reason", "")
             if p.get("style") == "maker":
                 self.start_maker(ticker, snap, p, fresh, prob, conf)
