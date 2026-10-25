@@ -127,6 +127,48 @@ class TestMarketRules(unittest.TestCase):
         self.assertEqual(result["status"], "review_required")
         self.assertTrue(result["missing"])
 
+    def test_mcp_structured_content_is_normalized(self):
+        result = summarize_rules({
+            "structuredContent": {
+                "ticker": "KXTEST",
+                "rules_primary": "Settles using the official league result.",
+                "settlement_source": "Official league result",
+            }
+        })
+        self.assertTrue(result["available"])
+        self.assertEqual(result["status"], "terms_found")
+        self.assertIn("rules_primary", result["terms"])
+
+    def test_mcp_json_text_block_is_parsed_but_plain_text_fails_closed(self):
+        import json
+
+        encoded = json.dumps({
+            "rules_primary": "Settles using the official league result.",
+            "settlement_source": "Official league result",
+        })
+        parsed = summarize_rules({
+            "content": [{"type": "text", "text": encoded}]
+        })
+        self.assertEqual(parsed["status"], "terms_found")
+        self.assertIn("settlement_source", parsed["terms"])
+
+        plain = summarize_rules({
+            "content": [{"type": "text", "text": "This market may resolve based on the event."}]
+        })
+        self.assertEqual(plain["status"], "review_required")
+        self.assertTrue(plain["missing"])
+
+    def test_mcp_error_and_non_text_content_fail_closed(self):
+        error = summarize_rules({
+            "isError": True,
+            "content": [{"type": "text", "text": "No market found"}],
+        })
+        self.assertFalse(error["available"])
+        self.assertEqual(error["status"], "unavailable")
+        empty = summarize_rules({"content": [{"type": "image", "data": "ignored"}]})
+        self.assertFalse(empty["available"])
+        self.assertEqual(empty["status"], "unavailable")
+
     def test_non_dict_or_empty_mcp_result_fails_closed(self):
         for payload in (None, [], "not a market", {"result": None}):
             result = summarize_rules(payload)
