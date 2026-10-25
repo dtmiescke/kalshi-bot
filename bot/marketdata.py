@@ -138,7 +138,10 @@ def context(store, coin, coinbase_price=None, get=requests.get):
     ks = kraken_spot(coin, get)
     now = time.time()
     upcoming = [e for e in calendar(store, get) if -3600 <= e["ts"] - now <= 6 * 3600]
+    from .signals.crypto_microstructure import orderbook as crypto_orderbook
+    l2 = crypto_orderbook(store, coin)
     return {
+        "orderbook": l2,
         "funding": fut.get("funding"), "basis": fut.get("basis"),
         "oi_change_1h": oi_change(store, coin, fut.get("open_interest")),
         "put_call_oi": put_call(store, coin, get),
