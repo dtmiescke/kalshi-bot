@@ -12,7 +12,7 @@ from . import alerts, brain, council, fees, guard, risk
 from .llm import LLM
 from .config import CRYPTO_15M, SPORTS
 from .kalshi_client import KalshiClient, num, price
-from .matching import match_event
+from .matching import market_team_labels, match_event
 from .odds import OddsClient, consensus, next_game_ts as odds_next_game, record_spend, refresh_plan
 from . import crypto_brain
 from .live import settlement
@@ -660,9 +660,13 @@ class Engine:
                     sports_markets_deferred += len(markets)
                     continue
                 sports_markets_processed += len(markets)
-                teams = [m.get("yes_sub_title") for m in markets if m.get("yes_sub_title")]
-                ktime = next((m.get("expected_expiration_time") or m.get("close_time")
-                              for m in markets), None)
+                teams = market_team_labels(markets)
+                # Prefer the event's actual start time; contract close/expiration
+                # can be hours away from kickoff and weaken otherwise valid matches.
+                ktime = (ev.get("start_time") or ev.get("commence_time")
+                         or next((m.get("occurrence_datetime") or
+                                  m.get("expected_expiration_time") or m.get("close_time")
+                                  for m in markets), None))
                 mapping, ev_match = match_event(teams, ktime, odds_events)
                 if ev_match:
                     summary["matched"] += 1
