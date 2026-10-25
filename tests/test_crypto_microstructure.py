@@ -1,6 +1,8 @@
 import unittest
 
-from bot.signals.crypto_microstructure import (indicator_snapshot, orderbook, summarize_book,\n                                                summarize_kalshi_book)
+from bot.signals.crypto_microstructure import (
+    indicator_snapshot, orderbook, summarize_book, summarize_kalshi_book
+)
 
 
 class FakeStore:
