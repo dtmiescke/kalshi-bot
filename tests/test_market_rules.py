@@ -218,6 +218,27 @@ class TestMarketRules(unittest.TestCase):
         self.assertEqual(result["terms"]["settlement_source"], "Official league result")
         self.assertIn("rules_primary", result["terms"])
 
+    def test_conflicting_nested_mcp_settlement_fields_fail_closed(self):
+        result = summarize_rules({
+            "rules_primary": "Settles on official league result.",
+            "settlement_source": "League A",
+            "result": {
+                "rules_primary": "Settles on official league result.",
+                "settlement_source": "League B",
+            },
+        })
+        self.assertEqual(result["status"], "unavailable")
+        self.assertFalse(result["available"])
+
+    def test_identical_nested_mcp_rules_are_not_duplicates(self):
+        rule = "Settles on official league result."
+        result = summarize_rules({
+            "rules_primary": rule,
+            "result": {"rules_primary": rule, "settlement_source": "Official league"},
+        })
+        self.assertEqual(result["status"], "terms_found")
+        self.assertEqual(result["terms"]["rules_primary"], rule)
+
     def test_nested_mcp_error_cannot_be_overridden_by_outer_rule_text(self):
         result = summarize_rules({
             "rules_primary": "Outer wrapper text must not be trusted.",
