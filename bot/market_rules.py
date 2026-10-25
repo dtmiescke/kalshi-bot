@@ -76,13 +76,13 @@ def summarize_rules(market, series=None):
     missing = []
     if not terms.get("rules_primary") and not terms.get("settlement_source") \
             and not terms.get("settlement_sources") \
-            and not terms.get("rules_text") and not terms.get("rules_pdf_text") \
+            and not terms.get("rules_text") \
             and not terms.get("contract_terms_text") \
             and not terms.get("rules") and not terms.get("contract_terms"):
         missing.append("primary settlement rules/source not present in supplied market/series data")
     flags = []
     patterns = (
-        ("early_close", r"early close|close early|may close before"),
+        ("early_close", r"early close|close early|may close early|may close before"),
         ("settlement_exception", r"exception|subject to change|at kalshi.s discretion"),
         ("source_or_index", r"index|official source|settlement source|published by"),
         ("void_or_cancellation", r"cancelled|canceled|void|no contest|postponed|abandoned"),

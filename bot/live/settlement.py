@@ -13,6 +13,8 @@ import os
 import re
 from datetime import datetime, timezone
 
+from ..market_rules import summarize_rules
+
 
 def _norm_cdf(x):
     return 0.5 * (1 + math.erf(x / math.sqrt(2)))
@@ -35,7 +37,7 @@ def _nonnegative_env_float(name, default):
 
 
 def contract_terms(mkt):
-    """Extract strike, deadline and averaging window from a Kalshi market."""
+    """Extract settlement parameters and a compact shared contract-rules audit."""
     rules = " ".join(str(mkt.get(k, "")) for k in ("rules_primary", "rules_secondary"))
     avg_s, source = None, "assumed"
     m = re.search(r"average[^.]{0,80}?(\d+)\s*(second|minute)", rules, re.I) or \
@@ -67,8 +69,11 @@ def contract_terms(mkt):
             close_ts = parsed.timestamp()
         except ValueError:
             pass
+    rules_audit = summarize_rules(mkt)
+    # Keep raw multi-kilobyte contract text out of recurring live-market state.
+    rules_audit.pop("terms", None)
     return {"strike": strike, "close_ts": close_ts, "avg_seconds": avg_s,
-            "avg_source": source, "benchmark": benchmark}
+            "avg_source": source, "benchmark": benchmark, "rules_audit": rules_audit}
 
 
 def prob_above(spot, strike, vol_per_min, seconds_left, avg_seconds=60,
