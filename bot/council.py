@@ -200,8 +200,9 @@ def standings(store, settings, now=None):
                        "brier": None if brier is None else round(brier, 4),
                        "market_brier": None if market is None else round(market, 4),
                        "streak": streak, "doghouse": doghouse, "stage": stage}
-    order = sorted(out, key=lambda m: (out[m]["doghouse"],
-                                       -(out[m]["recent_rate"] if out[m]["recent_rate"] is not None else -1),
+    # members with no graded votes yet sit behind everyone with a record
+    order = sorted(out, key=lambda m: (out[m]["doghouse"], out[m]["recent_rate"] is None,
+                                       -(out[m]["recent_rate"] or 0),
                                        out[m]["brier"] if out[m]["brier"] is not None else 1.0))
     for seat, m in enumerate(order, 1):
         out[m]["seat"] = seat
