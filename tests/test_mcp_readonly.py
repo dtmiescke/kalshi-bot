@@ -28,6 +28,14 @@ class ReadOnlyResearchTests(unittest.TestCase):
                          [(0.51, 10)])
         self.client.orderbook.assert_called_once()
 
+    def test_public_trades_reuse_client_with_bounded_limit(self):
+        self.client.trades.return_value = [{"ticker": "KXNFLGAME-EXAMPLE", "count": 2}]
+        result = research_tool(self.client, "trades", "KXNFLGAME-EXAMPLE")
+        self.assertEqual(result[0]["count"], 2)
+        self.client.trades.assert_called_once_with("KXNFLGAME-EXAMPLE", limit=100)
+        self.client.place_limit_buy.assert_not_called()
+        self.client.cancel.assert_not_called()
+
     def test_rules_use_existing_market_and_series(self):
         result = research_tool(self.client, "rules", "KXNFLGAME-EXAMPLE")
         self.assertTrue(result["available"])
@@ -35,7 +43,7 @@ class ReadOnlyResearchTests(unittest.TestCase):
 
     def test_no_order_write_or_dynamic_method_dispatch(self):
         for name in ("place_limit_buy", "cancel", "positions", "balance",
-                     "place_resting_buy", "__getattribute__", "trades"):
+                     "place_resting_buy", "__getattribute__", "batch_cancel", "create_order"):
             with self.assertRaises(ValueError):
                 research_tool(self.client, name, "KXNFLGAME")
         self.client.place_limit_buy.assert_not_called()
