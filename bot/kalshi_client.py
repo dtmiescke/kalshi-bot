@@ -223,6 +223,13 @@ class KalshiClient:
     def market(self, ticker):
         return self._req("GET", f"/markets/{ticker}").get("market", {})
 
+    def series(self, ticker):
+        """Read official series settlement sources, restrictions, and document links."""
+        ticker = str(ticker or "").strip()
+        if not ticker or "/" in ticker or "?" in ticker:
+            raise ValueError("invalid Kalshi series ticker")
+        return self._req("GET", f"/series/{ticker}").get("series", {})
+
     def orderbook(self, ticker, depth=20):
         """Returns {'yes': [(price, qty), ...], 'no': [...]} as bids, best first."""
         data = self._req("GET", f"/markets/{ticker}/orderbook", params={"depth": depth})
