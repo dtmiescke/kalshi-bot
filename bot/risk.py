@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from . import brain, fees
 from .adaptive_aggression import AggressionPolicy, choose, safe_settled_paper_results
+from .contextual_calibration import contextual_policy
 
 
 
@@ -131,6 +132,9 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
             min_edge=s.min_edge, min_confidence=s.min_confidence,
             kelly_fraction=s.kelly_fraction),
             settled_paper_results=history)
+        if policy and aggression_level == "adaptive":
+            policy = contextual_policy(policy, model_prob=model_prob,
+                                       confidence=confidence, book=book)
         if policy:
             if min_edge == s.min_edge:
                 min_edge = max(s.min_edge, policy["min_edge"])
