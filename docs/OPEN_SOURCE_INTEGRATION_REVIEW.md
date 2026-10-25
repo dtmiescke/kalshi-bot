@@ -32,7 +32,9 @@ any future reuse of implementation code.
    is exhausted. AI counsel remains a veto/review layer: it cannot create a candidate,
    change size, or bypass the numeric risk gate.
 4. Added offline tests for rule-field preservation, bounded context, missing-rule behavior,
-   and unavailable AI counsel. No live order was sent.
+   unavailable AI counsel, series restrictions/document URL allowlisting, and common MCP
+   field aliases. Prohibition-only payloads cannot satisfy the required settlement-rule check.
+   No live order was sent.
 
 ## Deliberately not added
 
