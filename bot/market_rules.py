@@ -15,7 +15,9 @@ _RULE_FIELDS = (
     # Read-only MCP/PDF extractors sometimes expose a consolidated text field
     # instead of Kalshi's native rules_primary/rules_secondary fields.
     "rules_text", "rules_pdf_text", "contract_terms_text",
-    "series_prohibitions", "settlement_sources", "additional_prohibitions",
+    # Conservative aliases used by third-party read-only MCP responses.
+    "rules", "contract_terms", "series_prohibitions", "prohibitions",
+    "settlement_sources", "additional_prohibitions",
 )
 
 
@@ -75,7 +77,8 @@ def summarize_rules(market, series=None):
     if not terms.get("rules_primary") and not terms.get("settlement_source") \
             and not terms.get("settlement_sources") \
             and not terms.get("rules_text") and not terms.get("rules_pdf_text") \
-            and not terms.get("contract_terms_text"):
+            and not terms.get("contract_terms_text") \
+            and not terms.get("rules") and not terms.get("contract_terms"):
         missing.append("primary settlement rules/source not present in supplied market/series data")
     flags = []
     patterns = (
@@ -88,8 +91,8 @@ def summarize_rules(market, series=None):
     for name, pattern in patterns:
         if re.search(pattern, lower):
             flags.append(name)
-    if (terms.get("additional_prohibitions") or terms.get("series_prohibitions")) \
-            and "series_prohibition" not in flags:
+    if (terms.get("additional_prohibitions") or terms.get("series_prohibitions")
+            or terms.get("prohibitions")) and "series_prohibition" not in flags:
         flags.append("series_prohibition")
 
     doc_urls = []
