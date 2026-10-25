@@ -23,9 +23,9 @@ def _sources(urls):
         if not isinstance(url, str) or not url.startswith(("https://", "http://")):
             continue
         host = urlparse(url).netloc.lower()
-        if not host or host in seen:
+        if not host or url in seen:
             continue
-        seen.add(host)
+        seen.add(url)
         out.append({"url": url[:1000], "domain": host})
         if len(out) >= 10:
             break
@@ -109,7 +109,7 @@ def run_tech_scout(store, llm, *, now=None):
     now = int(now or time.time())
     last = int(store.get_kv("openrouter_tech_scout_last", 0) or 0)
     retry_after = int(store.get_kv("openrouter_tech_scout_retry_after", 0) or 0)
-    if now - last < 7 * 86400:
+    if last and now - last < 7 * 86400:
         return {"ok": True, "skipped": "weekly cadence", "last_run_ts": last}
     if now < retry_after:
         return {"ok": False, "skipped": "retry backoff", "retry_after": retry_after}
