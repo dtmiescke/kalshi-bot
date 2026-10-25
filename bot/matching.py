@@ -44,6 +44,20 @@ def _parse_time(s):
     except ValueError:
         return None
 
+def market_team_labels(markets):
+    """Return distinct team labels across the supported Kalshi market fields.
+
+    API payloads have used both yes_sub_title and subtitle. Keep market-level
+    labels in one place so matching and snapshots do not disagree on the team.
+    """
+    labels = []
+    for market in markets or []:
+        value = market.get("yes_sub_title") or market.get("subtitle")
+        label = str(value or "").strip()
+        if label and label not in labels:
+            labels.append(label)
+    return labels
+
 
 def match_team(kalshi_team, kalshi_time, odds_events, max_hours=36, min_score=0.6):
     """Return (event, book_team_name, score) for the best match, or None."""
