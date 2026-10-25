@@ -700,6 +700,15 @@ class Engine:
                 "markets_deferred": sports_markets_deferred,
                 "full_event_scan": True, "held_events_prioritized": True}
             self.store.set_kv("sports_deep_scan_health", {"ts": now, **summary["sports_deep_scan"]})
+            coverage = self.store.get_kv("sports_coverage_audit", {}) or {}
+            deep_budget = self.store.get_kv("sports_deep_scan_budget", {}) or {}
+            coverage.update({
+                "deep_scan": dict(summary["sports_deep_scan"]),
+                "events_available_for_deep_scan": deep_budget.get("events_available"),
+                "events_selected_for_deep_scan": deep_budget.get("events_selected"),
+                "event_rotation_cursor": deep_budget.get("event_cursor"),
+            })
+            self.store.set_kv("sports_coverage_audit", coverage)
         if self.s.crypto_enabled:
             self.run_crypto(watch, brain.get_weights(self.store, "crypto"), summary, now)
         log.info("cycle: %s", summary)
