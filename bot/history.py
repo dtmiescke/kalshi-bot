@@ -241,7 +241,7 @@ def run(store, client, days=3, series=None, fee_rate=0.07, max_markets=300, spot
 
 
 def vol_check(store, days=7, series=None, leads_min=(8, 5, 3), avg_seconds=60, now=None,
-              spot_get=requests.get):
+              spot_get=requests.get, fit=False):
     """Read-only: is the volatility forecast the right size for 15-minute windows?
 
     At several decision points before every 15-minute close in the last `days`,
@@ -255,7 +255,9 @@ def vol_check(store, days=7, series=None, leads_min=(8, 5, 3), avg_seconds=60, n
     A right-sized forecast gives mean z^2 ~ 1 and |z| > 2 about 4.6% of the time.
     vol_scale = sqrt(mean z^2): below 1 means the forecast is too wide (fat
     tails priced too rich, long shots look cheap). Changes no setting; the
-    report goes to kv vol_check_report.
+    report goes to kv vol_check_report. With fit=True the same samples fit each
+    coin's tail model (vol.learn_tail_model), kept only if it beats current
+    pricing on newer held-out windows.
     """
     end = int(time.time() if now is None else now) - 600
     end -= end % 900
@@ -267,7 +269,7 @@ def vol_check(store, days=7, series=None, leads_min=(8, 5, 3), avg_seconds=60, n
         closes = {k: c["close"] for k, c in full.items()}
         blend = dict(store.get_kv(f"vol_blend_{coin}") or volmod.DEFAULT_BLEND)
         w_sum = (blend.get("ewma", 0) + blend.get("long", 0)) or 1.0
-        zs, sigmas = [], []
+        zs, sigmas, samples = [], [], []
         for close in range(start + 900, end + 1, 900):
             last = full.get(close - 60)                  # minute that settles the window
             if not last:
@@ -288,6 +290,7 @@ def vol_check(store, days=7, series=None, leads_min=(8, 5, 3), avg_seconds=60, n
                 var = (sigma ** 2 / 60) * ((tau - a) + a / 3)
                 zs.append(math.log(settle / spot) / math.sqrt(var))
                 sigmas.append(sigma)
+                samples.append((close, zs[-1]))
         if not zs:
             out["coins"][coin] = {"n": 0}
             continue
@@ -311,6 +314,8 @@ def vol_check(store, days=7, series=None, leads_min=(8, 5, 3), avg_seconds=60, n
             "median_sigma_per_min": round(sigmas[n // 2], 7),
             "blend_used": {k: round(blend.get(k, 0) / w_sum, 3) for k in ("ewma", "long")},
         }
+        if fit:
+            out["coins"][coin]["tail_model"] = volmod.learn_tail_model(store, coin, samples)
     store.set_kv("vol_check_report", out)
     return out
 
