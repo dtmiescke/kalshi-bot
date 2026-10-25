@@ -711,6 +711,34 @@ class Engine:
                         except Exception as exc:
                             log.debug("contract-rule lookup unavailable for %s: %s",
                                       best[0].get("ticker"), exc)
+                    # The native API can omit the full legal terms. In that case, use
+                    # the series' official contract PDF as a bounded, read-only evidence
+                    # fallback. Cache by series so recurring markets do not redownload it.
+                    if not best[0].get("rules_primary") and not best[0].get("settlement_source"):
+                        try:
+                            series_ticker = (best[0].get("series") or ev.get("series_ticker")
+                                             or str(best[0].get("ticker", "")).split("-", 1)[0])
+                            cache_key = f"contract_rules_pdf_{series_ticker}"
+                            cached_pdf = self.store.get_kv(cache_key)
+                            pdf_result = (cached_pdf if isinstance(cached_pdf, dict)
+                                          and now - int(cached_pdf.get("ts", 0) or 0) < 7 * 86400
+                                          else None)
+                            if not pdf_result:
+                                series_info = self.data.series(series_ticker)
+                                pdf_url = (series_info.get("contract_terms_url")
+                                           or series_info.get("contract_url"))
+                                if pdf_url:
+                                    from .contract_pdf import extract_contract_pdf_text
+                                    extracted = extract_contract_pdf_text(pdf_url)
+                                    if extracted:
+                                        pdf_result = {"ts": now, **extracted}
+                                        self.store.set_kv(cache_key, pdf_result)
+                            if pdf_result and pdf_result.get("text"):
+                                best[0]["rules_pdf_text"] = str(pdf_result["text"])[:3000]
+                                best[0]["rules_pdf_url"] = str(pdf_result.get("url") or "")[:1000]
+                        except Exception as exc:
+                            log.debug("contract PDF fallback unavailable for %s: %s",
+                                      best[0].get("ticker"), exc)
                     # Sport-specific counsel is a veto/wait layer only; it cannot
                     # create candidates, alter sizing, or bypass the existing risk gate.
                     from . import sports_counsel
