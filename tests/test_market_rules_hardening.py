@@ -64,6 +64,25 @@ class TestMarketRulesEnvelopeHardening(unittest.TestCase):
         self.assertFalse(result["available"])
         self.assertEqual(result["status"], "unavailable")
 
+    def test_conflicting_mcp_series_settlement_source_requires_review(self):
+        market = {"rules_primary": "Settles on official final result.",
+                  "settlement_source": "League official website"}
+        series = {"structuredContent": {"result": {"data": {
+            "settlement_sources": "Third-party unofficial statistics provider"
+        }}}}
+        result = summarize_rules(market, series)
+        self.assertEqual(result["status"], "review_required")
+        self.assertIn("settlement_source_conflict", result["flags"])
+        self.assertEqual(result["terms"]["settlement_source"], "League official website")
+
+    def test_matching_mcp_series_settlement_source_is_not_conflict(self):
+        market = {"rules_primary": "Settles on official final result.",
+                  "settlement_source": "League official website"}
+        series = {"result": {"settlement_sources": "League official website"}}
+        result = summarize_rules(market, series)
+        self.assertEqual(result["status"], "terms_found")
+        self.assertNotIn("settlement_source_conflict", result["flags"])
+
     def test_too_many_envelope_nodes_fail_closed(self):
         def tree(depth):
             if depth == 0:
