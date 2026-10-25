@@ -29,18 +29,19 @@ class FakeKalshi:
     """Celtics at 0.50 on Kalshi while sharp books say ~0.61 -> should bet YES."""
     def __init__(self, start):
         self.start = start
+        self.event_ticker = "KXNBAGAME-" + start.strftime("%y%b%d").upper() + "BOSNYK"
         self.result = None
 
     def sports_events(self, series):
         if series != "KXNBAGAME":
             return []
-        return [{"event_ticker": "KXNBAGAME-26OCT20BOSNYK", "series_ticker": series,
+        return [{"event_ticker": self.event_ticker, "series_ticker": series,
                  "title": "Boston at New York", "markets": [
-            {"ticker": "KXNBAGAME-26OCT20BOSNYK-BOS", "yes_sub_title": "Boston",
+            {"ticker": self.event_ticker + "-BOS", "yes_sub_title": "Boston",
              "status": "active", "yes_bid": 49, "yes_ask": 50, "last_price": 50,
              "volume": 5000, "rules_primary": "Resolves YES if the named team wins the scheduled game; otherwise NO.",
              "expected_expiration_time": iso(self.start + timedelta(hours=3))},
-            {"ticker": "KXNBAGAME-26OCT20BOSNYK-NYK", "yes_sub_title": "New York",
+            {"ticker": self.event_ticker + "-NYK", "yes_sub_title": "New York",
              "status": "active", "yes_bid": 50, "yes_ask": 51, "last_price": 50,
              "volume": 5000, "rules_primary": "Resolves YES if the named team wins the scheduled game; otherwise NO.",
              "expected_expiration_time": iso(self.start + timedelta(hours=3))},
@@ -58,7 +59,7 @@ class FakeKalshi:
         return {"yes": [(0.50, 500)], "no": [(0.49, 400)]}
 
     def market(self, ticker):
-        return {"result": self.result, "event_ticker": "KXNBAGAME-26OCT20BOSNYK"}
+        return {"result": self.result, "event_ticker": self.event_ticker}
 
 
 class FakeOdds:
@@ -322,7 +323,7 @@ class TestEndToEnd(unittest.TestCase):
             self.assertEqual(len(store.open_bets()), 1)
 
             # game ends, Boston wins
-            for t in ("KXNBAGAME-26OCT20BOSNYK-BOS", "KXNBAGAME-26OCT20BOSNYK-NYK"):
+            for t in (kalshi.event_ticker + "-BOS", kalshi.event_ticker + "-NYK"):
                 store.set_kv(f"start_{t}", int(time.time()) - 4 * 3600)
                 store.x("UPDATE signal_readings SET ts=ts-5*3600 WHERE ticker=?", (t,))
                 store.x("UPDATE market_snapshots SET ts=ts-5*3600 WHERE ticker=?", (t,))
