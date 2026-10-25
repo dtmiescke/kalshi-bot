@@ -54,9 +54,8 @@ def _official_rules_url(value):
     host = (parsed.hostname or "").lower().rstrip(".")
     if parsed.scheme != "https" or not host:
         return None
-    if not (host == "kalshi.com" or host.endswith(".kalshi.com")
-            or host == "kalshi-public-docs.s3.amazonaws.com"
-            or (host.endswith(".amazonaws.com") and "kalshi" in host)):
+    is_kalshi_s3 = host.startswith("kalshi-public-docs.s3.") and host.endswith(".amazonaws.com")
+    if not (host == "kalshi.com" or host.endswith(".kalshi.com") or is_kalshi_s3):
         return None
     return url[:1000]
 
