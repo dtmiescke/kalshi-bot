@@ -1,6 +1,6 @@
 """Opt-in adaptive aggression policy. Does not place orders or alter hard risk caps.
 
-Aggressive is the requested policy default, but existing runtime remains unchanged until wired.
+Adaptive is the requested policy default, but existing runtime remains unchanged until wired.
 Only settled, chronological, out-of-sample paper outcomes may drive adaptation.
 """
 from dataclasses import dataclass
@@ -11,7 +11,7 @@ LEVELS = ("off", "conservative", "balanced", "aggressive", "adaptive")
 
 @dataclass(frozen=True)
 class AggressionPolicy:
-    level: str = "aggressive"
+    level: str = "adaptive"
     min_edge: float = 0.03
     min_confidence: float = 0.55
     kelly_fraction: float = 0.25
@@ -63,7 +63,7 @@ def choose(policy, settled_paper_results=()):
     edge, confidence, size = factors[level]
     return {
         "effective_level": level,
-        "min_edge": min(0.99, policy.min_edge * edge),
+        "min_edge": max(policy.min_edge, min(0.99, policy.min_edge * edge)),
         "min_confidence": min(1.0, policy.min_confidence * confidence),
         "kelly_fraction": min(policy.kelly_fraction, policy.kelly_fraction * size),
     }
