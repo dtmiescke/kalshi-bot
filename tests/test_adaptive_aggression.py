@@ -29,12 +29,31 @@ class TestAggression(unittest.TestCase):
         self.assertEqual(policy["min_confidence"], 0.55)
         self.assertEqual(policy["kelly_fraction"], 0.25)
 
-    def test_adaptive_needs_verified_held_out_history(self):
+    def test_adaptive_uses_real_settled_paper_results(self):
         self.assertEqual(choose(AggressionPolicy(level="adaptive"))["effective_level"], "conservative")
-        bad = [{"mode": "paper", "held_out": False, "settled": True, "pnl": 1}] * 50
+        bad = [{"mode": "demo", "settled": True, "pnl": 1}] * 50
         self.assertEqual(choose(AggressionPolicy(level="adaptive"), bad)["effective_level"], "conservative")
-        good = [{"mode": "paper", "held_out": True, "settled": True, "pnl": 1}] * 50
+        good = [{"mode": "paper", "settled": True, "pnl": 1} for _ in range(50)]
         self.assertEqual(choose(AggressionPolicy(level="adaptive"), good)["effective_level"], "aggressive")
+        losses = [{"mode": "paper", "settled": True, "pnl": -1} for _ in range(50)]
+        self.assertEqual(choose(AggressionPolicy(level="adaptive"), losses)["effective_level"], "conservative")
+
+    def test_settled_paper_history_reads_existing_ledger(self):
+        from bot.adaptive_aggression import settled_paper_results
+
+        class FakeStore:
+            def q(self, sql, args):
+                self.sql, self.args = sql, args
+                return [
+                    {"mode": "paper", "pnl": 2.0, "graded_ts": 100, "result": "yes"},
+                    {"mode": "paper", "pnl": -1.0, "graded_ts": 200, "result": "no"},
+                ]
+
+        store = FakeStore()
+        rows = settled_paper_results(store)
+        self.assertEqual([r["pnl"] for r in rows], [2.0, -1.0])
+        self.assertIn("status='graded'", store.sql)
+        self.assertIn("mode='paper'", store.sql)
 
     def test_invalid_level_fails_closed(self):
         with self.assertRaises(ValueError):
