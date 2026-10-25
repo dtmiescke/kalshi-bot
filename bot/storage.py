@@ -102,6 +102,14 @@ RAW_RETENTION = {
 }
 
 
+# Narrower windows for parts of a table: (table, time column, row filter, days).
+# Crypto 15-minute markets print ~130k trades an hour, but their readers look
+# back 5 minutes (live runner) or 15 minutes (snapshot runs), so an hour is plenty.
+RAW_RETENTION_SUBSETS = (
+    ("flow_trades", "ts", "ticker LIKE 'KX%15M-%'", 1 / 24),
+)
+
+
 def trim_raw(db, now, retention=None):
     """Delete raw rows older than their retention window. Returns rows deleted
     per table; tables that don't exist yet are skipped."""
@@ -112,6 +120,12 @@ def trim_raw(db, now, retention=None):
             continue
         cur = db.execute(f"DELETE FROM {table} WHERE {column} < ?", (int(now) - days * 86400,))
         deleted[table] = max(0, cur.rowcount)
+    for table, column, where, days in RAW_RETENTION_SUBSETS:
+        if table not in existing:
+            continue
+        cur = db.execute(f"DELETE FROM {table} WHERE {where} AND {column} < ?",
+                         (int(now - days * 86400),))
+        deleted[table] = deleted.get(table, 0) + max(0, cur.rowcount)
     return deleted
 
 
