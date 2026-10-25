@@ -205,8 +205,14 @@ class Engine:
         store vig-free consensus. Stale lines never trade: evaluate() refuses
         consensus older than 1.5 x ODDS_MAX_AGE_MINUTES."""
         now = int(time.time())
-        due, why = refresh_plan(self.store, sport, now, next_game, self.s.odds_refresh_minutes,
-                                self.s.odds_regions, int(os.environ.get("ODDS_MONTHLY_CREDITS", 500)))
+        cached_events = self.store.get_kv(f"odds_events_{sport}", []) or []
+        due, why = refresh_plan(
+            self.store, sport, now, next_game, self.s.odds_refresh_minutes,
+            self.s.odds_regions, int(os.environ.get("ODDS_MONTHLY_CREDITS", 500)),
+            cache_empty=not bool(cached_events))
+        if not due:
+            log.debug("odds %s refresh deferred: %s (cached_events=%d)",
+                      sport, why, len(cached_events))
         if not due:
             log.debug("odds %s not refreshed: %s", sport, why)
             return
