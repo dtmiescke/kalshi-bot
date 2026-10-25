@@ -38,11 +38,16 @@ def summarize_rules(market):
     for name, pattern in patterns:
         if re.search(pattern, lower):
             flags.append(name)
-    # Exact text is preserved but bounded before it can enter an LLM payload.
+    # No text means unavailable, not a generic review-required result.
+    if not terms:
+        status = "unavailable"
+    elif missing or "early_close" in flags:
+        status = "review_required"
+    else:
+        status = "terms_found"
     return {
         "available": bool(terms),
-        "status": "review_required" if missing or "early_close" in flags else
-                  ("terms_found" if terms else "unavailable"),
+        "status": status,
         "missing": missing,
         "flags": flags,
         "terms": terms,
