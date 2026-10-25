@@ -84,6 +84,16 @@ class TestTailShrinkBounds(unittest.TestCase):
         self.assertEqual(details["candidate"], vol.TAIL_SHRINK_MIN)
         self.assertGreaterEqual(vol.tail_shrink(self.st, "SOL"), vol.TAIL_SHRINK_MIN)
 
+    def test_thin_tails_fit_up_to_ceiling(self):
+        # owner spec 0.8-1.2: a thin-tailed truth above the old 1.05 cap is reachable
+        details = vol.learn_tail_shrink(self.st, "BTC", self.windows(1.15, 600, rows_per=25))
+        self.assertTrue(details["accepted"], details)
+        self.assertGreater(details["candidate"], 1.05)
+        self.assertLessEqual(details["candidate"], vol.TAIL_SHRINK_MAX)
+        details = vol.learn_tail_shrink(self.st, "ETH", self.windows(1.6, 400, rows_per=10))
+        self.assertEqual(details["candidate"], vol.TAIL_SHRINK_MAX)
+        self.assertEqual(vol.TAIL_SHRINK_MAX, 1.2)
+
     def test_window_split_is_by_time_and_counts_windows_once(self):
         rows = self.windows(0.82, 200)
         rows += [("KXBTC15M-W0", 5, 0.1, 1)] * 500        # many rows in one old window

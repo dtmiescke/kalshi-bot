@@ -94,8 +94,10 @@ def forecast(store, coin, closes, dvol_pct=None, now=None, events=None):
 
 # Bounds on the fat-tail adjustment. Below 1.0 fattens the tails; an unbounded
 # fit once reached 0.5, which priced a ~1% long shot at ~10-13% and bought it.
+# Above 1.0 thins them (owner spec: 0.8-1.2); a fit is still kept only if it
+# beats 0.9 on newer held-out windows.
 DEFAULT_TAIL_SHRINK = 0.9
-TAIL_SHRINK_MIN, TAIL_SHRINK_MAX = 0.8, 1.05
+TAIL_SHRINK_MIN, TAIL_SHRINK_MAX = 0.8, 1.2
 
 
 def _bounded_shrink(value):
