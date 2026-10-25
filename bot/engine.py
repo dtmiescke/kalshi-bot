@@ -395,6 +395,29 @@ class Engine:
                 except Exception as e:
                     log.debug("cached scoreboard stats unavailable for %s: %s", sport, e)
 
+            # OpenRouter web search augments the existing evidence path; it does not
+            # create a second collector or bypass the current signal/risk engine.
+            try:
+                from . import research_brain
+                web_evidence = research_brain.event_research(
+                    self.llm, self.store,
+                    event_ticker=mkt.get("event_ticker") or mkt.get("ticker"),
+                    sport=sport, team=team, opponent=opp,
+                    event_start_ts=start, market_price=mid,
+                    book_prob=hist[-1]["fair_prob"] if hist else None,
+                    context=ai_context,
+                )
+                if web_evidence:
+                    heads = (heads + [web_evidence])[-15:]
+                    ai_context["open_web_research"] = {
+                        "summary": web_evidence.get("description", "")[:3000],
+                        "sources": web_evidence.get("research_sources", [])[:8],
+                        "source": web_evidence.get("source"),
+                    }
+            except Exception as exc:
+                log.debug("OpenRouter event research unavailable for %s: %s",
+                          mkt.get("event_ticker") or mkt.get("ticker"), exc)
+
             book = hist[-1]["fair_prob"] if hist else None
             r = intel.ai_news(self.llm, team, opp, mid, book, heads, ai_context)
             self.store.set_kv(f"news_last_{mkt['ticker']}", time.time())
