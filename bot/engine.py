@@ -723,6 +723,23 @@ class Engine:
                         except Exception as exc:
                             log.debug("series rule metadata unavailable for %s: %s",
                                       series_ticker, type(exc).__name__)
+                    # Read the official series PDF only if native market terms are missing.
+                    # Extracted PDF text is research context, not independent proof of
+                    # the event-specific settlement source or permission to place an order.
+                    if (series_ticker and not counsel_snapshot.get("rules_primary")
+                            and not counsel_snapshot.get("settlement_source")
+                            and counsel_snapshot.get("series_metadata")):
+                        try:
+                            from .contract_pdf import load_series_contract_pdf
+                            pdf_result = load_series_contract_pdf(
+                                self.data, self.store, series_ticker, now,
+                                series_metadata=counsel_snapshot["series_metadata"])
+                            if pdf_result and pdf_result.get("text"):
+                                counsel_snapshot["rules_pdf_text"] = str(pdf_result["text"])[:3000]
+                                counsel_snapshot["rules_pdf_url"] = str(pdf_result.get("url") or "")[:1000]
+                        except Exception as exc:
+                            log.debug("contract PDF fallback unavailable for %s: %s",
+                                      series_ticker, type(exc).__name__)
                     # Sport-specific counsel is a veto/wait layer only; it cannot
                     # create candidates, alter sizing, or bypass the existing risk gate.
                     from . import sports_counsel
