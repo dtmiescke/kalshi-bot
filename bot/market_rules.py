@@ -63,7 +63,16 @@ def _unwrap_market(payload):
         if node.get("isError") is True:
             return {}
 
-        merged.update({k: v for k, v in node.items() if k not in envelope_keys})
+        # Conflicting settlement facts across nested MCP envelopes are untrusted.
+        # Never allow traversal order to silently choose one version.
+        for key, value in node.items():
+            if key in envelope_keys:
+                continue
+            if key in _RULE_FIELDS and key in merged and merged[key] not in (None, "", [], {}) and value not in (None, "", [], {}):
+                if merged[key] != value:
+                    return {}
+            if key not in merged or merged[key] in (None, "", [], {}):
+                merged[key] = value
 
         for key in ("structuredContent", "result", "data", "market"):
             nested = node.get(key)
