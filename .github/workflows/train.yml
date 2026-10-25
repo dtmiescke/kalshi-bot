@@ -43,6 +43,8 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           ML_MIN_WINDOWS: ${{ vars.ML_MIN_WINDOWS || '300' }}
           ML_MIN_TEST_WINDOWS: ${{ vars.ML_MIN_TEST_WINDOWS || '100' }}
+          # stop training cleanly well inside the 90-minute job timeout
+          TRAIN_TIME_LIMIT_MINUTES: ${{ vars.TRAIN_TIME_LIMIT_MINUTES || '45' }}
           # signed reads get better rate limits than anonymous GitHub servers
           KALSHI_DATA_URL: ${{ vars.KALSHI_DATA_URL }}
           KALSHI_DATA_KEY_ID: ${{ secrets.KALSHI_DATA_KEY_ID }}
