@@ -62,6 +62,32 @@ class TestLLMGatewayRouting(unittest.TestCase):
         self.assertEqual(post.call_args.kwargs["json"]["model"], "sports-fast")
         self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer proxy-key")
 
+    def test_failed_omniroute_falls_through_to_litellm(self):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {"choices": [{"message": {"content": "fallback worked"}}]}
+
+        def fake_post(url, **kwargs):
+            if url.startswith("https://omni.example/"):
+                raise __import__("requests").ConnectionError("gateway unavailable")
+            return response
+
+        store = MemoryStore()
+        with patch.dict(os.environ, {
+            "OMNIROUTE_URL": "https://omni.example/v1",
+            "OMNIROUTE_API_KEY": "omni-key",
+            "OMNIROUTE_MODELS": "auto",
+            "LITELLM_URL": "https://litellm.example/v1",
+            "LITELLM_API_KEY": "litellm-key",
+            "LITELLM_MODELS": "fallback-model",
+            "OPENROUTER_MODELS": "openai/gpt-4o-mini",
+        }, clear=True):
+            llm = LLM(None, store, post=fake_post)
+            text, used = llm.ask("hello")
+        self.assertEqual(text, "fallback worked")
+        self.assertEqual(used, "litellm|fallback-model")
+        self.assertIn("omniroute", llm.dead)
+
     def test_blank_litellm_settings_preserve_openrouter_fallback(self):
         with patch.dict(os.environ, {
             "OMNIROUTE_URL": "",
