@@ -218,6 +218,143 @@ def grade_combo_predictions(store, client, max_fetch=150):
     return graded
 
 
+def _settle_gap_summary(samples, min_samples=30):
+    """{source: {coin: gap stats in bps}}; recommends a SETTLE_PROXY_BPS only
+    with enough data."""
+    return {src: _settle_gap_coins([x for x in samples if x.get("source", "bot_readings") == src],
+                                   min_samples)
+            for src in sorted({x.get("source", "bot_readings") for x in samples})}
+
+
+def _settle_gap_coins(samples, min_samples):
+    out = {}
+    for coin in sorted({x["coin"] for x in samples}):
+        gaps = sorted(x["gap_bps"] for x in samples if x["coin"] == coin)
+        n = len(gaps)
+        rms = (sum(g * g for g in gaps) / n) ** 0.5
+        abs_sorted = sorted(abs(g) for g in gaps)
+        out[coin] = {
+            "n": n, "mean_bps": round(sum(gaps) / n, 2), "median_bps": round(gaps[n // 2], 2),
+            "rms_bps": round(rms, 2), "p90_abs_bps": round(abs_sorted[min(n - 1, int(0.9 * n))], 2),
+            # the proxy term is a standard deviation in bps; RMS includes any bias
+            "recommended_proxy_bps": round(rms, 1) if n >= min_samples else None,
+        }
+    return out
+
+
+def settlement_gap(store, client, max_fetch=150, now=None, keep=3000):
+    """Read-only T1c check: how far is our spot price from the index Kalshi
+    settles 15-minute crypto on?
+
+    For each settled window, the crypto_model readings the bot recorded inside
+    the final averaging window (avg_s, default 60 s) are averaged and compared
+    with Kalshi's expiration_value ("the value that was considered for the
+    settlement": the CF Benchmarks average). gap_bps = (ours / index - 1) * 1e4.
+    Changes no setting; the report (kv settle_gap_report) says whether
+    SETTLE_PROXY_BPS looks too small.
+    """
+    now = int(time.time() if now is None else now)
+    samples = store.get_kv("settle_gap_samples") or []
+    done = {x["ticker"] for x in samples if x.get("source", "bot_readings") == "bot_readings"}
+    skipped = {"no_final_minute_readings": 0, "no_expiration_value": 0, "lookup_failed": 0}
+    rows = store.q("""SELECT DISTINCT ticker FROM signal_readings
+                      WHERE signal='crypto_model' AND ticker LIKE 'KX%15M-%'""")
+    todo = []
+    for r in rows:
+        t = r["ticker"]
+        close = store.get_kv(f"start_{t}")
+        if t not in done and close and now >= int(close) + 300:
+            todo.append((int(close), t))
+    for close, t in sorted(todo, reverse=True)[:max(0, int(max_fetch))]:
+        readings = store.q("""SELECT detail FROM signal_readings WHERE ticker=? AND
+                              signal='crypto_model' AND ts BETWEEN ? AND ?""", (t, close - 120, close))
+        spots = []
+        for row in readings:
+            d = json.loads(row["detail"] or "{}")
+            avg_s = d.get("avg_s") or 60
+            secs_left = d.get("secs_left")
+            if isinstance(d.get("spot"), (int, float)) and d["spot"] > 0 and \
+                    secs_left is not None and 0 <= secs_left <= avg_s:
+                spots.append(float(d["spot"]))
+        if not spots:
+            skipped["no_final_minute_readings"] += 1
+            continue
+        try:
+            m = client.market(t)
+        except Exception as e:
+            log.debug("settlement gap lookup %s: %s", t, e)
+            skipped["lookup_failed"] += 1
+            continue
+        try:
+            index = float(m.get("expiration_value"))
+        except (TypeError, ValueError):
+            index = 0.0
+        if m.get("result") not in ("yes", "no") or not index > 0:
+            skipped["no_expiration_value"] += 1
+            continue
+        ours = sum(spots) / len(spots)
+        samples.append({"source": "bot_readings", "ticker": t, "coin": ml.coin_of(t), "close_ts": close,
+                        "readings": len(spots), "ours": round(ours, 4), "index": index,
+                        "gap_bps": round((ours / index - 1) * 1e4, 3)})
+    return _save_settle_gap(store, samples, skipped, now, keep)
+
+
+def _save_settle_gap(store, samples, skipped, now, keep):
+    import os
+    samples = sorted(samples, key=lambda x: x["close_ts"])[-keep:]
+    store.set_kv("settle_gap_samples", samples)
+    report = {"ts": now, "samples": len(samples), "skipped_this_run": skipped,
+              "current_proxy_bps": float(os.environ.get("SETTLE_PROXY_BPS", 3)),
+              "by_source": _settle_gap_summary(samples)}
+    store.set_kv("settle_gap_report", report)
+    return report
+
+
+def replay_settlement_gap(store, client, days=3, now=None, get=None, keep=3000):
+    """Same check over many past windows: Coinbase's 1-minute candle for the
+    final averaging minute (mean of open/high/low/close, the feed the bot
+    prices from) vs Kalshi's expiration_value. Read-only."""
+    import requests
+    from . import history
+    from .config import CRYPTO_15M
+    from .live.settlement import contract_terms
+    get = get or requests.get
+    now = int(time.time() if now is None else now)
+    start = now - int(days * 86400)
+    samples = store.get_kv("settle_gap_samples") or []
+    done = {(x.get("source", "bot_readings"), x["ticker"]) for x in samples}
+    skipped = {"no_expiration_value": 0, "not_60s_average": 0, "no_coinbase_minute": 0}
+    for series, pair in CRYPTO_15M.items():
+        markets = history.settled_markets(client, series, start, now, limit=int(days * 96) + 10)
+        if not markets:
+            continue
+        candles = history.spot_candles(pair, start - 120, now, get)
+        for m in markets:
+            if ("coinbase_replay", m["ticker"]) in done:
+                continue
+            terms = contract_terms(m)
+            try:
+                index = float(m.get("expiration_value"))
+            except (TypeError, ValueError):
+                index = 0.0
+            if not index > 0:
+                skipped["no_expiration_value"] += 1
+                continue
+            if terms["avg_seconds"] != 60:
+                skipped["not_60s_average"] += 1
+                continue
+            c = candles.get(int(terms["close_ts"]) - 60)   # candles are stamped at minute start
+            if not c:
+                skipped["no_coinbase_minute"] += 1
+                continue
+            ours = (c["open"] + c["high"] + c["low"] + c["close"]) / 4
+            samples.append({"source": "coinbase_replay", "ticker": m["ticker"],
+                            "coin": ml.coin_of(m["ticker"]), "close_ts": int(terms["close_ts"]),
+                            "ours": round(ours, 4), "index": index,
+                            "gap_bps": round((ours / index - 1) * 1e4, 3)})
+    return _save_settle_gap(store, samples, skipped, now, keep)
+
+
 def grade(store, client):
     n_bets = settle_bets(store, client)
     n_mkts, changes = learn_from_markets(store, client)
