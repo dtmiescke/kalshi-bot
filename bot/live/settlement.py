@@ -13,6 +13,8 @@ import os
 import re
 from datetime import datetime, timezone
 
+from .contract_rules import audit_rules
+
 
 def _norm_cdf(x):
     return 0.5 * (1 + math.erf(x / math.sqrt(2)))
@@ -35,10 +37,10 @@ def _nonnegative_env_float(name, default):
 
 
 def contract_terms(mkt):
-    """Extract strike, deadline and averaging window from a Kalshi market."""
+    """Extract pricing terms and a read-only audit of the market's rule text."""
     rules = " ".join(str(mkt.get(k, "")) for k in ("rules_primary", "rules_secondary"))
     avg_s, source = None, "assumed"
-    m = re.search(r"average[^.]{0,80}?(\d+)\s*(second|minute)", rules, re.I) or \
+    m = re.search(r"average[^.]{0,80}?(\d+)\s*(second|minute)", rules, re.I) or \\
         re.search(r"(\d+)\s*(second|minute)s?[^.]{0,40}?average", rules, re.I)
     if m:
         avg_s = int(m.group(1)) * (60 if m.group(2).lower().startswith("minute") else 1)
@@ -68,7 +70,8 @@ def contract_terms(mkt):
         except ValueError:
             pass
     return {"strike": strike, "close_ts": close_ts, "avg_seconds": avg_s,
-            "avg_source": source, "benchmark": benchmark}
+            "avg_source": source, "benchmark": benchmark,
+            "rules_audit": audit_rules(mkt)}
 
 
 def prob_above(spot, strike, vol_per_min, seconds_left, avg_seconds=60,
@@ -128,7 +131,7 @@ def z_above(spot, strike, vol_per_min, seconds_left, avg_seconds=60,
         return None
     if spot <= 0 or strike <= 0 or vol_per_min <= 0 or avg_seconds <= 0:
         return None
-    s2 = (vol_per_min ** 2) / 60.0          # variance per second
+    s2 = (vol_per_min ** 2) / 60.0
     x, k = math.log(spot), math.log(strike)
     tau, A = max(seconds_left, 0.0), max(avg_seconds, 1)
     if tau >= A:
@@ -140,8 +143,7 @@ def z_above(spot, strike, vol_per_min, seconds_left, avg_seconds=60,
         mean = (done * r + tau * x) / A
         var = (tau / A) ** 2 * s2 * tau / 3.0
     # Our price (Coinbase/Kraken) is not Kalshi's settlement index (CF Benchmarks).
-    # That gap is extra uncertainty that matters most right at the strike, so
-    # it's added as variance: it stops the model calling a coin-flip a sure thing.
+    # That gap is extra uncertainty that matters most right at the strike.
     if proxy_bps is None:
         proxy_bps = _nonnegative_env_float("SETTLE_PROXY_BPS", 3)
     try:
