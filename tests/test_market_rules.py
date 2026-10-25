@@ -197,5 +197,49 @@ class TestMarketRules(unittest.TestCase):
             self.assertEqual(result["status"], "unavailable")
 
 
+    def test_nested_mcp_result_content_and_json_envelopes_are_recursively_unwrapped(self):
+        import json
+
+        nested = {
+            "data": {
+                "market": {
+                    "ticker": "KXTEST",
+                    "rules_primary": "Settles using the official league result.",
+                    "settlement_source": "Official league result",
+                }
+            }
+        }
+        result = summarize_rules({
+            "result": {
+                "content": [{"type": "text", "text": json.dumps(nested)}]
+            }
+        })
+        self.assertEqual(result["status"], "terms_found")
+        self.assertEqual(result["terms"]["settlement_source"], "Official league result")
+        self.assertIn("rules_primary", result["terms"])
+
+    def test_nested_mcp_error_cannot_be_overridden_by_outer_rule_text(self):
+        result = summarize_rules({
+            "rules_primary": "Outer wrapper text must not be trusted.",
+            "result": {
+                "isError": True,
+                "content": [{"type": "text", "text": "tool failed"}],
+            },
+        })
+        self.assertFalse(result["available"])
+        self.assertEqual(result["status"], "unavailable")
+
+    def test_mcp_envelope_depth_is_bounded(self):
+        payload = {
+            "rules_primary": "Deeply wrapped text must not bypass the depth bound.",
+            "settlement_source": "Official source",
+        }
+        for _ in range(10):
+            payload = {"result": payload}
+        result = summarize_rules(payload)
+        self.assertFalse(result["available"])
+        self.assertEqual(result["status"], "unavailable")
+
+
 if __name__ == "__main__":
     unittest.main()
