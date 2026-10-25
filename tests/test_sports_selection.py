@@ -4,9 +4,22 @@ from unittest.mock import patch
 
 from bot.config import Settings
 from bot.engine import _rotating_event_batch, _series_sport, _sports_excluded
+from bot.matching import market_team_labels
 
 
 class TestSportsSelection(unittest.TestCase):
+    def test_market_team_labels_supports_both_subtitle_fields_and_deduplicates(self):
+        markets = [
+            {"yes_sub_title": "Green Bay Packers"},
+            {"subtitle": "Chicago Bears"},
+            {"yes_sub_title": "", "subtitle": "Green Bay Packers"},
+            {"ticker": "KXNFLGAME-EXAMPLE"},
+        ]
+        self.assertEqual(
+            market_team_labels(markets),
+            ["Green Bay Packers", "Chicago Bears"],
+        )
+
     def test_configured_sports_are_default_and_combos_default_off(self):
         with patch.dict(os.environ, {}, clear=True):
             settings = Settings()
