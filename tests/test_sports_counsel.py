@@ -23,14 +23,38 @@ class TestSportsCounsel(unittest.TestCase):
         else:
             os.environ["COUNCIL_MODE"] = self.old_mode
 
-    def test_numeric_candidate_passes_when_counsel_disabled(self):
+    def test_numeric_candidate_passes_when_counsel_disabled_and_rules_are_clear(self):
+        readings = [Reading("book_consensus", .62, .8, {"age_min": 5, "n_books": 4})]
+        result = review(None, self.store,
+                        {"event_ticker": "EVT", "title": "Team A vs Team B"},
+                        {"ticker": "MKT", "series": "KXNFLGAME", "event_ticker": "EVT",
+                         "rules_primary": "Market settles based on the official final score.",
+                         "settlement_source": "Official league result"},
+                        {"side": "yes", "price": .5, "edge": .12},
+                        readings, .62, .8, now=1000)
+        self.assertEqual(result["decision"], "approve")
+
+    def test_missing_contract_rules_wait_even_when_counsel_is_off(self):
         readings = [Reading("book_consensus", .62, .8, {"age_min": 5, "n_books": 4})]
         result = review(None, self.store,
                         {"event_ticker": "EVT", "title": "Team A vs Team B"},
                         {"ticker": "MKT", "series": "KXNFLGAME", "event_ticker": "EVT"},
                         {"side": "yes", "price": .5, "edge": .12},
                         readings, .62, .8, now=1000)
-        self.assertEqual(result["decision"], "approve")
+        self.assertEqual(result["decision"], "wait")
+        self.assertEqual(result["by"], "contract_rules")
+
+    def test_early_close_terms_require_manual_review(self):
+        readings = [Reading("book_consensus", .62, .8, {"age_min": 5, "n_books": 4})]
+        result = review(None, self.store,
+                        {"event_ticker": "EVT", "title": "Team A vs Team B"},
+                        {"ticker": "MKT", "series": "KXNFLGAME", "event_ticker": "EVT",
+                         "rules_primary": "The market may close early based on official data.",
+                         "settlement_source": "Official league result"},
+                        {"side": "yes", "price": .5, "edge": .12},
+                        readings, .62, .8, now=1000)
+        self.assertEqual(result["decision"], "wait")
+        self.assertEqual(result["contract_rule_status"], "review_required")
 
     def test_missing_sportsbook_consensus_is_rejected(self):
         readings = [Reading("market", .62, .8, {})]
