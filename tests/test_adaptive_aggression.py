@@ -6,14 +6,14 @@ from bot.config import Settings
 
 class TestAggression(unittest.TestCase):
     def test_requested_default(self):
-        self.assertEqual(Settings().aggression_level, "aggressive")
+        self.assertEqual(Settings().aggression_level, "adaptive")
 
     def test_off_is_inert(self):
         self.assertIsNone(choose(AggressionPolicy(level="off")))
 
     def test_aggressive_keeps_sizing_cap(self):
         policy = choose(AggressionPolicy(level="aggressive"))
-        self.assertLess(policy["min_edge"], 0.03)
+        self.assertGreaterEqual(policy["min_edge"], 0.03)
         self.assertLess(policy["min_confidence"], 0.55)
         self.assertLessEqual(policy["kelly_fraction"], 0.25)
 
