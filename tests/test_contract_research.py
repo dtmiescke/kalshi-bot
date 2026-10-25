@@ -20,7 +20,7 @@ class ContractResearchTests(unittest.TestCase):
         self.assertEqual(result["document_urls"], ["https://kalshi.com/terms.pdf"])
         client.market.assert_called_once_with("TEST-YES")
         client.series.assert_called_once_with("TEST")
-        self.assertFalse(hasattr(client, "create_order"))
+        client.create_order.assert_not_called()
 
     def test_missing_rules_fail_closed(self):
         client = Mock()
