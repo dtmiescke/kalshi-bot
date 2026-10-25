@@ -53,6 +53,29 @@ class TestMarketRules(unittest.TestCase):
         self.assertIn("rules_pdf_text", result["terms"])
         self.assertIn("void_or_cancellation", result["flags"])
 
+    def test_series_metadata_supplies_settlement_source_and_prohibitions(self):
+        result = summarize_rules(
+            {"ticker": "KXNFLGAME-TEST"},
+            {
+                "ticker": "KXNFLGAME",
+                "settlement_sources": [{"name": "Official league result"}],
+                "additional_prohibitions": ["Special series restrictions apply"],
+                "contract_terms_url": "https://kalshi-public-docs.s3.amazonaws.com/contracts/example.pdf",
+            },
+        )
+        self.assertTrue(result["available"])
+        self.assertEqual(result["status"], "review_required")
+        self.assertIn("settlement_sources", result["terms"])
+        self.assertIn("series_prohibition", result["flags"])
+        self.assertEqual(len(result["official_rule_document_urls"]), 1)
+
+    def test_untrusted_contract_document_url_is_not_exposed(self):
+        result = summarize_rules(
+            {"rules_primary": "Official settlement source is the league result."},
+            {"contract_url": "https://attacker-kalshi.amazonaws.com/rules.pdf"},
+        )
+        self.assertEqual(result["official_rule_document_urls"], [])
+
     def test_non_dict_or_empty_mcp_result_fails_closed(self):
         for payload in (None, [], "not a market", {"result": None}):
             result = summarize_rules(payload)
