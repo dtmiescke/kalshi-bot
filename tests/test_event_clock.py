@@ -12,7 +12,7 @@ def iso(ts):
 
 
 class TestEventClock(unittest.TestCase):
-    def test_occurrence_time_and_expiration_fallback(self):
+    def test_occurrence_time_event_schedule_and_expiration_fallback(self):
         now = time.time()
         self.assertAlmostEqual(event_start_ts({"markets": [{
             "status": "active", "occurrence_datetime": iso(now + 300)}]}),
@@ -20,6 +20,11 @@ class TestEventClock(unittest.TestCase):
         self.assertAlmostEqual(event_start_ts({"markets": [{
             "status": "open", "expected_expiration_time": iso(now + 600)}]}),
             now + 600, delta=1)
+        self.assertAlmostEqual(event_start_ts({"start_time": iso(now + 900), "markets": []}),
+            now + 900, delta=1)
+        self.assertAlmostEqual(event_start_ts({"start_time": "bad", "markets": [{
+            "status": "open", "expected_expiration_time": iso(now + 1200)}]}),
+            now + 1200, delta=1)
 
     def test_near_start_event_is_prioritized_and_duplicates_removed(self):
         now = time.time()
