@@ -37,7 +37,7 @@ def _nonnegative_env_float(name, default):
 
 
 def contract_terms(mkt):
-    """Extract strike, deadline, averaging window and bounded rules audit."""
+    """Extract strike, deadline, averaging window and compact rules audit."""
     rules = " ".join(str(mkt.get(k, "")) for k in ("rules_primary", "rules_secondary"))
     avg_s, source = None, "assumed"
     m = re.search(r"average[^.]{0,80}?(\d+)\s*(second|minute)", rules, re.I)
@@ -70,9 +70,13 @@ def contract_terms(mkt):
             close_ts = parsed.timestamp()
         except ValueError:
             pass
+    rules_audit = summarize_rules(mkt)
+    # Do not copy multi-kilobyte raw rule text into every in-memory live-market
+    # record. The shared counsel path can still request full bounded terms directly.
+    rules_audit.pop("terms", None)
     return {"strike": strike, "close_ts": close_ts, "avg_seconds": avg_s,
             "avg_source": source, "benchmark": benchmark,
-            "rules_audit": summarize_rules(mkt)}
+            "rules_audit": rules_audit}
 
 
 def prob_above(spot, strike, vol_per_min, seconds_left, avg_seconds=60,
