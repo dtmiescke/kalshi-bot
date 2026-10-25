@@ -21,7 +21,7 @@ class SportsModelQualityTests(unittest.TestCase):
     def test_invalid_rows_are_ignored_and_empty_results_are_none(self):
         self.assertIsNone(brier_score([(float("nan"), 1), (0.7, 0.5)]))
         self.assertIsNone(log_loss([]))
-        self.assertEqual(brier_score([(0.8, 1), (float("inf"), 0)]), 0.04)
+        self.assertAlmostEqual(brier_score([(0.8, 1), (float("inf"), 0)]), 0.04)
 
     def test_calibration_bins_keep_counts_and_observed_rates(self):
         rows = calibration_bins([(0.11, 0), (0.19, 0), (0.91, 1)], bins=10)
