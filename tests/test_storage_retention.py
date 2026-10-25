@@ -41,6 +41,18 @@ class TestStorageRetention(unittest.TestCase):
         ids = {r["trade_id"] for r in self.store.flow("KXNBAGAME-X-BOS", self.now - 4 * 3600)}
         self.assertEqual(ids, {"recent"})
 
+    def test_crypto_15m_trades_kept_one_hour_others_two_days(self):
+        for tid, ticker, age in (("c-new", "KXBTC15M-W1-00", 1800), ("c-old", "KXBTC15M-W0-00", 7200),
+                                 ("s-2h", "KXNBAGAME-X-BOS", 7200), ("l-2h", "KXBTCD-26OCT2517-T80000", 7200)):
+            self.store.add_flow_trades([{"trade_id": tid, "ticker": ticker, "ts": self.now - age,
+                                         "count": 1, "yes_price": .5, "taker_side": "yes"}])
+        result = janitor_retention(self.store, now=self.now)
+        left = {r["trade_id"] for r in self.store.q("SELECT trade_id FROM flow_trades")}
+        self.assertEqual(left, {"c-new", "s-2h", "l-2h"})
+        self.assertEqual(result["before"]["flow_trades"] - result["after"]["flow_trades"], 1)
+        # the crypto readers' windows (5 and 15 minutes) are still fully covered
+        self.assertEqual(len(self.store.flow("KXBTC15M-W1-00", self.now - 3600)), 1)
+
     def test_sports_intel_items_trimmed_by_observed_time(self):
         sports_intel.ensure_schema(self.store)
         for i, age in enumerate((DAY, 20 * DAY)):
