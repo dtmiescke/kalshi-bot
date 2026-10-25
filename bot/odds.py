@@ -168,7 +168,8 @@ def refresh_plan(store, sport, now, next_game, base_minutes, regions="us",
                  monthly_credits=500, cache_empty=False):
     """(due, reason) for re-pulling one sport's odds within the free budget."""
     cost = max(1, len([r for r in str(regions).split(",") if r.strip()]))
-    if next_game is not None and next_game - now > HORIZON_HOURS * 3600:
+    if (next_game is not None and next_game - now > HORIZON_HOURS * 3600
+            and not cache_empty):
         return False, "no game soon"
     near = next_game is not None and next_game - now <= NEAR_GAME_HOURS * 3600
     interval = 60 if near else base_minutes
