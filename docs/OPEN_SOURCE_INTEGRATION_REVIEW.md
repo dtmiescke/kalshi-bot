@@ -43,7 +43,7 @@ any future reuse of implementation code.
 ## Deliberately not added
 
 - No separate MCP server with order-write access.
-- No new API credentials, external SDKs, or always-on service.
+- No new API credentials, MCP runtime, external exchange client, or always-on service; `pypdf` is used only for bounded PDF text extraction.
 - No NWS/GFS/FRED feeds in unrelated market categories.
 - No market-making strategy, Half-Kelly replacement, or FIX transport.
 - No automatic source-code modification based on web research.
