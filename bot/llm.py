@@ -114,7 +114,7 @@ class LLM:
         if not endpoint or not endpoint[1] or self.budget_left() <= 0:
             return None, None, []
         run_limit = max(0, int(os.environ.get("OPENROUTER_WEB_SEARCH_MAX_PER_RUN", 2)))
-        daily_limit = max(0, int(os.environ.get("OPENROUTER_WEB_SEARCH_DAILY_LIMIT", 12)))
+        daily_limit = max(0, int(os.environ.get("OPENROUTER_WEB_SEARCH_DAILY_LIMIT", 6)))
         day_key = "openrouter_web_searches_" + time.strftime("%Y%m%d", time.gmtime())
         if run_limit <= 0 or daily_limit - int(self.store.get_kv(day_key, 0) or 0) <= 0:
             return None, None, []
