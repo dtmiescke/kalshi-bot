@@ -33,7 +33,8 @@ any future reuse of implementation code.
    change size, or bypass the numeric risk gate.
 4. Added offline tests for rule-field preservation, bounded context, missing-rule behavior,
    unavailable AI counsel, series restrictions/document URL allowlisting, common MCP field
-   aliases, and safe official-PDF extraction/cache behavior. Prohibition-only payloads and
+   aliases, safe official-PDF extraction/cache behavior, and shared compact rules auditing in
+   both sports counsel and crypto settlement metadata. Prohibition-only payloads and
    PDF text without a settlement source cannot satisfy the required settlement-rule check.
    No live order was sent.
 5. Added an optional official contract-PDF fallback: HTTPS-only allowlisted hosts, no
