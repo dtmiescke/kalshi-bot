@@ -49,10 +49,12 @@ ESPN_SCOREBOARDS = {
     "golf_lpga": ("golf", "lpga"),
     "mma_ufc": ("mma", "ufc"),
     "motorsports_f1": ("racing", "f1"),
-    "motorsports_nascar": ("racing", "nascar"),
-    "cricket_ipl": ("cricket", "ipl"),
-    "rugby_union": ("rugby", "rugby-union"),
+    # Removed 2026-10-25 (always failed): racing/nascar scoreboard 400,
+    # cricket/ipl 404, rugby/rugby-union 400. Their news still comes via RSS.
 }
+# ESPN serves scoreboards but no per-event summary (404) for these sports, so
+# summary requests for them only burn the bounded box-score budget.
+NO_EVENT_SUMMARY = {"golf", "mma", "racing"}
 SPORT_TERMS = {
     "football": "NFL OR college football injury lineup depth chart",
     "basketball": "NBA OR WNBA OR college basketball injury lineup",
@@ -83,8 +85,7 @@ SCOREBOARD_CATEGORIES = {
     "soccer": {key for key in ESPN_SCOREBOARDS if key.startswith("soccer_")},
     "tennis": {"tennis_atp", "tennis_wta"},
     "golf": {"golf_pga", "golf_lpga"}, "mma": {"mma_ufc"},
-    "motorsports": {"motorsports_f1", "motorsports_nascar"},
-    "cricket": {"cricket_ipl"}, "rugby": {"rugby_union"},
+    "motorsports": {"motorsports_f1"},
 }
 
 
@@ -540,7 +541,8 @@ def collect(store, force=False, now=None, categories=None):
                 normalized.append(event)
                 # Upcoming events are included too: pre-game summaries can expose
                 # injuries, rosters, depth charts, and lineup announcements before the start.
-                if event.get("state") in ("pre", "in", "post") and event.get("provider_event_id"):
+                if event.get("state") in ("pre", "in", "post") and event.get("provider_event_id") \
+                        and sport not in NO_EVENT_SUMMARY:
                     summary_candidates.append((category, sport, league, event))
             summary["new_items"] += _record_items(store, normalized)
             _source_status(store, key, {"ok": True, "ts": now, "count": len(events)})
