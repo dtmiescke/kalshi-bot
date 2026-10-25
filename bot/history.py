@@ -240,6 +240,81 @@ def run(store, client, days=3, series=None, fee_rate=0.07, max_markets=300, spot
     return out
 
 
+def vol_check(store, days=7, series=None, leads_min=(8, 5, 3), avg_seconds=60, now=None,
+              spot_get=requests.get):
+    """Read-only: is the volatility forecast the right size for 15-minute windows?
+
+    At several decision points before every 15-minute close in the last `days`,
+    rebuild the forecast from Coinbase minutes with the bot's own pieces
+    (vol.ewma_vol, vol.long_vol, the stored blend; option-implied vol has no
+    history here, so it is left out and the blend renormalised), then score the
+    move to the settlement average (final-minute mean of open/high/low/close,
+    within ~1-2 bps of CF Benchmarks per the T1c check) in the model's own
+    standard deviations: z = log(settle / spot) / sd, with sd from
+    settlement.z_above's variance (averaging window included, no proxy term).
+    A right-sized forecast gives mean z^2 ~ 1 and |z| > 2 about 4.6% of the time.
+    vol_scale = sqrt(mean z^2): below 1 means the forecast is too wide (fat
+    tails priced too rich, long shots look cheap). Changes no setting; the
+    report goes to kv vol_check_report.
+    """
+    end = int(time.time() if now is None else now) - 600
+    end -= end % 900
+    start = end - int(days * 86400)
+    out = {"ts": int(time.time()), "days": days, "leads_min": list(leads_min), "coins": {}}
+    for ser in series or SERIES_PAIR:
+        coin = ml.coin_of(ser)
+        full = spot_candles(SERIES_PAIR[ser], start - 3 * 3600, end + 60, get=spot_get)
+        closes = {k: c["close"] for k, c in full.items()}
+        blend = dict(store.get_kv(f"vol_blend_{coin}") or volmod.DEFAULT_BLEND)
+        w_sum = (blend.get("ewma", 0) + blend.get("long", 0)) or 1.0
+        zs, sigmas = [], []
+        for close in range(start + 900, end + 1, 900):
+            last = full.get(close - 60)                  # minute that settles the window
+            if not last:
+                continue
+            settle = (last["open"] + last["high"] + last["low"] + last["close"]) / 4
+            for lead in leads_min:
+                t = close - lead * 60                    # decision time (minute boundary)
+                hist = [closes[m] for m in range(t - 120 * 60, t, 60) if m in closes]
+                if len(hist) < 61 or (t - 60) not in closes:
+                    continue
+                spot = closes[t - 60]                    # last minute fully known at t
+                ew, lg = volmod.ewma_vol(hist), volmod.long_vol(hist)
+                if not (ew and lg):
+                    continue
+                sigma = math.sqrt((blend.get("ewma", 0) * ew * ew + blend.get("long", 0) * lg * lg)
+                                  / w_sum)
+                tau, a = lead * 60, avg_seconds
+                var = (sigma ** 2 / 60) * ((tau - a) + a / 3)
+                zs.append(math.log(settle / spot) / math.sqrt(var))
+                sigmas.append(sigma)
+        if not zs:
+            out["coins"][coin] = {"n": 0}
+            continue
+        n = len(zs)
+        mean_z2 = sum(z * z for z in zs) / n
+        sigmas.sort()
+        from statistics import NormalDist
+        nd = NormalDist()
+        tails = {}
+        for k in (1.0, 1.5, 2.0, 2.5, 3.0):
+            share = sum(abs(z) > k for z in zs) / n
+            # the tail shrink a that would price this: 2 * Phi(-a k) = share
+            implied = (-nd.inv_cdf(share / 2) / k) if 0 < share < 1 else None
+            tails[str(k)] = {"share": round(share, 4),
+                             "normal": round(2 * nd.cdf(-k), 4),
+                             "priced_at_0.9": round(2 * nd.cdf(-0.9 * k), 4),
+                             "implied_shrink": None if implied is None else round(implied, 3)}
+        out["coins"][coin] = {
+            "n": n, "mean_z2": round(mean_z2, 3), "vol_scale": round(math.sqrt(mean_z2), 3),
+            "tails": tails,
+            "median_sigma_per_min": round(sigmas[n // 2], 7),
+            "blend_used": {k: round(blend.get(k, 0) / w_sum, 3) for k in ("ewma", "long")},
+        }
+    store.set_kv("vol_check_report", out)
+    return out
+
+
 def text(result):
     lines = [f"=== REAL HISTORY REPLAY (last {result['days']} days, Kalshi + Coinbase) ==="]
     for ser, r in result["by_series"].items():

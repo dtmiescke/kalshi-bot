@@ -297,6 +297,12 @@ def main(argv=None):
             alerts.send("New model promoted", ml.text(m)[:1500], tags=["brain"])
         store.set_kv("last_train", time.time())
         return
+    if cmd == "vol-check":
+        # read-only: is the volatility forecast the right size? (history.vol_check)
+        days = float(argv[1]) if len(argv) > 1 else 7
+        from . import history
+        print(json.dumps(history.vol_check(store, days=days), indent=2))
+        return
     if cmd == "compact":
         store.compact()
         print("compacted")
