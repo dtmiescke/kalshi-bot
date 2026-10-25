@@ -103,8 +103,11 @@ class TestMarketRules(unittest.TestCase):
         })
         self.assertLessEqual(len(result["terms"]["contract_terms"]), 3000)
         self.assertLessEqual(len(result["terms"]["prohibitions"]), 3000)
-        self.assertTrue(result["missing"])
-        self.assertEqual(result["status"], "review_required")
+        self.assertFalse(result["missing"])
+        self.assertEqual(result["status"], "terms_found")
+        prohibited_only = summarize_rules({"prohibitions": ["P" * 5000]})
+        self.assertTrue(prohibited_only["missing"])
+        self.assertEqual(prohibited_only["status"], "review_required")
 
     def test_non_dict_or_empty_mcp_result_fails_closed(self):
         for payload in (None, [], "not a market", {"result": None}):
