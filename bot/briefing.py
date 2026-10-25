@@ -71,3 +71,54 @@ def write(store, llm, path="data/BRIEFING.txt"):
     with open(path, "w") as f:
         f.write(f"AI briefing ({model}, {stamp})\n\n{text}\n")
     return text
+
+
+def sunday_sitdown(store, settings=None, llm=None, now=None, rng=None):
+    """Weekly recap in Don Theo's voice, once per ISO week, on Sunday (UTC):
+    record, P&L, best and worst call, the doghouse, who earned a better seat.
+    Bad news first if the week lost money. Saved as kv sunday_sitdown."""
+    import random
+    from . import council, don_theo
+    from .config import Settings
+    now = int(now or time.time())
+    if time.gmtime(now).tm_wday != 6:
+        return None
+    week = time.strftime("%G-W%V", time.gmtime(now))
+    prev = store.get_kv("sunday_sitdown") or {}
+    if prev.get("week") == week:
+        return None
+    settings = settings or Settings()
+    rec = don_theo.record(store, getattr(settings, "mode", "paper"), now)
+    table = council.standings(store, settings, now)
+    nick = lambda m: don_theo.NICKNAMES.get(m, m)
+    bad = [f"We're down ${-rec['pnl']:.2f} this week."] if rec["pnl"] < 0 else []
+    parts = [f"Sunday Sit-Down. {rec['wins']}-{rec['losses']} this week, "
+             f"{'+' if rec['pnl'] >= 0 else '-'}${abs(rec['pnl']):.2f}."]
+    if rec["best"] and rec["bets"]:
+        b = rec["best"]
+        parts.append(f"Best call: {b['ticker']} {str(b['side']).upper()} at "
+                     f"{b['price'] * 100:.0f}c, {b['pnl']:+.2f}.")
+    if rec["worst"] and rec["bets"] and rec["worst"] is not rec["best"]:
+        w = rec["worst"]
+        parts.append(f"Worst call: {w['ticker']} {str(w['side']).upper()} at "
+                     f"{w['price'] * 100:.0f}c, {w['pnl']:+.2f}.")
+    graded = [m for m, r in table.items() if r["graded"]]
+    top = min(graded, key=lambda m: table[m]["seat"]) if graded else None
+    dog = [m for m in graded if table[m]["doghouse"]]
+    if top and top not in dog:
+        parts.append(f"{nick(top)} carried us ({table[top]['recent']} lately).")
+    for m in dog:
+        parts.append(don_theo.doghouse_line(m, tuple(map(int, table[m]["last_window"].split(" for ")))))
+    old_seats = prev.get("seats") or {}
+    moved_up = [m for m in graded if m in old_seats and table[m]["seat"] < old_seats[m]]
+    if moved_up:
+        parts.append("Earned a better seat: " + ", ".join(nick(m) for m in moved_up) + ".")
+    if not graded:
+        parts.append("No council votes graded yet. Everybody earns their kibble.")
+    reason = " ".join(parts)
+    closer = don_theo._ai_line(store, llm, reason, don_theo.SIGNATURE, now) or don_theo.SIGNATURE
+    text = don_theo.first_bad_news(bad, reason + " " + closer)
+    out = {"week": week, "ts": now, "text": text, "bad_news": bad,
+           "seats": {m: r["seat"] for m, r in table.items()}}
+    store.set_kv("sunday_sitdown", out)
+    return out

@@ -235,6 +235,17 @@ def run_scheduled(s, store, data):
             print("health alarms:", json.dumps(health_result["alarms"], default=str))
     except Exception as exc:
         logging.warning("silent-failure check failed: %s", exc)
+    # Don Theo's line for the app (after the health check, so bad news is current)
+    # and his Sunday Sit-Down. AI-written only within its own small daily cap.
+    try:
+        from . import don_theo
+        theo_llm = LLM(s.openrouter_key, store, max_per_run=2) if s.ai_enabled() else None
+        print("don theo:", don_theo.speak(store, s, theo_llm)["line"])
+        sitdown = briefing.sunday_sitdown(store, s, theo_llm)
+        if sitdown:
+            print("\n=== SUNDAY SIT-DOWN ===\n" + sitdown["text"])
+    except Exception as exc:
+        logging.warning("don theo line failed: %s", exc)
     store.set_kv("last_run_ts", time.time())
     if time.time() - store.get_kv("last_compact", 0) >= 86400:
         store.compact()

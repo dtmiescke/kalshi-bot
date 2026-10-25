@@ -165,8 +165,8 @@ successfully. Following the plan, the bot-data branches are left alone.
 | Member grading (right/wrong + Brier) | Done (6a) | `grader.grade_council_votes` after settlement, `council_votes` table in `storage.py` |
 | Seating, doghouse, earned power (Advisory → Veto → Full) | Done (6a) | `council.standings` / `council.ruling`, thresholds `COUNCIL_*` in `config.py`; rule-based member votes in `council.member_votes`, convened from `Engine.evaluate` and the live runner |
 | Memory callbacks from the casebook | New | Phase 1 casebook → `don_theo` |
-| AI-written lines with fallback, never blank | Partial | `briefing.py` / `llm.py` → `don_theo` fallback |
-| Sunday Sit-Down | New | `briefing.py` weekly, in Don Theo's voice, bad news first |
+| AI-written lines with fallback, never blank | Done (6b) | `don_theo.speak` (own cap `DON_THEO_AI_PER_DAY`, keeps the trading reserve) → kv `don_theo_last` |
+| Sunday Sit-Down | Done (6b) | `briefing.sunday_sitdown` (Sundays UTC, once per ISO week) → kv `sunday_sitdown` |
 | Chamber, elevator, Data Floor, animations, voice toggle | New | `index.html` Council tab (Phase 7) |
 
 ### Phase 7: App (`index.html`; same 4 tabs)
