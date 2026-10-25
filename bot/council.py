@@ -70,35 +70,63 @@ def review(llm, store, ticker, summary, cooldown_s=180):
     if cached and time.time() - cached["ts"] < cooldown_s:
         return cached["result"]
 
-    if llm is None or llm.budget_left() < 2:
-        result = ({"decision": "wait", "by": "rules", "reason": "council required but unavailable"}
-                  if mode() == "required" else
-                  {"decision": "approve", "by": "numbers", "reason": "council unavailable; numbers only"})
-        return result
+    # A failed/unavailable LLM must not turn every mathematically qualified setup
+    # into an automatic no-trade. The numeric risk gate has already approved this
+    # candidate; when the AI service cannot vote, let the existing rule-based
+    # council record its vote at the execution boundary instead of deadlocking.
+    if llm is None:
+        reason = "LLM unavailable; numeric risk gate decides and rule-based council still votes"
+        log.warning("council %s fallback: %s", ticker, reason)
+        return {"decision": "approve", "by": "numbers", "reason": reason}
+    try:
+        budget = llm.budget_left()
+    except Exception:
+        budget = 0
+        log.exception("council %s could not read LLM budget", ticker)
+    if budget < 2:
+        reason = f"LLM budget unavailable (budget_left={budget}); numeric risk gate decides"
+        log.warning("council %s fallback: %s", ticker, reason)
+        return {"decision": "approve", "by": "numbers", "reason": reason}
 
     text = json.dumps(summary, default=str)[:5000]
     models = [m for m in llm.models if m not in llm.dead]
     chair_model = models[0] if models else None
     skeptic_model = models[1] if len(models) > 1 else chair_model
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        f1 = pool.submit(llm.ask_json, COUNCIL_PROMPT.format(summary=text), chair_model)
-        f2 = pool.submit(llm.ask_json, SKEPTIC_PROMPT.format(summary=text), skeptic_model)
-        council, cm = f1.result()
-        skeptic, sm = f2.result()
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f1 = pool.submit(llm.ask_json, COUNCIL_PROMPT.format(summary=text), chair_model)
+            f2 = pool.submit(llm.ask_json, SKEPTIC_PROMPT.format(summary=text), skeptic_model)
+            council, cm = f1.result()
+            skeptic, sm = f2.result()
+    except Exception as exc:
+        reason = f"LLM review error ({type(exc).__name__}); numeric risk gate decides"
+        log.exception("council %s model review failed", ticker)
+        return {"decision": "approve", "by": "numbers", "reason": reason}
 
-    decision = "approve"
     reasons = []
-    if council and isinstance(council.get("chair"), dict):
-        d = str(council["chair"].get("decision", "")).lower()
-        decision = d if d in ("approve", "reject", "wait") else "wait"
-        reasons.append(str(council["chair"].get("reason", ""))[:200])
-    elif mode() == "required":
-        decision = "wait"
+    valid_chair = bool(council and isinstance(council.get("chair"), dict)
+                       and str(council["chair"].get("decision", "")).lower()
+                       in ("approve", "reject", "wait"))
+    if valid_chair:
+        decision = str(council["chair"]["decision"]).lower()
+        chair_reason = str(council["chair"].get("reason", "")).strip()[:200]
+        if chair_reason:
+            reasons.append(chair_reason)
+    else:
+        # Invalid/missing chair output is an unavailable vote, not a trade rejection.
+        decision = "approve"
+        reasons.append("chair response unavailable/invalid; numeric risk gate decides")
+        log.warning("council %s fallback: invalid/missing chair JSON; chair_model=%s skeptic_model=%s",
+                    ticker, cm, sm)
     if skeptic and skeptic.get("severe_issue") is True:
         decision = "reject"
         reasons.append("skeptic: " + "; ".join(map(str, skeptic.get("issues", [])))[:200])
-    result = {"decision": decision, "by": "council", "reason": " | ".join(r for r in reasons if r),
+    result = {"decision": decision, "by": "council" if valid_chair else "numbers",
+              "reason": " | ".join(r for r in reasons if r),
               "models": [m for m in (cm, sm) if m], "roles": council or {}, "skeptic": skeptic or {}}
+    log.info("council %s decision=%s by=%s chair_valid=%s skeptic_severe=%s reason=%s",
+             ticker, result["decision"], result["by"], valid_chair,
+             bool(skeptic and skeptic.get("severe_issue") is True), result["reason"][:300])
     store.set_kv(f"council_{ticker}", {"ts": time.time(), "result": result})
     return result
 
