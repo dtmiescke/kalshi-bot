@@ -12,10 +12,11 @@ import re
 _RULE_FIELDS = (
     "rules_primary", "rules_secondary", "early_close_condition",
     "settlement_value", "settlement_source", "custom_strike",
-    # Read-only MCP/PDF extractors sometimes expose a consolidated text field
-    # instead of Kalshi's native rules_primary/rules_secondary fields.
+    # Read-only MCP/PDF extractors sometimes expose consolidated text instead
+    # of Kalshi's native rules_primary/rules_secondary fields.
     "rules_text", "rules_pdf_text", "contract_terms_text",
-    "series_prohibitions",
+    # Conservative aliases used by third-party read-only MCP responses.
+    "rules", "contract_terms", "series_prohibitions", "prohibitions",
 )
 
 
@@ -56,9 +57,10 @@ def summarize_rules(market):
     combined = " ".join(terms.values())
     lower = combined.lower()
     missing = []
-    if not terms.get("rules_primary") and not terms.get("settlement_source") \
-            and not terms.get("rules_text") and not terms.get("rules_pdf_text") \
-            and not terms.get("contract_terms_text"):
+    if not any(terms.get(key) for key in (
+        "rules_primary", "settlement_source", "rules_text", "rules_pdf_text",
+        "contract_terms_text", "rules", "contract_terms",
+    )):
         missing.append("primary settlement rules/source not present in supplied market data")
     flags = []
     patterns = (
