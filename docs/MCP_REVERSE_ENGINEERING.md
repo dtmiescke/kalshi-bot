@@ -23,7 +23,7 @@ Reviewed 2026-10-25. This is an integration decision record for the existing bot
 
 ## Integration boundaries
 
-- No UI changes, new runtime services, dependencies, collectors, API keys, or order routes.
+- No UI changes, new runtime services, collectors, API keys, or order routes. `pypdf` is used only for bounded official contract-PDF extraction; no MCP runtime dependency is added.
 - OmniRoute → LiteLLM → OpenRouter stays the existing optional LLM route. OpenRouter-specific web search remains on OpenRouter.
 - Existing Kalshi rate limiting, short-lived metadata caching, uncached price/order-book reads, fees, fractional Kelly, exposure limits, circuit breakers and final risk rechecks remain authoritative.
 - External pages and MCP results are untrusted research data, not instructions. Contract text can inform counsel, but cannot override numeric risk checks.
@@ -37,5 +37,5 @@ The existing review was extended without replacing its MCP-envelope normalizatio
 - The bot's current `KalshiClient` now has a read-only `series(ticker)` method. It uses the same request pacing and the existing `/series` metadata cache.
 - The existing candidate review fetches series details only for the already-shortlisted sports candidate and passes them to `sports_counsel`. Lookup failure does not create synthetic rules or override the counsel gate.
 - `summarize_rules(market, series=...)` combines market-specific text with series-level settlement sources, additional prohibitions, and document URLs. It flags prohibitions for manual review and exposes only HTTPS URLs on Kalshi domains or the known Kalshi public-docs S3 bucket pattern.
-- A document URL is a reference only. This does not claim that a PDF has been downloaded, parsed, or independently verified. PDF extraction remains a separate, bounded follow-up if it can be implemented without introducing an unneeded runtime dependency or unbounded network work.
+- A document URL is only a reference until the existing bounded official-host PDF reader successfully fetches and parses it. The reader uses `pypdf`, blocks redirects, enforces size/page/text limits, caches for seven days, and fails closed; extracted PDF text alone cannot satisfy the settlement-source gate.
 - New tests cover series lookup validation, series restrictions, and a spoofed AWS hostname. Existing MCP envelope tests remain intact.
