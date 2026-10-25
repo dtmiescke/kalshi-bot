@@ -40,8 +40,9 @@ def contract_terms(mkt):
     """Extract strike, deadline, averaging window and bounded rules audit."""
     rules = " ".join(str(mkt.get(k, "")) for k in ("rules_primary", "rules_secondary"))
     avg_s, source = None, "assumed"
-    m = re.search(r"average[^.]{0,80}?(\d+)\s*(second|minute)", rules, re.I) or \\
-        re.search(r"(\d+)\s*(second|minute)s?[^.]{0,40}?average", rules, re.I)
+    m = re.search(r"average[^.]{0,80}?(\d+)\s*(second|minute)", rules, re.I)
+    if not m:
+        m = re.search(r"(\d+)\s*(second|minute)s?[^.]{0,40}?average", rules, re.I)
     if m:
         avg_s = int(m.group(1)) * (60 if m.group(2).lower().startswith("minute") else 1)
         source = "rules"
