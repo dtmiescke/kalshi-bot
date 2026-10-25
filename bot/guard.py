@@ -94,6 +94,10 @@ def clv_tripped(store, n=50, floor=-0.01, mode=None):
 
 
 def league_benched(store, series, n=40, mode=None):
+    # a critical silent-failure alarm (nerd.silent_failure_check) pauses its area
+    from .nerd import area_paused
+    if area_paused(store, series):
+        return True
     rows = store.q("""SELECT clv, pnl FROM bets WHERE status='graded' AND series=?
                       AND graded_ts >= ? AND (? IS NULL OR mode=?)
                       ORDER BY graded_ts DESC LIMIT ?""", (series, _since(), mode, mode, n))

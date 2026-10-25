@@ -4,9 +4,10 @@ Catches the class of bug where something quietly returns nothing (the order-book
 bug: 0 of 488 markets priced for days). Each check returns a list of alarms;
 an empty list means healthy. Checks never raise: a broken check is itself an alarm.
 
-Wire-up (after reading the bot's run loop on build day): call run_all(stats)
-at the end of every run, store the result, alert on any 'critical' alarm, and
-block betting for the affected area.
+Wired in by nerd.silent_failure_check at the end of every scheduled cycle: stats
+come from what the cycle wrote to the database, the result is stored in the
+Nerd's report (kv nerd_last_health["silent_failures"]), critical alarms alert
+and pause only their area via guard.league_benched until a clean cycle.
 """
 from dataclasses import dataclass, field
 import time
