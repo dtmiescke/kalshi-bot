@@ -125,7 +125,7 @@ class Settings:
         default_factory=lambda: _env_float("ODDS_MAX_AGE_MINUTES", 60))
 
     # Optional paper-only aggression. No effect on demo/live execution.
-    aggression_level: str = field(default_factory=lambda: _env("AGGRESSION_LEVEL", "adaptive").strip().lower())
+    aggression_level: str = field(default_factory=lambda: _env("AGGRESSION_LEVEL", "aggressive").strip().lower())
 
     # --- decision rules -----------------------------------------------------
     min_edge: float = field(default_factory=lambda: _env_pct("MIN_EDGE", 3))
