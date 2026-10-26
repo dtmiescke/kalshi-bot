@@ -59,6 +59,7 @@ class LiveRunner:
             self.coins[series] = SymbolAnalytics(kr, OrderBook(kr, depth=100))
         self.markets = {}         # ticker -> {"series", "event", "raw", "terms"}
         self.books = {}           # ticker -> KalshiBook
+        self.ticker_updates = {}   # ticker -> latest official Kalshi ticker event
         self.pending = set()      # tickers under council review
         self.last_saved = {}
         self.last_flow_poll = {}  # REST trade-flow polling is throttled per market
@@ -649,7 +650,7 @@ class LiveRunner:
             return asyncio.create_task(feeds.run_feed(
                 "kalshi", feeds.KALSHI_WS["production"],
                 lambda: feeds.kalshi_subs(list(self.books)),
-                lambda m: feeds.handle_kalshi(m, self.books), lambda: None, stop,
+                lambda m: feeds.handle_kalshi(m, self.books, self.ticker_updates), lambda: None, stop,
                 headers_fn=lambda: signer._headers("GET", "")))
         if use_ws:
             kalshi_task = start_kalshi()
@@ -779,8 +780,13 @@ class LiveRunner:
         out = {"ts": now, "betting": self.betting_why, "summary": self.summary,
                "coins": {s: a.summary(now) for s, a in self.coins.items()},
                "markets": {t: {"secs_left": round(m["terms"]["close_ts"] - now) if m["terms"]["close_ts"] else None,
-                               "strike": m["terms"]["strike"], "kalshi_mid": self.books[t].mid()}
-                           for t, m in self.markets.items() if t in self.books}}
+                               "strike": m["terms"]["strike"], "kalshi_mid": self.books[t].mid(),
+                               "ticker": self.ticker_updates.get(t)}
+                           for t, m in self.markets.items() if t in self.books},
+               "kalshi_feed": {"channel": "ticker + orderbook_delta",
+                               "subscribed_markets": len(self.books),
+                               "ticker_updates": len(self.ticker_updates),
+                               "latest_received_ts": max((v.get("received_ts", 0) for v in self.ticker_updates.values()), default=0)}}
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w") as f:
