@@ -215,9 +215,13 @@ def run_scheduled(s, store, data):
         limit_min = float(os.environ.get("TRAIN_TIME_LIMIT_MINUTES_SCHEDULED", 8))
         m = ml.train(store, min_windows=int(os.environ.get("ML_MIN_WINDOWS", 300)),
                      fee_rate=s.taker_fee_rate, deadline_ts=time.time() + limit_min * 60)
-        status = m.get("status") or "trained"
+        # A fit that finishes but fails the out-of-sample promotion gates is
+        # an evaluated candidate, not a successful model update. Record that
+        # distinction so the scheduler retries after TRAIN_RETRY_HOURS instead
+        # of treating a rejected candidate as a 24-hour training success.
+        status = m.get("status") or ("promoted" if m.get("promoted") else "not promoted")
         store.set_kv("last_train_status", status)
-        if status not in ("not enough data", "time limit"):
+        if m.get("promoted"):
             store.set_kv("last_train", train_now)
         print(ml.text(m))
         if m.get("promoted"):
