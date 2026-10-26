@@ -150,7 +150,9 @@ def status(store, bankroll, daily_loss_limit=None, mode=None):
     if incident:
         return False, str(incident)
     lost = store.realized_today(day_start_ts(), mode=mode)
-    if lost <= -limit:
+    # DAILY_LOSS_LIMIT=0 disables the separate daily stop. The independent
+    # cumulative realized net-loss circuit breaker below remains authoritative.
+    if limit > 0 and lost <= -limit:
         return False, f"daily loss limit hit (${-lost:.2f} lost today; resets at midnight in {os.environ.get('BOT_TIMEZONE', 'America/Chicago')})"
     if total_loss_tripped(store, mode=mode):
         return False, "lifetime net-loss limit reached; betting paused"
