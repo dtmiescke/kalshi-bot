@@ -984,7 +984,7 @@ function loop(now){tickHub(now);tickCouncil(now);tickOrbit(now);requestAnimation
 function start(){
   $("setup").classList.remove("show");$("app").hidden=false;$("tabs").hidden=false;
   initWalkers();show("hub");refresh();requestAnimationFrame(loop);
-  setInterval(()=>{if(document.visibilityState==="visible")refresh()},60000);
+  setInterval(()=>{if(document.visibilityState==="visible")refresh()},30000);
 }
 $("connectBtn").onclick=async()=>{const token=$("tokenIn").value.trim(),repo=$("repoIn").value.trim();if(!token){toast("Paste your token first.");return}
   cfg={token,repo};demo=false;try{await gh("");localStorage.setItem("kbot",JSON.stringify(cfg));start()}catch(e){cfg=null;toast(explain(e))}};
