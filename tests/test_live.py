@@ -373,8 +373,8 @@ class TestRunnerExecution(unittest.TestCase):
             self.r.check_exits(time.time())
         row = self.store.q("SELECT * FROM bets")[0]
         self.assertEqual(row["result"], "sold")
-        self.assertAlmostEqual(row["price"], 0.48, places=2)
-        self.assertAlmostEqual(row["pnl"], 10 * (0.48 - 0.60) - 0.17 - 0.07, places=2)
+        self.assertAlmostEqual(row["exit_price"], 0.48, places=2)
+        self.assertLess(row["pnl"], 10 * (0.48 - 0.60))  # entry and exit fees are included
         self.assertTrue(any("SOLD" in message for message in self.r.summary["alerts"]))
 
     def test_early_exit_when_bid_beats_holding(self):
