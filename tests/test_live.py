@@ -360,6 +360,23 @@ class TestRunnerExecution(unittest.TestCase):
         self.assertNotIn(ticker, self.r.makers)
         self.assertEqual(self.store.open_bets(), [])
 
+    def test_crypto_hard_stop_triggers_at_20_percent_below_entry_without_model_readings(self):
+        t = next(iter(self.r.markets))
+        self.store.add_bet({"ts": 1, "mode": "paper", "ticker": t, "event_ticker": "KXBTC15M-E",
+                            "series": "KXBTC15M", "team": "UP", "side": "yes", "price": 0.60,
+                            "contracts": 10, "stake": 6, "fee": 0.17, "model_prob": .6,
+                            "edge": .1, "confidence": .8, "signals": {}})
+        # Bid is exactly 80% of original entry. Hard stop must override holding logic.
+        self.r.books[t].yes = {0.48: 50}
+        self.r.books[t].no = {0.50: 50}
+        with mock.patch.object(self.r, "readings_for", side_effect=AssertionError("stop must not need model readings")):
+            self.r.check_exits(time.time())
+        row = self.store.q("SELECT * FROM bets")[0]
+        self.assertEqual(row["result"], "sold")
+        self.assertAlmostEqual(row["price"], 0.48, places=2)
+        self.assertAlmostEqual(row["pnl"], 10 * (0.48 - 0.60) - 0.17 - 0.07, places=2)
+        self.assertTrue(any("SOLD" in message for message in self.r.summary["alerts"]))
+
     def test_early_exit_when_bid_beats_holding(self):
         t = next(iter(self.r.markets))
         self.store.add_bet({"ts": 1, "mode": "paper", "ticker": t, "event_ticker": "KXBTC15M-E",
