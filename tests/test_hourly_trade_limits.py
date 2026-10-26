@@ -29,7 +29,7 @@ class TestHourlyCryptoTradeCap(unittest.TestCase):
                 "series": "KXBTC15M", "team": "UP", "side": "yes",
                 "price": 0.50, "contracts": 30, "stake": 15.0, "fee": 0.50,
                 "model_prob": 0.65, "edge": 0.10, "confidence": 0.9,
-                "signals_json": "[]", "status": "graded",
+                "signals": [], "status": "graded",
             })
         plan, reason = risk.decide(
             self.settings, self.store,
