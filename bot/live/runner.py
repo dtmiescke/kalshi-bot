@@ -510,7 +510,16 @@ class LiveRunner:
             bid = levels[0][0] if levels else None
             if bid is None:
                 continue
-            # A 20% hard stop takes priority over the model-based early exit.\n            # Compare against the original entry price; never move the threshold.\n            stop_triggered = bid <= float(b["price"]) * 0.80\n            if not stop_triggered:\n                readings, _ = self.readings_for(t, now)\n                if not readings:\n                    continue\n                prob, _ = brain.blend(readings, weights)\n                p_side = prob if b["side"] == "yes" else 1 - prob\n            # only sell what the best bid can actually absorb
+            # A 20% hard stop takes priority over the model-based early exit.
+            # Compare against the original entry price; never move the threshold.
+            stop_triggered = bid <= float(b["price"]) * 0.80
+            if not stop_triggered:
+                readings, _ = self.readings_for(t, now)
+                if not readings:
+                    continue
+                prob, _ = brain.blend(readings, weights)
+                p_side = prob if b["side"] == "yes" else 1 - prob
+            # only sell what the best bid can actually absorb
             n = int(min(b["contracts"], levels[0][1]))
             if n < 1:
                 continue
