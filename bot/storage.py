@@ -322,6 +322,28 @@ class Store:
     def set_kv(self, k, v):
         self.x("INSERT OR REPLACE INTO kv(k, v) VALUES(?, ?)", (k, json.dumps(v)))
 
+    def reserve_kv(self, k, v):
+        """Atomically reserve a KV key across threads and processes.
+
+        Existing JSON null means released; any other value means another worker
+        owns the reservation. BEGIN IMMEDIATE serializes competing SQLite writers.
+        """
+        encoded = json.dumps(v)
+        with self.lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                cur = self.db.execute(
+                    "UPDATE kv SET v=? WHERE k=? AND v='null'", (encoded, k))
+                if cur.rowcount == 0:
+                    cur = self.db.execute(
+                        "INSERT OR IGNORE INTO kv(k, v) VALUES(?, ?)", (k, encoded))
+                won = cur.rowcount == 1
+                self.db.commit()
+                return won
+            except Exception:
+                self.db.rollback()
+                raise
+
     def compact(self, keep_days=None):
         """Trim RAW data so the memory file stays small enough to save to GitHub.
         Learned things (weights, grades, bets, lessons, model runs) are never
