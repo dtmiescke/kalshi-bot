@@ -221,7 +221,7 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
         return None, "risk caps reached"
     min_total_cost = crypto_min_bet + taker_fee(max(1, int(crypto_min_bet / max(price, 0.01))), price, rate)
     if crypto_domain and budget + 1e-9 < min_total_cost:
-        return None, f"crypto minimum $\{crypto_min_bet:.2f} unavailable under risk/account caps"
+        return None, f"crypto minimum ${crypto_min_bet:.2f} unavailable under risk/account caps"
 
     if style == "maker":
         contracts, avg = int(budget // price), price
@@ -251,7 +251,7 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
         return None, "fees exceed available budget"
     fee = taker_fee(contracts, avg, rate)
     if crypto_domain and contracts * avg + 1e-9 < crypto_min_bet:
-        return None, f"crypto minimum $\{crypto_min_bet:.2f} cannot be filled at an eligible price"
+        return None, f"crypto minimum ${crypto_min_bet:.2f} cannot be filled at an eligible price"
     # Final check on the REAL order: fees round up per order, so small orders
     # and deeper fills can turn a "5% edge" into 3%. Re-test after actual costs.
     real_edge = p_win - avg - fee / contracts
