@@ -19,6 +19,16 @@ class TestTrainingSafety(unittest.TestCase):
         self.assertTrue(main.training_due(store, 10_000.0 + 6 * 3600,
                                           every_hours=24, retry_hours=6))
 
+    def test_unpromoted_candidate_retries_after_short_backoff(self):
+        state = {"last_train": 9_900.0, "last_train_attempt": 10_000.0,
+                 "last_train_status": "not promoted"}
+        store = mock.Mock()
+        store.get_kv.side_effect = lambda key, default=0: state.get(key, default)
+        self.assertFalse(main.training_due(store, 10_000.0 + 5 * 3600,
+                                           every_hours=24, retry_hours=6))
+        self.assertTrue(main.training_due(store, 10_000.0 + 6 * 3600,
+                                          every_hours=24, retry_hours=6))
+
     def test_successful_training_keeps_daily_cadence(self):
         state = {"last_train": 10_000.0, "last_train_attempt": 10_000.0,
                  "last_train_status": "trained"}
