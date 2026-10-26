@@ -40,17 +40,17 @@ jobs:
         run: bash .github/load.sh
       - name: Download history + train
         id: train-cycle
-        timeout-minutes: 55
+        timeout-minutes: 45
         env:
           # Bound the amount of history per series so slow historical endpoints
           # cannot consume the whole runner allocation. Override in repo vars.
           DAYS: ${{ github.event.inputs.days || '3' }}
-          HISTORY_MAX_MARKETS: ${{ vars.HISTORY_MAX_MARKETS || '60' }}
+          HISTORY_MAX_MARKETS: ${{ vars.HISTORY_MAX_MARKETS || '20' }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           ML_MIN_WINDOWS: ${{ vars.ML_MIN_WINDOWS || '300' }}
           ML_MIN_TEST_WINDOWS: ${{ vars.ML_MIN_TEST_WINDOWS || '100' }}
           # stop training cleanly well inside the 90-minute job timeout
-          TRAIN_TIME_LIMIT_MINUTES: ${{ vars.TRAIN_TIME_LIMIT_MINUTES || '45' }}
+          TRAIN_TIME_LIMIT_MINUTES: ${{ vars.TRAIN_TIME_LIMIT_MINUTES || '30' }}
           # signed reads get better rate limits than anonymous GitHub servers
           KALSHI_DATA_URL: ${{ vars.KALSHI_DATA_URL }}
           KALSHI_DATA_KEY_ID: ${{ secrets.KALSHI_DATA_KEY_ID }}
