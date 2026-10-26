@@ -35,10 +35,27 @@ jobs:
       - name: Load memory
         id: load-memory
         run: bash .github/load.sh
+      # Temporary request: for Oct 26, 2026 in the bot's configured Central timezone,
+      # run paper-only and permit up to 25 crypto entries per rolling hour. This is a
+      # ceiling, not a quota; existing edge, council, and risk gates still decide.
+      # On other dates, preserve the repository's normal mode and hourly cap.
+      - name: Set temporary crypto research limits
+        id: daily-limits
+        shell: bash
+        run: |
+          if [ "$(TZ=America/Chicago date +%F)" = "2026-10-26" ]; then
+            echo "bot_mode=paper" >> "$GITHUB_OUTPUT"
+            echo "crypto_cap=25" >> "$GITHUB_OUTPUT"
+            echo "Temporary Oct 26 settings: paper mode, crypto cap 25/hour."
+          else
+            echo "bot_mode=${{ vars.BOT_MODE == 'live' && vars.LIVE_TRADING_OPERATIONAL_APPROVED != 'yes' && 'paper' || vars.BOT_MODE || 'paper' }}" >> "$GITHUB_OUTPUT"
+            echo "crypto_cap=${{ vars.CRYPTO_MAX_TRADES_PER_HOUR || '10' }}" >> "$GITHUB_OUTPUT"
+            echo "Using normal repository settings."
+          fi
       - name: Run
         id: run
         env:
-          BOT_MODE: ${{ vars.BOT_MODE == 'live' && vars.LIVE_TRADING_OPERATIONAL_APPROVED != 'yes' && 'paper' || vars.BOT_MODE || 'paper' }}
+          BOT_MODE: ${{ steps.daily-limits.outputs.bot_mode == 'paper' && 'paper' || vars.BOT_MODE == 'live' && vars.LIVE_TRADING_OPERATIONAL_APPROVED != 'yes' && 'paper' || vars.BOT_MODE || 'paper' }}
           LIVE_TRADING_CONFIRMED: ${{ vars.LIVE_TRADING_OPERATIONAL_APPROVED == 'yes' && vars.LIVE_TRADING_CONFIRMED == 'yes' && 'yes' || 'no' }}
           KALSHI_API_KEY_ID: ${{ secrets.KALSHI_API_KEY_ID }}
           KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
@@ -102,7 +119,7 @@ jobs:
           AGGRESSION_LEVEL: ${{ vars.AGGRESSION_LEVEL || 'aggressive' }}
           MIN_EDGE: ${{ vars.MIN_EDGE || '3' }}
           CRYPTO_MIN_EDGE: ${{ vars.CRYPTO_MIN_EDGE || '5' }}
-          CRYPTO_MAX_TRADES_PER_HOUR: ${{ vars.CRYPTO_MAX_TRADES_PER_HOUR || '10' }}
+          CRYPTO_MAX_TRADES_PER_HOUR: ${{ steps.daily-limits.outputs.crypto_cap }}
           LADDERS_ENABLED: ${{ vars.LADDERS_ENABLED || 'yes' }}
           COUNCIL_MODE: ${{ vars.COUNCIL_MODE || 'advisory' }}
         run: python -m bot.main scheduled
@@ -120,7 +137,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           # The save step rebuilds the dashboard + bets.csv, so it needs the same
           # mode/bankroll/timezone as the run. Without these it always showed PAPER.
-          BOT_MODE: ${{ vars.BOT_MODE == 'live' && vars.LIVE_TRADING_OPERATIONAL_APPROVED != 'yes' && 'paper' || vars.BOT_MODE || 'paper' }}
+          BOT_MODE: ${{ steps.daily-limits.outputs.bot_mode }}
           LIVE_TRADING_CONFIRMED: ${{ vars.LIVE_TRADING_OPERATIONAL_APPROVED == 'yes' && vars.LIVE_TRADING_CONFIRMED == 'yes' && 'yes' || 'no' }}
           BANKROLL: ${{ vars.BANKROLL || '1000' }}
           DAILY_LOSS_LIMIT: ${{ vars.DAILY_LOSS_LIMIT || '30' }}
