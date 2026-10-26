@@ -206,6 +206,7 @@ class TestExecution(unittest.TestCase):
         obj.s = Settings()
         obj.s.mode = "paper"
         obj.s.max_per_bet = 10.0
+        obj.s.min_per_bet = 1.0
         obj.s.bankroll = 1000.0
         obj.store = type("StoreStub", (), {"add_bet": lambda self, row: saved.append(row)})()
         obj.data = type("DataStub", (), {"orderbook": lambda self, ticker: {}})()
@@ -229,6 +230,71 @@ class TestExecution(unittest.TestCase):
         self.assertEqual(len(saved), 2)
         for row in saved:
             self.assertAlmostEqual(row["signals"]["arbitrage"]["locked"], 1.96)
+
+    def test_ladder_execution_caps_each_leg_including_fees(self):
+        from bot.engine import Engine
+        from unittest.mock import patch
+
+        obj = Engine.__new__(Engine)
+        obj.s = Settings()
+        obj.s.mode = "paper"
+        obj.s.max_per_bet = 4.01
+        obj.s.min_per_bet = 1.0
+        obj.s.bankroll = 1000.0
+        saved = []
+        obj.store = type("StoreStub", (), {"add_bet": lambda self, row: saved.append(row)})()
+        obj.data = type("DataStub", (), {"orderbook": lambda self, ticker: {}})()
+        obj._arbitrage_budget = lambda event: 10.0
+        summary = {"bets": 0}
+        books = iter((
+            {"yes": [(0.40, 10)], "no": []},
+            {"yes": [], "no": [(0.40, 10)]},
+        ))
+        with (
+            patch("bot.engine.risk.asks_from_book", side_effect=lambda book: next(books)),
+            patch("bot.engine.fees.rate", return_value=0.07),
+            patch("bot.engine.risk.taker_fee", return_value=0.02),
+            patch("bot.engine.guard.status", return_value=(True, "ok")),
+        ):
+            obj.execute_ladder({"low": "LOW", "high": "HIGH", "series": "KXBTCD",
+                                "event_ticker": "EV"}, 123, summary)
+
+        self.assertEqual(summary["bets"], 2)
+        self.assertEqual(len(saved), 2)
+        self.assertEqual([row["contracts"] for row in saved], [9, 9])
+        for row in saved:
+            self.assertLessEqual(row["stake"] + row["fee"], 4.01)
+
+    def test_ladder_execution_skips_below_minimum_on_either_leg(self):
+        from bot.engine import Engine
+        from unittest.mock import patch
+
+        obj = Engine.__new__(Engine)
+        obj.s = Settings()
+        obj.s.mode = "paper"
+        obj.s.max_per_bet = 10.0
+        obj.s.min_per_bet = 5.0
+        obj.s.bankroll = 1000.0
+        saved = []
+        obj.store = type("StoreStub", (), {"add_bet": lambda self, row: saved.append(row)})()
+        obj.data = type("DataStub", (), {"orderbook": lambda self, ticker: {}})()
+        obj._arbitrage_budget = lambda event: 10.0
+        summary = {"bets": 0}
+        books = iter((
+            {"yes": [(0.40, 10)], "no": []},
+            {"yes": [], "no": [(0.40, 10)]},
+        ))
+        with (
+            patch("bot.engine.risk.asks_from_book", side_effect=lambda book: next(books)),
+            patch("bot.engine.fees.rate", return_value=0.07),
+            patch("bot.engine.risk.taker_fee", return_value=0.02),
+            patch("bot.engine.guard.status", return_value=(True, "ok")),
+        ):
+            obj.execute_ladder({"low": "LOW", "high": "HIGH", "series": "KXBTCD",
+                                "event_ticker": "EV"}, 123, summary)
+
+        self.assertEqual(summary["bets"], 0)
+        self.assertEqual(saved, [])
 
 
 class TestMarketData(unittest.TestCase):
