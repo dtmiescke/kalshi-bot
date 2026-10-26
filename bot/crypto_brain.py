@@ -216,7 +216,7 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
             row.update({"live_z": info["live_z"], "tail_shrink_used": shrink})
             ml.add_row(store, ticker, int(now) - int(now) % 60, coin, row, None, "live")
     info["features"] = feats
-    chart_indicators = features.timeframe_indicator_snapshot(candles)
+    chart_indicators = features.timeframe_indicator_snapshot(candles, now_ts=now)
     info["chart_indicators"] = chart_indicators
     # These strategy views are available to the same ensemble/settlement learner
     # as existing signals. Low initial weights prevent unvalidated heuristics from
