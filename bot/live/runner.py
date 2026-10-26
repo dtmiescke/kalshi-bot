@@ -224,6 +224,10 @@ class LiveRunner:
         trades = self.store.flow(ticker, int(now - 300))
         return flow_sig.trade_flow(trades, kalshi_mid)
 
+    def _window_lock_key(self, series, close_ts):
+        """One persistent entry reservation per coin and 15-minute expiry window."""
+        return f"crypto_entry_window:{series}:{int(close_ts)}"
+
     def tick(self, now=None):
         now = now or time.time()
         for a in self.coins.values():
@@ -233,6 +237,7 @@ class LiveRunner:
             self.check_exits(now)
         self.learn_vol(now)
         weights = brain.get_weights(self.store, "crypto")
+        candidates = {}
         for ticker, info in list(self.markets.items()):
             if ticker in self.pending or ticker in self.makers or ticker not in self.books:
                 continue
@@ -240,23 +245,53 @@ class LiveRunner:
             if not readings:
                 continue
             terms = info["terms"]
-            self.store.set_kv(f"start_{ticker}", int(terms["close_ts"]))
-            self.store.set_kv(f"settle_after_{ticker}", int(terms["close_ts"]) + 300)
-            if now - self.last_saved.get(ticker, 0) >= 30:   # learning data, not every tick
+            close_ts = int(terms["close_ts"] or 0)
+            if close_ts <= 0:
+                continue
+            self.store.set_kv(f"start_{ticker}", close_ts)
+            self.store.set_kv(f"settle_after_{ticker}", close_ts + 300)
+            if now - self.last_saved.get(ticker, 0) >= 30:
                 for r in readings:
                     self.store.add_signal(int(now), ticker, r.name, r.prob, r.confidence, r.detail)
                 self.last_saved[ticker] = now
-            mins_left = (terms["close_ts"] - now) / 60
+            mins_left = (close_ts - now) / 60
             if not (self.s.crypto_min_minutes <= mins_left <= self.s.crypto_max_minutes):
                 continue
             if not self.betting_ok or guard.league_benched(self.store, info["series"], mode=self.s.mode):
                 continue
+            lock_key = self._window_lock_key(info["series"], close_ts)
+            if self.store.get_kv(lock_key):
+                # A trade or in-flight attempt already owns this coin/window.
+                continue
             plan = self.plan_for(ticker, readings, weights)
-            if plan:
+            if not plan:
+                continue
+            snap, p, prob, conf = plan
+            group_key = (info["series"], close_ts)
+            candidate = (float(p.get("edge", 0.0)), float(conf or 0.0),
+                         ticker, readings, ctx, plan, lock_key, close_ts)
+            if group_key not in candidates or candidate[:2] > candidates[group_key][:2]:
+                candidates[group_key] = candidate
+
+        # Markets can expose several strikes/contracts for the same coin/window.
+        # Rank them by the live chart/model edge and review only the strongest one.
+        for (series, close_ts), candidate in candidates.items():
+            edge, conf, ticker, readings, ctx, plan, lock_key, _ = candidate
+            reservation = {"state": "pending", "series": series, "close_ts": close_ts,
+                           "ticker": ticker, "created_ts": int(now), "mode": self.s.mode}
+            # Atomic in SQLite: two separate runner processes cannot both claim
+            # the same coin/window between a read and a later write.
+            if not self.store.reserve_kv(lock_key, reservation):
+                continue
+            self.pending.add(ticker)
+            try:
                 snap, p, prob, conf = plan
                 council.convene(self.store, self.s, snap, p, readings, prob, conf, now=now)
-                self.pending.add(ticker)
-                yield ticker, readings, ctx, plan
+            except Exception:
+                self.pending.discard(ticker)
+                self.store.set_kv(lock_key, None)
+                raise
+            yield ticker, readings, ctx, plan
 
     def plan_for(self, ticker, readings, weights, maker=None):
         if not any(r.name == "crypto_model" for r in readings):
@@ -325,6 +360,32 @@ class LiveRunner:
                                           f"edge {p['edge']:+.1%} ({verdict['by']})")
         finally:
             self.pending.discard(ticker)
+            info = getattr(self, "markets", {}).get(ticker, {})
+            terms = info.get("terms", {})
+            close_ts = int(terms.get("close_ts") or 0)
+            if info.get("series") and close_ts:
+                lock_key = self._window_lock_key(info["series"], close_ts)
+                reservation = self.store.get_kv(lock_key) or {}
+                created_ts = int(reservation.get("created_ts") or 0)
+                filled_rows = self.store.q(
+                    "SELECT id, order_id FROM bets WHERE ticker=? AND mode=? AND ts>=? LIMIT 1",
+                    (ticker, self.s.mode, created_ts),
+                )
+                if filled_rows:
+                    self.store.set_kv(lock_key, {
+                        **reservation, "state": "traded",
+                        "order_id": filled_rows[0].get("order_id"),
+                    })
+                elif ticker in self.makers:
+                    self.store.set_kv(lock_key, {**reservation, "state": "maker_pending"})
+                elif self.store.get_kv("execution_reconciliation_required"):
+                    # The exchange may have accepted an order despite a lost response.
+                    # Keep this coin/window blocked until reconciled.
+                    self.store.set_kv(lock_key, {**reservation, "state": "uncertain"})
+                else:
+                    # No order was recorded and submission was not ambiguous: permit
+                    # a later chart-qualified candidate in this same window.
+                    self.store.set_kv(lock_key, None)
 
     # --- maker orders: rest at a better price, cancel if not filled ---------------------
     def start_maker(self, ticker, snap, plan, readings, prob, conf):
@@ -471,6 +532,13 @@ class LiveRunner:
                 self.store.log_maker(ticker, 1, "filled", now - mk["placed"])
                 if real_order:
                     self.store.set_kv("maker_recovery", None)
+                info = getattr(self, "markets", {}).get(ticker, {})
+                close_ts = int((info.get("terms") or {}).get("close_ts") or 0)
+                if info.get("series") and close_ts:
+                    lock_key = self._window_lock_key(info["series"], close_ts)
+                    reservation = self.store.get_kv(lock_key) or {}
+                    self.store.set_kv(lock_key, {**reservation, "state": "traded",
+                                                  "order_id": mk.get("order_id")})
                 del self.makers[ticker]
             elif terminal or edge_gone or expired or not self.betting_ok:
                 if not self.betting_ok:
@@ -485,6 +553,10 @@ class LiveRunner:
                 self.store.log_maker(ticker, 0, outcome, now - mk["placed"])
                 if real_order:
                     self.store.set_kv("maker_recovery", None)
+                info = getattr(self, "markets", {}).get(ticker, {})
+                close_ts = int((info.get("terms") or {}).get("close_ts") or 0)
+                if info.get("series") and close_ts:
+                    self.store.set_kv(self._window_lock_key(info["series"], close_ts), None)
                 del self.makers[ticker]
 
     def _side_edge(self, ticker, side, price, now):
@@ -506,22 +578,26 @@ class LiveRunner:
             t = b["ticker"]
             if t not in self.markets or t not in self.books or b["series"] == "ARB":
                 continue
-            readings, _ = self.readings_for(t, now)
-            if not readings:
-                continue
-            prob, _ = brain.blend(readings, weights)
-            p_side = prob if b["side"] == "yes" else 1 - prob
             levels = self.books[t].as_rest_book().get(b["side"], [])
             bid = levels[0][0] if levels else None
             if bid is None:
                 continue
+            # A 20% hard stop takes priority over the model-based early exit.
+            # Compare against the original entry price; never move the threshold.
+            stop_triggered = bid <= float(b["price"]) * 0.80
+            if not stop_triggered:
+                readings, _ = self.readings_for(t, now)
+                if not readings:
+                    continue
+                prob, _ = brain.blend(readings, weights)
+                p_side = prob if b["side"] == "yes" else 1 - prob
             # only sell what the best bid can actually absorb
             n = int(min(b["contracts"], levels[0][1]))
             if n < 1:
                 continue
             exit_fee = risk.taker_fee(n, bid, fees.rate(t, self.s))
             # holding is worth p_side per contract; selling is worth the bid minus fees
-            if bid - exit_fee / n <= p_side + self.s.exit_margin:
+            if not stop_triggered and bid - exit_fee / n <= p_side + self.s.exit_margin:
                 continue
             if self.s.mode in ("demo", "live"):
                 try:
@@ -572,7 +648,7 @@ class LiveRunner:
                 continue
             msg = f"SOLD {t} {b['side'].upper()} x{n} @ ${bid:.2f} (P&L ${pnl:+.2f})"
             self.summary["alerts"].append(msg)
-            alerts.send("Early exit", msg)
+            alerts.send("Crypto 20% stop-loss" if stop_triggered else "Early exit", msg)
             log.info(msg)
 
     # --- self-learning volatility --------------------------------------------------------

@@ -210,6 +210,9 @@ class TestRunner(unittest.TestCase):
             got = list(r.tick(now))
             self.assertEqual(len(got), 1)
             ticker, readings, ctx, plan = got[0]
+            # The same coin/window is reserved before council review; another
+            # contract at the same expiry cannot create a parallel entry.
+            self.assertEqual(list(r.tick(now)), [])
             names = {x.name for x in readings}
             self.assertTrue({"crypto_model", "crypto_model_iv"} <= names)
             verdict = council.review(None, store, ticker, ctx)
@@ -359,6 +362,23 @@ class TestRunnerExecution(unittest.TestCase):
         self.r.check_makers(time.time() + self.s.maker_wait_s + 1)
         self.assertNotIn(ticker, self.r.makers)
         self.assertEqual(self.store.open_bets(), [])
+
+    def test_crypto_hard_stop_triggers_at_20_percent_below_entry_without_model_readings(self):
+        t = next(iter(self.r.markets))
+        self.store.add_bet({"ts": 1, "mode": "paper", "ticker": t, "event_ticker": "KXBTC15M-E",
+                            "series": "KXBTC15M", "team": "UP", "side": "yes", "price": 0.60,
+                            "contracts": 10, "stake": 6, "fee": 0.17, "model_prob": .6,
+                            "edge": .1, "confidence": .8, "signals": {}})
+        # Bid is exactly 80% of original entry. Verify the stop is evaluated before model access.
+        self.r.books[t].yes = {0.48: 50}
+        self.r.books[t].no = {0.50: 50}
+        with mock.patch.object(self.r, "readings_for", side_effect=AssertionError("stop must not need model readings")):
+            self.r.check_exits(time.time())
+        row = self.store.q("SELECT * FROM bets")[0]
+        self.assertEqual(row["result"], "sold")
+        self.assertAlmostEqual(row["exit_price"], 0.48, places=2)
+        self.assertLess(row["pnl"], 10 * (0.48 - 0.60))  # entry and exit fees are included
+        self.assertTrue(any("SOLD" in message for message in self.r.summary["alerts"]))
 
     def test_early_exit_when_bid_beats_holding(self):
         t = next(iter(self.r.markets))
