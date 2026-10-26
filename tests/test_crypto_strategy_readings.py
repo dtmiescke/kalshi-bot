@@ -1,7 +1,8 @@
 """Supplemental crypto strategy signals are bounded and deterministic."""
 import unittest
 
-from bot.crypto_brain import strategy_readings\nfrom bot.features import timeframe_indicator_snapshot
+from bot.crypto_brain import strategy_readings
+from bot.features import timeframe_indicator_snapshot
 
 
 class TestCryptoStrategyReadings(unittest.TestCase):
