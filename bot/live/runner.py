@@ -277,11 +277,12 @@ class LiveRunner:
         # Rank them by the live chart/model edge and review only the strongest one.
         for (series, close_ts), candidate in candidates.items():
             edge, conf, ticker, readings, ctx, plan, lock_key, _ = candidate
-            if self.store.get_kv(lock_key):
-                continue
             reservation = {"state": "pending", "series": series, "close_ts": close_ts,
                            "ticker": ticker, "created_ts": int(now), "mode": self.s.mode}
-            self.store.set_kv(lock_key, reservation)
+            # Atomic in SQLite: two separate runner processes cannot both claim
+            # the same coin/window between a read and a later write.
+            if not self.store.reserve_kv(lock_key, reservation):
+                continue
             self.pending.add(ticker)
             try:
                 snap, p, prob, conf = plan
