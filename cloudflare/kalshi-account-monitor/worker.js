@@ -1,4 +1,4 @@
-const API_BASE = "https://external-api.kalshi.com/trade-api/v2";
+const API_BASE = "https://api.elections.kalshi.com/trade-api/v2";
 
 function corsHeaders(origin, env) {
   const allowed = (env.APP_ORIGIN || "").trim();
@@ -34,12 +34,14 @@ async function importSigningKey(pem) {
 
 async function kalshiGet(path, env, key) {
   const timestamp = String(Date.now());
-  const signedPath = path.split("?")[0]; // Kalshi signatures exclude query parameters.\n  const message = timestamp + "GET" + "/trade-api/v2" + signedPath;
+  const signedPath = path.split("?")[0]; // Sign the path without query parameters.
+  const message = timestamp + "GET" + "/trade-api/v2" + signedPath;
   const signature = await crypto.subtle.sign(
     { name: "RSA-PSS", saltLength: 32 }, key, new TextEncoder().encode(message)
   );
   const b64 = btoa(String.fromCharCode(...new Uint8Array(signature)));
-  const response = await fetch(API_BASE + path, {
+  const base = (env.KALSHI_API_BASE_URL || API_BASE).replace(/\/+$/, "");
+  const response = await fetch(base + path, {
     method: "GET",
     headers: {
       "KALSHI-ACCESS-KEY": env.KALSHI_API_KEY_ID,
