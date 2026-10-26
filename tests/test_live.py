@@ -210,6 +210,9 @@ class TestRunner(unittest.TestCase):
             got = list(r.tick(now))
             self.assertEqual(len(got), 1)
             ticker, readings, ctx, plan = got[0]
+            # The same coin/window is reserved before council review; another
+            # contract at the same expiry cannot create a parallel entry.
+            self.assertEqual(list(r.tick(now)), [])
             names = {x.name for x in readings}
             self.assertTrue({"crypto_model", "crypto_model_iv"} <= names)
             verdict = council.review(None, store, ticker, ctx)
