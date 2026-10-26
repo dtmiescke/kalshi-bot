@@ -26,7 +26,7 @@ class TestRequestedRiskSettings(unittest.TestCase):
             self.assertEqual(s.max_per_bet, 750.0)
             self.assertEqual(s.max_total_loss, 20000.0)
             self.assertEqual(s.max_per_game, 750.0)
-            self.assertEqual(s.max_per_day, 6000.0)
+            self.assertEqual(s.max_per_day, 20000.0)
             self.assertEqual(s.max_open_cost, 3750.0)
             self.assertEqual(s.daily_loss_limit, 2000.0)
             self.assertEqual(s.crypto_min_bet, 500.0)
