@@ -310,9 +310,12 @@ class TestEndToEnd(unittest.TestCase):
             start = datetime.now(timezone.utc) + timedelta(hours=5)
             kalshi, odds = FakeKalshi(start), FakeOdds(start)
 
-            # Keep the offline fixture independent of repository-level odds quota
-            # overrides; this fake provider has no real API-credit cost.
-            with patch.dict(os.environ, {"ODDS_MONTHLY_CREDITS": "500"}):
+            # This is an end-to-end fixture for matching, decisions, fills, and
+            # grading—not a test of the production monthly-quota scheduler. Force
+            # the fake, zero-cost provider refresh so the test stays deterministic
+            # when quota defaults or the current calendar month change.
+            with patch.dict(os.environ, {"ODDS_MONTHLY_CREDITS": "500"}), \
+                    patch("bot.engine.refresh_plan", return_value=(True, "offline test fixture")):
                 summary = Engine(s, store, data_client=kalshi, odds_client=odds, schedule_fetch=lambda sp: []).run()
             self.assertEqual(summary["matched"], 1)
             bets = store.open_bets()
