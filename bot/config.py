@@ -152,12 +152,12 @@ class Settings:
     bankroll: float = field(default_factory=lambda: _env_float("BANKROLL", 1000.0))
     max_per_bet: float = field(default_factory=lambda: _env_float("MAX_PER_BET", 25.0))
     max_per_game: float = field(default_factory=lambda: _env_float("MAX_PER_GAME", 50.0))
-    max_per_day: float = field(default_factory=lambda: _env_float("MAX_PER_DAY", 150.0))
+    max_per_day: float = field(default_factory=lambda: _env_float("MAX_PER_DAY", 20000.0))
 
     # --- account limits (from the Council Lab design) ----------------------------
     max_open_positions: int = field(default_factory=lambda: _env_int("MAX_OPEN_POSITIONS", 5))
     max_open_cost: float = field(default_factory=lambda: _env_float("MAX_OPEN_COST", 200.0))
-    daily_loss_limit: float = field(default_factory=lambda: _env_float("DAILY_LOSS_LIMIT", 30.0))
+    daily_loss_limit: float = field(default_factory=lambda: _env_float("DAILY_LOSS_LIMIT", 20000.0))
 
     # --- council (DON_THEO_SPEC): members start advisory and EARN power ---------
     # Veto: >= COUNCIL_VETO_MIN_VOTES graded votes with a Brier better than the
