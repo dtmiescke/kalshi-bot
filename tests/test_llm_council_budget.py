@@ -1,5 +1,6 @@
 import os
 import unittest
+import time
 from unittest.mock import patch
 
 from bot.llm import LLM
@@ -29,8 +30,9 @@ class TestCouncilBudgetReserve(unittest.TestCase):
                 max_per_run=6,
                 endpoints=[("omniroute", "https://omni.example/v1/chat/completions", "key")],
             )
-            self.assertEqual(llm.budget_left(), 4)
-            self.assertEqual(llm.budget_left(for_council=True), 6)
+            store.set_kv("llm_calls_" + time.strftime("%Y%m%d", time.gmtime()), 8)
+            self.assertEqual(llm.budget_left(), 0)
+            self.assertEqual(llm.budget_left(for_council=True), 2)
 
     def test_disabled_council_does_not_reserve_capacity(self):
         store = MemoryStore()
