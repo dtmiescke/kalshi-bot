@@ -117,7 +117,7 @@ class LLM:
             # the two council reviews needed for shortlisted crypto trades.
             council_enabled = os.environ.get("COUNCIL_MODE", "advisory").strip().lower() != "off"
             if council_enabled:
-                council_reserve = max(0, int(os.environ.get("LLM_COUNCIL_RESERVE", "8")))
+                council_reserve = max(0, int(os.environ.get("LLM_COUNCIL_RESERVE", "0")))
                 daily_left -= min(council_reserve, max(0, daily_left))
         if not for_web_search and not for_council:
             reserve = max(0, int(os.environ.get("LLM_WEB_SEARCH_RESERVE", "0")))
