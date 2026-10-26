@@ -9,6 +9,7 @@ strings (yes_bid_dollars). `price()` reads either, always returning dollars 0-1.
 """
 import base64
 import math
+import logging
 import re
 import threading
 import time
@@ -143,7 +144,7 @@ class KalshiClient:
                     return bridged
             except Exception as exc:
                 # Integration must not break the existing direct API path.
-                log.warning("Val Town bridge unavailable for %s: %s", path, type(exc).__name__)
+                logging.getLogger(__name__).warning("Val Town bridge unavailable for %s: %s", path, type(exc).__name__)
         last = None
         for attempt in range(retries):
             self._pace()
