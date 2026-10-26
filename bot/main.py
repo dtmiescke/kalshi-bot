@@ -177,7 +177,25 @@ def run_scheduled(s, store, data):
             }, default=str))
         except Exception as e:
             logging.warning("combo research scan failed: %s", e)
+    # Synthetic BTC/ETH/SOL parlay simulations are paper-only and use the
+    # existing crypto forecasts/market snapshots. They never submit exchange orders.
+    try:
+        from . import crypto_combo
+        crypto_combo_result = crypto_combo.scan(data, store, settings=s)
+        print("crypto combo paper:", json.dumps({
+            "ok": crypto_combo_result.get("ok"),
+            "created": crypto_combo_result.get("created", 0),
+            "skipped": crypto_combo_result.get("skipped"),
+            "execution": crypto_combo_result.get("execution", "none"),
+        }, default=str))
+    except Exception as e:
+        logging.warning("crypto combo paper scan failed: %s", e)
     grade(store, data)
+    try:
+        from . import crypto_combo
+        print("crypto combo grading:", json.dumps(crypto_combo.grade(store), default=str))
+    except Exception as e:
+        logging.warning("crypto combo grading failed: %s", e)
     # A failed-to-train attempt is not a successful training cycle. Record the
     # attempt and status separately so insufficient data is retried on a short
     # backoff instead of silently suppressing training for a full day.

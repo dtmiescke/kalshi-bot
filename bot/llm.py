@@ -100,7 +100,7 @@ class LLM:
     def _day_key(self):
         return "llm_calls_" + time.strftime("%Y%m%d", time.gmtime())
 
-    def budget_left(self, for_web_search=False):
+    def budget_left(self, for_web_search=False, for_council=False):
         """Return usable calls while optionally protecting the sports web-research budget.
 
         Ordinary council/analysis calls reserve a small number of calls for current
@@ -111,7 +111,15 @@ class LLM:
         used = int(self.store.get_kv(self._day_key(), 0) or 0)
         daily_left = self.daily_limit - used
         run_left = self.max_per_run - self.calls_this_run
-        if not for_web_search:
+        if not for_council:
+            # Keep a small slice of the shared daily budget for the AI council.
+            # Briefings/scouts may use the same provider, but should not starve
+            # the two council reviews needed for shortlisted crypto trades.
+            council_enabled = os.environ.get("COUNCIL_MODE", "advisory").strip().lower() != "off"
+            if council_enabled:
+                council_reserve = max(0, int(os.environ.get("LLM_COUNCIL_RESERVE", "0")))
+                daily_left -= min(council_reserve, max(0, daily_left))
+        if not for_web_search and not for_council:
             reserve = max(0, int(os.environ.get("LLM_WEB_SEARCH_RESERVE", "0")))
             web_enabled = os.environ.get("SPORTS_AI_WEB_SEARCH", "yes").strip().lower() not in ("0", "no", "false", "off")
             web_limit = max(0, int(os.environ.get("OPENROUTER_WEB_SEARCH_MAX_PER_RUN", "2")))
@@ -124,9 +132,14 @@ class LLM:
                 run_left -= reserve
         return min(daily_left, run_left)
 
-    def ask(self, prompt, model=None, temperature=0.1, max_tokens=400, minimalism=True):
-        """Return (text, model_used) or (None, None). Falls back across models."""
-        if not self.endpoints or self.budget_left() <= 0:
+    def ask(self, prompt, model=None, temperature=0.1, max_tokens=400, minimalism=True,
+            council=False):
+        """Return (text, model_used) or (None, None). Falls back across models.
+
+        Council calls may consume the explicitly reserved budget; ordinary calls
+        cannot consume it while the council is enabled.
+        """
+        if not self.endpoints or self.budget_left(for_council=council) <= 0:
             return None, None
         order = ([model] if model else []) + [m for m in self.models if m != model]
         for m in order:
@@ -134,7 +147,7 @@ class LLM:
             if ep not in self.endpoints or ep in self.dead:
                 continue
             with self._lock:   # council calls run in parallel threads
-                if m in self.dead or self.budget_left() <= 0:
+                if m in self.dead or self.budget_left(for_council=council) <= 0:
                     continue
                 self.calls_this_run += 1
                 self.store.set_kv(self._day_key(), self.store.get_kv(self._day_key(), 0) + 1)
@@ -266,8 +279,8 @@ class LLM:
                 self.dead.add(candidate)
         return None, None, []
 
-    def ask_json(self, prompt, model=None):
-        text, m = self.ask(prompt, model=model, minimalism=False)
+    def ask_json(self, prompt, model=None, council=False):
+        text, m = self.ask(prompt, model=model, minimalism=False, council=council)
         if not text:
             return None, None
         hit = re.search(r"\{.*\}", text, re.S)
