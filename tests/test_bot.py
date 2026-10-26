@@ -310,7 +310,10 @@ class TestEndToEnd(unittest.TestCase):
             start = datetime.now(timezone.utc) + timedelta(hours=5)
             kalshi, odds = FakeKalshi(start), FakeOdds(start)
 
-            summary = Engine(s, store, data_client=kalshi, odds_client=odds, schedule_fetch=lambda sp: []).run()
+            # Keep the offline fixture independent of repository-level odds quota
+            # overrides; this fake provider has no real API-credit cost.
+            with patch.dict(os.environ, {"ODDS_MONTHLY_CREDITS": "500"}):
+                summary = Engine(s, store, data_client=kalshi, odds_client=odds, schedule_fetch=lambda sp: []).run()
             self.assertEqual(summary["matched"], 1)
             bets = store.open_bets()
             self.assertEqual(len(bets), 1, summary)
@@ -319,7 +322,8 @@ class TestEndToEnd(unittest.TestCase):
             self.assertLessEqual(bets[0]["stake"], s.max_per_bet)
 
             # second cycle must not double up on the same market
-            Engine(s, store, data_client=kalshi, odds_client=odds, schedule_fetch=lambda sp: []).run()
+            with patch.dict(os.environ, {"ODDS_MONTHLY_CREDITS": "500"}):
+                Engine(s, store, data_client=kalshi, odds_client=odds, schedule_fetch=lambda sp: []).run()
             self.assertEqual(len(store.open_bets()), 1)
 
             # game ends, Boston wins
