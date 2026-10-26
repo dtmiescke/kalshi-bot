@@ -74,10 +74,24 @@ def handle_coinbase(msg, analytics_by_product):
         a.add_cb_trade(_ts(msg.get("time")), msg["price"], msg.get("size", 0))
 
 
-def handle_kalshi(msg, books):
-    """books: {ticker: KalshiBook}"""
+def handle_kalshi(msg, books, ticker_updates=None):
+    """Update order books and the latest ticker snapshot from Kalshi messages."""
     typ, body = msg.get("type"), msg.get("msg", {})
-    book = books.get(body.get("market_ticker"))
+    ticker = body.get("market_ticker")
+    if typ == "ticker":
+        if ticker_updates is not None and ticker:
+            # Keep a small, numeric/diagnostic-only record for the dashboard.
+            fields = ("price_dollars", "yes_bid_dollars", "yes_ask_dollars",
+                      "volume_fp", "open_interest_fp", "dollar_volume",
+                      "dollar_open_interest", "yes_bid_size_fp", "yes_ask_size_fp",
+                      "last_trade_size_fp", "ts", "ts_ms", "time")
+            ticker_updates[ticker] = {
+                "market_ticker": ticker,
+                **{key: body[key] for key in fields if key in body},
+                "received_ts": time.time(),
+            }
+        return
+    book = books.get(ticker)
     if not book:
         return
     if typ == "orderbook_snapshot":
@@ -134,4 +148,5 @@ def kalshi_subs(tickers):
     if not tickers:
         return []
     return [{"id": 1, "cmd": "subscribe",
-             "params": {"channels": ["orderbook_delta"], "market_tickers": tickers}}]
+             "params": {"channels": ["orderbook_delta", "ticker"],
+                        "market_tickers": tickers}}]
