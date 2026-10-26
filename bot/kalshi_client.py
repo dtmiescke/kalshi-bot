@@ -8,6 +8,8 @@ Kalshi has been moving price fields from integer cents (yes_bid) to dollar
 strings (yes_bid_dollars). `price()` reads either, always returning dollars 0-1.
 """
 import base64
+import math
+import re
 import threading
 import time
 import uuid
@@ -93,6 +95,10 @@ class KalshiClient:
         }
 
     def _req(self, method, path, params=None, body=None, retries=3):
+        # POST/DELETE writes may succeed even if the response is lost. Never
+        # blindly retry a non-idempotent request after an ambiguous failure.
+        if method.upper() != "GET":
+            retries = 1
         url = self.base_url + path
         ttl = _cache_ttl(path) if method == "GET" else 0
         ck = (path, tuple(sorted((params or {}).items())))
@@ -259,10 +265,30 @@ class KalshiClient:
     def positions(self):
         return self._req("GET", "/portfolio/positions")
 
+    @staticmethod
+    def _validated_order(ticker, side, contracts, limit_price):
+        """Reject malformed order inputs before sending an authenticated request."""
+        if not isinstance(ticker, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,199}", ticker):
+            raise ValueError("invalid market ticker")
+        if side not in ("yes", "no"):
+            raise ValueError("side must be yes or no")
+        if isinstance(contracts, bool) or not isinstance(contracts, int) or contracts <= 0:
+            raise ValueError("contracts must be a positive integer")
+        if isinstance(limit_price, bool) or not isinstance(limit_price, (int, float)):
+            raise ValueError("limit_price must be numeric")
+        if not math.isfinite(limit_price) or not 0.01 <= limit_price <= 0.99:
+            raise ValueError("limit_price must be finite and between $0.01 and $0.99")
+        cents = round(limit_price * 100)
+        if abs(limit_price * 100 - cents) > 1e-6:
+            raise ValueError("limit_price must be on a one-cent tick")
+        return int(cents)
+
     def place_resting_buy(self, ticker, side, contracts, limit_price, expires_s=60):
         """Maker order: rests on the book at limit_price until filled, cancelled
         or expired (so a forgotten order can never linger)."""
-        cents = int(round(limit_price * 100))
+        cents = self._validated_order(ticker, side, contracts, limit_price)
+        if isinstance(expires_s, bool) or not isinstance(expires_s, int) or not 1 <= expires_s <= 3600:
+            raise ValueError("expires_s must be an integer between 1 and 3600")
         body = {"ticker": ticker, "action": "buy", "side": side, "count": int(contracts),
                 "type": "limit", "client_order_id": str(uuid.uuid4()),
                 "expiration_ts": int(time.time()) + int(expires_s),
@@ -277,7 +303,7 @@ class KalshiClient:
 
     def place_limit_sell(self, ticker, side, contracts, limit_price):
         """Sell contracts we hold, immediate-or-cancel at limit_price or better."""
-        cents = int(round(limit_price * 100))
+        cents = self._validated_order(ticker, side, contracts, limit_price)
         body = {"ticker": ticker, "action": "sell", "side": side, "count": int(contracts),
                 "type": "limit", "client_order_id": str(uuid.uuid4()),
                 "time_in_force": "immediate_or_cancel",
@@ -287,7 +313,7 @@ class KalshiClient:
     def place_limit_buy(self, ticker, side, contracts, limit_price):
         """Limit buy at `limit_price` dollars. Immediate-or-cancel so the bot never
         leaves stale resting orders when it isn't watching."""
-        cents = int(round(limit_price * 100))
+        cents = self._validated_order(ticker, side, contracts, limit_price)
         body = {
             "ticker": ticker, "action": "buy", "side": side, "count": int(contracts),
             "type": "limit", "client_order_id": str(uuid.uuid4()),
