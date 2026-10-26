@@ -134,26 +134,12 @@ def total_loss_tripped(store, limit=None, mode=None):
 
 def status(store, bankroll, daily_loss_limit=None, mode=None):
     """(betting_allowed, reason)."""
-    from .risk import day_start_ts
-    try:
-        limit = (float(daily_loss_limit) if daily_loss_limit is not None
-                 else float(os.environ.get("DAILY_LOSS_LIMIT", 30)))
-    except (TypeError, ValueError):
-        return False, "invalid daily loss limit configuration; betting paused"
-    if not math.isfinite(limit) or limit < 0:
-        return False, "invalid daily loss limit configuration; betting paused"
+    # One cumulative realized-net-loss stop only; no separate daily loss stop.
+    # Operational reconciliation, lifetime loss, drawdown, and CLV guards remain.
     mode = mode or os.environ.get("BOT_MODE", "paper")
-    # Durable circuit breaker: an interrupted order submission or maker
-    # reconciliation survives process restarts. Clear only after manually
-    # reconciling the exchange's orders and positions against the local ledger.
     incident = store.get_kv("execution_reconciliation_required")
     if incident:
         return False, str(incident)
-    lost = store.realized_today(day_start_ts(), mode=mode)
-    # DAILY_LOSS_LIMIT=0 disables the separate daily stop. The independent
-    # cumulative realized net-loss circuit breaker below remains authoritative.
-    if limit > 0 and lost <= -limit:
-        return False, f"daily loss limit hit (${-lost:.2f} lost today; resets at midnight in {os.environ.get('BOT_TIMEZONE', 'America/Chicago')})"
     if total_loss_tripped(store, mode=mode):
         return False, "lifetime net-loss limit reached; betting paused"
     if drawdown_tripped(store, bankroll, mode=mode):
