@@ -382,6 +382,11 @@ def main(argv=None):
             alerts.send("New model promoted", ml.text(m)[:1500], tags=["brain"])
         store.set_kv("last_train", time.time())
         return
+    if cmd == "learning-impact":
+        # Read-only replay: compare saved crypto snapshots with pre/post learned weights.
+        from .learning_impact import report as learning_impact_report
+        print(json.dumps(learning_impact_report(store, limit=int(argv[1]) if len(argv) > 1 else 100), indent=2))
+        return
     if cmd == "price-gap":
         # read-only: our spot vs Kalshi's CF Benchmarks settlement value
         #   price-gap            the bot's own final-minute readings
