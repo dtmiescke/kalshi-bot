@@ -23,10 +23,10 @@ function equalSecret(a: string, b: string): boolean {
 export default async function handler(req: Request): Promise<Response> {
   if (req.method !== "GET") return reply({ error: "method_not_allowed" }, 405);
   const expected = (Deno.env.get("ATI_INGEST_SHARED_TOKEN") ?? "").trim();
-  const supplied = (req.headers.get("authorization") ?? "").match(/^Bearer\\s+(.+)$/i)?.[1]?.trim() ?? "";
+  const supplied = (req.headers.get("authorization") ?? "").match(/^Bearer\s+(.+)$/i)?.[1]?.trim() ?? "";
   if (!equalSecret(expected, supplied)) return reply({ error: "unauthorized" }, 401);
   const incoming = new URL(req.url);
-  const path = incoming.pathname.replace(/\\/+$/, "") || "/";
+  const path = incoming.pathname.replace(/\/+$/, "") || "/";
   if (!allowed(path)) return reply({ error: "route_not_allowlisted" }, 404);
   if (incoming.search.length > 2048) return reply({ error: "query_too_large" }, 400);
   const params = new URLSearchParams();
