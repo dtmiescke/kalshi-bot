@@ -81,6 +81,16 @@ class TestSettlement(unittest.TestCase):
 
 
 class TestKalshiBook(unittest.TestCase):
+    def test_ticker_updates_are_kept_separately_from_orderbook(self):
+        updates = {}
+        feeds.handle_kalshi({"type": "ticker", "msg": {
+            "market_ticker": "T", "price_dollars": "0.4800",
+            "yes_bid_dollars": "0.4500", "yes_ask_dollars": "0.5300",
+            "volume_fp": "33896.00", "ts_ms": 1669149841000}}, {}, updates)
+        self.assertEqual(updates["T"]["price_dollars"], "0.4800")
+        self.assertEqual(updates["T"]["yes_bid_dollars"], "0.4500")
+        self.assertGreater(updates["T"]["received_ts"], 0)
+
     def test_snapshot_delta_and_gap(self):
         k = KalshiBook("T")
         feeds.handle_kalshi({"type": "orderbook_snapshot", "seq": 1, "msg": {
