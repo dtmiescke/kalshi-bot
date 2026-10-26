@@ -107,7 +107,7 @@ jobs:
           MAX_PER_BET: ${{ vars.MAX_PER_BET || '750' }}
           MAX_PER_GAME: ${{ vars.MAX_PER_GAME || '750' }}
           MAX_PER_DAY: ${{ vars.MAX_PER_DAY || '20000' }}
-          DAILY_LOSS_LIMIT: ${{ vars.DAILY_LOSS_LIMIT || '2000' }}
+          DAILY_LOSS_LIMIT: ${{ vars.DAILY_LOSS_LIMIT || '0' }}
           MAX_TOTAL_LOSS: ${{ vars.MAX_TOTAL_LOSS || '20000' }}
           MAX_OPEN_POSITIONS: ${{ vars.MAX_OPEN_POSITIONS || '5' }}
           MAX_OPEN_COST: ${{ vars.MAX_OPEN_COST || '3750' }}
@@ -138,7 +138,7 @@ jobs:
           BOT_MODE: ${{ steps.daily-limits.outputs.bot_mode }}
           LIVE_TRADING_CONFIRMED: ${{ vars.LIVE_TRADING_OPERATIONAL_APPROVED == 'yes' && vars.LIVE_TRADING_CONFIRMED == 'yes' && 'yes' || 'no' }}
           BANKROLL: ${{ vars.BANKROLL || '200000' }}
-          DAILY_LOSS_LIMIT: ${{ vars.DAILY_LOSS_LIMIT || '2000' }}
+          DAILY_LOSS_LIMIT: ${{ vars.DAILY_LOSS_LIMIT || '0' }}
           BOT_TIMEZONE: ${{ vars.BOT_TIMEZONE || 'America/Chicago' }}
         run: bash .github/save.sh
       - name: Queue the next run
