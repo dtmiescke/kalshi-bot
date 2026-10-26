@@ -1,6 +1,6 @@
 name: kalshi-bot
 
-# Every 12 minutes:
+# Every 15 minutes (scheduled fallback):
 #   crypto  - an 8-minute LIVE streaming burst (BURST_MINUTES) on the 15-minute markets
 #   sports  - full scan every 5.5 hours (SPORTS_EVERY_HOURS)
 #   always  - grading, learning, AI briefing, weekly model retraining
@@ -8,7 +8,7 @@ name: kalshi-bot
 
 on:
   schedule:
-    - cron: "*/12 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
 concurrency:
@@ -35,7 +35,7 @@ jobs:
       - name: Load memory
         id: load-memory
         run: bash .github/load.sh
-      # 12/hour is a rolling ceiling, never a quota. All existing price, edge,
+      # The hourly ceiling is a rolling limit, never a quota. All existing price, edge,
       # settlement, account, and risk checks remain active.
       - name: Set crypto hourly ceiling
         id: daily-limits
