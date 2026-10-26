@@ -30,7 +30,12 @@ DEFAULT_WEIGHTS = {
     "crypto_orderbook": 0.5,  # cross-venue L2; learned from settled outcomes
     "crypto_model_iv": 0.8,    # same model on option-implied (Deribit) volatility
     "spot_flow": 0.2,
-    "ml_model": 2.0,           # trained model; only exists after passing out-of-sample tests          # live executed flow + book imbalance on Kraken
+    "ml_model": 2.0,           # trained model; only exists after passing out-of-sample tests
+    # New strategy signals start small and must earn weight through settled outcomes.
+    "crypto_trend_strategy": 0.15,
+    "crypto_mean_reversion_strategy": 0.12,
+    "crypto_breakout_strategy": 0.10,
+    "crypto_multi_timeframe_chart": 0.15,
 }
 MIN_W, MAX_W = 0.05, 5.0
 ETA = 0.05            # learning rate: small = slow, steady learning

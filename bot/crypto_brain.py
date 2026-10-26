@@ -21,6 +21,94 @@ from .signals.crypto_microstructure import indicator_snapshot
 COIN_OF_SERIES = {"KXBTC15M": "BTC", "KXETH15M": "ETH", "KXSOL15M": "SOL"}
 
 
+def strategy_readings(feats, base_prob, chart_indicators=None):
+    """Independent, deliberately low-weight crypto strategy views.
+
+    These are candidate signals, not guarantees. Their weights are learned
+    against the Kalshi market baseline after settlement by the existing brain.
+    """
+    if not isinstance(feats, dict) or base_prob is None:
+        return []
+    out = []
+
+    def val(key, default=0.0):
+        try:
+            x = float(feats.get(key, default))
+            return x if math.isfinite(x) else default
+        except (TypeError, ValueError):
+            return default
+
+    # Trend continuation: momentum + EMA alignment, gated by trend strength.
+    trend_raw = (0.45 * max(-2.0, min(2.0, val("ret_5m"))) / 2
+                 + 0.35 * max(-2.0, min(2.0, val("ema_9_21"))) / 2
+                 + 0.20 * max(-2.0, min(2.0, val("ema_trend_5m"))) / 2)
+    trend_gate = max(0.25, min(1.0, val("adx_1m", 20.0) / 35.0))
+    out.append(Reading("crypto_trend_strategy",
+                       clamp(base_prob + 0.035 * trend_raw * trend_gate, 0.02, 0.98),
+                       0.20 + 0.10 * trend_gate,
+                       {"score": round(trend_raw, 4), "adx": round(val("adx_1m"), 2)}))
+
+    # Mean reversion: fade extreme RSI/Bollinger readings only when trend strength
+    # is low; the confidence is intentionally capped while this strategy gathers data.
+    rsi = val("rsi_1m", 50.0)
+    bb = val("bb_pctb", 0.5)
+    stretch = max(-1.0, min(1.0, (50.0 - rsi) / 35.0))
+    band = max(-1.0, min(1.0, 0.5 - bb))
+    reversion = 0.6 * stretch + 0.4 * band
+    range_gate = max(0.0, min(1.0, (28.0 - val("adx_1m", 20.0)) / 20.0))
+    out.append(Reading("crypto_mean_reversion_strategy",
+                       clamp(base_prob + 0.03 * reversion * range_gate, 0.02, 0.98),
+                       0.15 + 0.10 * range_gate,
+                       {"score": round(reversion, 4), "range_gate": round(range_gate, 4)}))
+
+    # Breakout continuation: only lean into direction when volume confirms proximity
+    # to the session high/low. This is a weak supplemental signal, not a trigger.
+    hi_dist, lo_dist = val("day_high_dist", 1.0), val("day_low_dist", 1.0)
+    near_high = max(0.0, min(1.0, 1.0 - hi_dist / 0.35))
+    near_low = max(0.0, min(1.0, 1.0 - lo_dist / 0.35))
+    vol_confirm = max(0.0, min(1.0, (val("vol_spike_5m", 1.0) - 1.0) / 1.5))
+    breakout = (near_high - near_low) * vol_confirm
+    out.append(Reading("crypto_breakout_strategy",
+                       clamp(base_prob + 0.025 * breakout, 0.02, 0.98),
+                       0.12 + 0.10 * vol_confirm,
+                       {"score": round(breakout, 4), "volume_confirm": round(vol_confirm, 4)}))
+    # Multi-timeframe chart confirmation. Every timeframe uses completed OHLCV
+    # bars; available frames are weighted toward the slower trend to reduce noise.
+    chart_indicators = chart_indicators if isinstance(chart_indicators, dict) else {}
+    tf_weights = {"1m": 0.15, "5m": 0.20, "15m": 0.30, "30m": 0.35}
+    tf_scores, tf_details, total_weight = [], {}, 0.0
+    for tf, weight in tf_weights.items():
+        ind = chart_indicators.get(tf)
+        if not isinstance(ind, dict):
+            continue
+        try:
+            rsi_score = max(-1.0, min(1.0, (float(ind.get("rsi", 50.0)) - 50.0) / 25.0))
+            ema_score = max(-1.0, min(1.0, float(ind.get("ema_9_21_bps", 0.0)) / 20.0))
+            macd_score = max(-1.0, min(1.0, float(ind.get("macd_hist_bps", 0.0)) / 12.0))
+            adx_value = max(0.0, min(1.0, float(ind.get("adx", 0.0)) / 35.0))
+            score = (0.35 * ema_score + 0.30 * macd_score + 0.20 * rsi_score) * (0.35 + 0.65 * adx_value)
+            tf_scores.append((score, weight))
+            total_weight += weight
+            tf_details[tf] = {
+                "score": round(score, 4), "rsi": round(float(ind.get("rsi", 50.0)), 2),
+                "ema_9_21_bps": round(float(ind.get("ema_9_21_bps", 0.0)), 3),
+                "macd_hist_bps": round(float(ind.get("macd_hist_bps", 0.0)), 3),
+                "adx": round(float(ind.get("adx", 0.0)), 2),
+                "bb_pct_b": round(float(ind.get("bb_pct_b", 0.5)), 3),
+                "volume_ratio": round(float(ind.get("volume_ratio", 1.0)), 3),
+            }
+        except (TypeError, ValueError, OverflowError):
+            continue
+    if tf_scores and total_weight:
+        mtf_score = sum(score * weight for score, weight in tf_scores) / total_weight
+        mtf_conf = min(0.40, 0.12 + 0.07 * len(tf_scores))
+        out.append(Reading("crypto_multi_timeframe_chart",
+                           clamp(base_prob + 0.04 * mtf_score, 0.02, 0.98),
+                           mtf_conf, {"score": round(mtf_score, 4), "timeframes": tf_details,
+                                      "available_timeframes": list(tf_details)}))
+    return out
+
+
 def coin_from_series(series):
     s = (series or "").upper()
     return next((c for c in ("BTC", "ETH", "SOL") if s.startswith(f"KX{c}")), "BTC")
@@ -128,6 +216,13 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
             row.update({"live_z": info["live_z"], "tail_shrink_used": shrink})
             ml.add_row(store, ticker, int(now) - int(now) % 60, coin, row, None, "live")
     info["features"] = feats
+    chart_indicators = features.timeframe_indicator_snapshot(candles, now_ts=now)
+    info["chart_indicators"] = chart_indicators
+    # These strategy views are available to the same ensemble/settlement learner
+    # as existing signals. Low initial weights prevent unvalidated heuristics from
+    # overpowering the exact-contract model or Kalshi's executable market price.
+    if feats:
+        readings.extend(strategy_readings(feats, p, chart_indicators))
     info["indicators"] = indicator_snapshot(feats)
     if isinstance(book, dict):
         info["orderbook"] = {k: book.get(k) for k in (
