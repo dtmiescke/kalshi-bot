@@ -200,10 +200,16 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
         kelly = max(0.0, (p_win - cost) / (1 - cost))
         want = s.bankroll * effective_kelly_fraction * kelly * confidence * earned
     crypto_min_bet = max(0.0, float(getattr(s, "crypto_min_bet", 15.0))) if crypto_domain else 0.0
-    min_total_cost = crypto_min_bet + taker_fee(max(1, int(crypto_min_bet / max(price, 0.01))), price, rate)
+    # The minimum is contract premium (stake), not premium-plus-fees. Round
+    # contract count UP so the planned stake actually reaches the threshold;
+    # then include fees in the budget. Rounding down here can make a $15 target
+    # become $14.85 and incorrectly reject an otherwise affordable crypto trade.
+    min_contracts = max(1, math.ceil((crypto_min_bet - 1e-9) / max(price, 0.01))) if crypto_domain else 0
+    min_stake_cost = min_contracts * price if crypto_domain else 0.0
+    min_total_cost = min_stake_cost + (taker_fee(min_contracts, price, rate) if crypto_domain else 0.0)
     if crypto_domain:
-        # Budget includes fees, so raise the target to cover the minimum stake plus fees.
-        # If the full minimum cannot pass every cap, skip instead of downsizing.
+        # Budget includes fees, so raise the target to cover enough contracts to
+        # meet the minimum stake plus fees. If caps cannot support it, skip.
         want = max(want, min_total_cost)
 
     acct = store.account(s.bankroll, mode=s.mode)
