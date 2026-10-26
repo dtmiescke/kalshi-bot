@@ -433,7 +433,11 @@ def main(argv=None):
     if cmd == "history":
         from . import history
         days = float(argv[1]) if len(argv) > 1 else 3
-        print(history.text(history.run(store, data, days=days, fee_rate=s.taker_fee_rate)))
+        # Keep CI history replays bounded. A per-run cap prevents a long-tail
+        # market catalog or rate-limit cooldown from monopolizing the runner.
+        max_markets = max(1, min(300, int(os.environ.get("HISTORY_MAX_MARKETS", "60"))))
+        print(history.text(history.run(store, data, days=days, fee_rate=s.taker_fee_rate,
+                                       max_markets=max_markets)))
         return
     if cmd == "backtest":
         print(backtest.text(backtest.run(store, s.taker_fee_rate)))
