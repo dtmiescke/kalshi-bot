@@ -9,7 +9,7 @@ This is an optional read-only Cloudflare Worker for the existing Kalshi Bot HQ d
    - `KALSHI_API_KEY_ID`: a Kalshi API key ID with read-only permissions if Kalshi offers that permission for your account.
    - `KALSHI_PRIVATE_KEY`: the matching PKCS#8 PEM private key. Never put it in the browser, GitHub, or chat.
 3. Add a plain-text Worker variable `APP_ORIGIN` equal to the exact HTTPS origin serving Bot HQ. Do not include a path or trailing slash.
-4. The worker defaults to Kalshi's production API base, `https://api.elections.kalshi.com/trade-api/v2`. Set `KALSHI_API_BASE_URL` only when deliberately targeting another compatible environment.
+4. The worker defaults to Kalshi's recommended production Trade API base, `https://external-api.kalshi.com/trade-api/v2` (the legacy `api.elections.kalshi.com` host may also be supported). Set `KALSHI_API_BASE_URL` only when deliberately targeting another compatible environment.
 5. Set the Worker URL in Bot HQ → Account and use the base Worker URL, not `/api/account`.
 6. Test `/health`, then open Account in Bot HQ and verify balance, positions, fills and settlements load.
 
