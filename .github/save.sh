@@ -17,6 +17,12 @@ fi
 # MEMORY_REMOTE overrides the destination (tests use a local bare repository).
 REMOTE="${MEMORY_REMOTE:-https://x-access-token:${GITHUB_TOKEN:-}@github.com/${GITHUB_REPOSITORY:-}.git}"
 BASE_FILE="$(pwd)/data/.memory_base"
+# A stalled GitHub/network request must not pin the scheduled job indefinitely.
+# Disable interactive prompts and fail boundedly if the remote stops responding.
+export GIT_TERMINAL_PROMPT=0
+export GIT_HTTP_LOW_SPEED_LIMIT=1000
+export GIT_HTTP_LOW_SPEED_TIME=30
+GIT_REMOTE_TIMEOUT_SECONDS="${GIT_REMOTE_TIMEOUT_SECONDS:-90}"
 
 python -c 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); result=c.execute("PRAGMA quick_check").fetchone()[0]; print("SQLite quick_check:", result); sys.exit(result != "ok")' data/bot.sqlite
 python -m bot.main report > /tmp/REPORT.txt || { echo "WARNING: report failed; saving memory anyway." >&2; echo "report unavailable" > /tmp/REPORT.txt; }
@@ -73,8 +79,8 @@ git commit -qm "data $(date -u +%FT%TZ)"
 # another job (bot, trainer, clear-pause) saved in between, a force-push here
 # would silently discard its newer memory, so refuse instead.
 base=$(cat "$BASE_FILE" 2>/dev/null || echo missing)
-if ! current=$(git ls-remote "$REMOTE" refs/heads/bot-data); then
-  echo "ERROR: Could not read the current bot-data commit; refusing to overwrite memory." >&2
+if ! current=$(timeout --foreground "${GIT_REMOTE_TIMEOUT_SECONDS}s" git ls-remote "$REMOTE" refs/heads/bot-data); then
+  echo "ERROR: Could not read the current bot-data commit within ${GIT_REMOTE_TIMEOUT_SECONDS}s; refusing to overwrite memory." >&2
   exit 1
 fi
 current=$(printf '%s' "$current" | cut -f1)
@@ -84,7 +90,7 @@ if [ "$base" = "missing" ] || { [ "$base" = "none" ] && [ -n "$current" ]; } || 
   python -c 'import sys; from bot import alerts; alerts.send("Memory save skipped", sys.argv[1], priority="high", tags=["warning"])' "bot-data changed during this run; this run's memory was not saved so the newer copy is kept." || true
   exit 1
 fi
-if git push -qf "$REMOTE" HEAD:bot-data; then
+if timeout --foreground "${GIT_REMOTE_TIMEOUT_SECONDS}s" git push -qf "$REMOTE" HEAD:bot-data; then
   # a later save in the same job (e.g. a mid-session save) builds on this one
   git rev-parse HEAD > "$BASE_FILE"
   echo "Persistent memory saved."
