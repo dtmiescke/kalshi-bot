@@ -130,6 +130,20 @@ class KalshiClient:
             hit = self._cache.get(ck)
             if hit and time.time() - hit[0] < ttl:
                 return hit[1]
+        # Optional Val Town bridge for public metadata/catalog GETs only. The
+        # helper explicitly excludes live quotes/order books/trades and private
+        # portfolio routes. Any bridge failure falls through to direct Kalshi.
+        if method.upper() == "GET":
+            try:
+                from .valtown_bridge import bridge_get
+                handled, bridged = bridge_get(path, params=params, timeout=min(self.timeout, 4))
+                if handled:
+                    if ttl:
+                        self._cache[ck] = (time.time(), bridged)
+                    return bridged
+            except Exception as exc:
+                # Integration must not break the existing direct API path.
+                log.warning("Val Town bridge unavailable for %s: %s", path, type(exc).__name__)
         last = None
         for attempt in range(retries):
             self._pace()
