@@ -106,7 +106,7 @@ jobs:
           MIN_PER_BET: ${{ vars.MIN_PER_BET || '500' }}
           MAX_PER_BET: ${{ vars.MAX_PER_BET || '750' }}
           MAX_PER_GAME: ${{ vars.MAX_PER_GAME || '750' }}
-          MAX_PER_DAY: ${{ vars.MAX_PER_DAY || '6000' }}
+          MAX_PER_DAY: ${{ vars.MAX_PER_DAY || '20000' }}
           DAILY_LOSS_LIMIT: ${{ vars.DAILY_LOSS_LIMIT || '2000' }}
           MAX_TOTAL_LOSS: ${{ vars.MAX_TOTAL_LOSS || '20000' }}
           MAX_OPEN_POSITIONS: ${{ vars.MAX_OPEN_POSITIONS || '5' }}
