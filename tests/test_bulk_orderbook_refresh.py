@@ -50,6 +50,20 @@ class TestBulkBookRefresh(unittest.TestCase):
         self.assertEqual(runner.books["A"].gaps, 1)
         self.assertEqual(runner.books["A"].seq, 123)  # failed resync must preserve prior state
 
+
+    def test_websocket_disconnect_invalidates_all_books(self):
+        rest = Mock()
+        runner = self.runner(rest, ["A", "B"])
+        for book in runner.books.values():
+            book.snapshot({"yes": [[0.4, 2]], "no": [[0.5, 3]]}, seq=10)
+        runner._mark_kalshi_books_stale()
+        for book in runner.books.values():
+            self.assertTrue(book.needs_resync)
+            self.assertEqual(book.last_update, 0.0)
+            self.assertEqual(book.gaps, 1)
+        runner.poll_books(only_quiet=True)
+        rest.market_orderbooks.assert_called_once_with(["A", "B"])
+
     def test_fresh_websocket_book_is_not_refreshed_in_quiet_mode(self):
         rest = Mock()
         runner = self.runner(rest, ["A"])
