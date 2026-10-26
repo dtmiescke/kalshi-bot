@@ -8,6 +8,7 @@ Kalshi has been moving price fields from integer cents (yes_bid) to dollar
 strings (yes_bid_dollars). `price()` reads either, always returning dollars 0-1.
 """
 import base64
+import math
 import threading
 import time
 import uuid
