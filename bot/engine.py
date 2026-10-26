@@ -1142,11 +1142,37 @@ class Engine:
         (pl, ql), (ph, qh) = yes_low[0], no_high[0]
         event_ticker = a.get("event_ticker") or a["low"]
         budget = self._arbitrage_budget(event_ticker)
-        per_leg_cap = int(self.s.max_per_bet // max(pl, ph)) if max(pl, ph) > 0 else 0
+        max_per_bet = float(self.s.max_per_bet)
+        min_per_bet = float(getattr(self.s, "min_per_bet", 0.0))
+        per_leg_cap = int(max_per_bet // max(pl, ph)) if max(pl, ph) > 0 else 0
         n = int(min(ql, qh, per_leg_cap, budget // (pl + ph))) if budget > 0 else 0
-        rate = fees.rate(a.get("series") or a["low"], self.s)
-        cost_fees = risk.taker_fee(n, pl, rate) + risk.taker_fee(n, ph, rate)
-        if n < 1 or n * (1 - pl - ph) - cost_fees <= 0:
+        low_rate = fees.rate(a["low"], self.s)
+        high_rate = fees.rate(a["high"], self.s)
+        # Fee-inclusive per-leg caps and a real minimum for BOTH legs. Reduce
+        # size until all costs fit; never silently submit an undersized "bet".
+        low_fee = high_fee = cost_fees = 0.0
+        while n > 0:
+            low_fee = risk.taker_fee(n, pl, low_rate)
+            high_fee = risk.taker_fee(n, ph, high_rate)
+            cost_fees = low_fee + high_fee
+            low_cost = n * pl + low_fee
+            high_cost = n * ph + high_fee
+            if (low_cost <= max_per_bet + 1e-9
+                    and high_cost <= max_per_bet + 1e-9
+                    and low_cost + high_cost <= budget + 1e-9):
+                break
+            n -= 1
+        if n < 1:
+            return
+        if n * pl + 1e-9 < min_per_bet or n * ph + 1e-9 < min_per_bet:
+            log.info("ladder arbitrage skipped: both legs must meet minimum bet of $%.2f",
+                     min_per_bet)
+            return
+        # Recalculate after any size reduction and require positive net profit.
+        low_fee = risk.taker_fee(n, pl, low_rate)
+        high_fee = risk.taker_fee(n, ph, high_rate)
+        cost_fees = low_fee + high_fee
+        if n * (1 - pl - ph) - cost_fees <= 0:
             return
         allowed, reason = guard.status(self.store, self.s.bankroll, mode=self.s.mode)
         if not allowed:
