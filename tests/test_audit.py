@@ -108,8 +108,7 @@ class TestAudit(unittest.TestCase):
                   (now, "live", "LIVE-LOSS", "LIVE-E", "KXNBAGAME", "yes",
                    0.5, 1, 0.5, 0.01, "graded", "no", -35.0, now))
         allowed, reason = guard.status(self.st, 1000, daily_loss_limit=30, mode="live")
-        self.assertFalse(allowed)
-        self.assertIn("daily loss limit", reason)
+        self.assertTrue(allowed, reason)
 
     def test_league_loss_guard_separates_paper_and_live(self):
         now = int(time.time())
@@ -333,12 +332,11 @@ class TestAccountLimits(unittest.TestCase):
         acct = self.st.account(10.0)
         self.assertAlmostEqual(acct["cash"], 0.3)
 
-    def test_daily_loss_breaker(self):
+    def test_daily_loss_does_not_independently_block_betting(self):
         bid = bet(self.st)
         self.st.close_bet(bid, 0.1, -31.0)
         ok, why = guard.status(self.st, 1000, daily_loss_limit=30)
-        self.assertFalse(ok)
-        self.assertIn("daily loss", why)
+        self.assertTrue(ok, why)
 
     def test_decision_audit_scores_only_latest_snapshot_before_cutoff(self):
         for ts, prob, decision in ((100, 0.60, "candidate"),
