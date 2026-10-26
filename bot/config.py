@@ -29,7 +29,7 @@ def _env_int(name, default):
 # Kalshi base URLs. Check these against Kalshi's official docs before going live;
 # third-party guides disagree, so they are overridable.
 KALSHI_URLS = {
-    "demo": "https://demo-api.kalshi.co/trade-api/v2",
+    "demo": "https://external-api.demo.kalshi.co/trade-api/v2",
     "production": "https://api.elections.kalshi.com/trade-api/v2",
 }
 
