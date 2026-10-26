@@ -375,6 +375,8 @@ class LiveRunner:
                         **reservation, "state": "traded",
                         "order_id": filled_rows[0].get("order_id"),
                     })
+                elif ticker in self.makers:
+                    self.store.set_kv(lock_key, {**reservation, "state": "maker_pending"})
                 elif self.store.get_kv("execution_reconciliation_required"):
                     # The exchange may have accepted an order despite a lost response.
                     # Keep this coin/window blocked until reconciled.
@@ -529,6 +531,13 @@ class LiveRunner:
                 self.store.log_maker(ticker, 1, "filled", now - mk["placed"])
                 if real_order:
                     self.store.set_kv("maker_recovery", None)
+                info = self.markets.get(ticker, {})
+                close_ts = int((info.get("terms") or {}).get("close_ts") or 0)
+                if info.get("series") and close_ts:
+                    lock_key = self._window_lock_key(info["series"], close_ts)
+                    reservation = self.store.get_kv(lock_key) or {}
+                    self.store.set_kv(lock_key, {**reservation, "state": "traded",
+                                                  "order_id": mk.get("order_id")})
                 del self.makers[ticker]
             elif terminal or edge_gone or expired or not self.betting_ok:
                 if not self.betting_ok:
@@ -543,6 +552,10 @@ class LiveRunner:
                 self.store.log_maker(ticker, 0, outcome, now - mk["placed"])
                 if real_order:
                     self.store.set_kv("maker_recovery", None)
+                info = self.markets.get(ticker, {})
+                close_ts = int((info.get("terms") or {}).get("close_ts") or 0)
+                if info.get("series") and close_ts:
+                    self.store.set_kv(self._window_lock_key(info["series"], close_ts), None)
                 del self.makers[ticker]
 
     def _side_edge(self, ticker, side, price, now):
