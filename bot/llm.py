@@ -119,7 +119,7 @@ class LLM:
             if council_enabled:
                 council_reserve = max(0, int(os.environ.get("LLM_COUNCIL_RESERVE", "8")))
                 daily_left -= min(council_reserve, max(0, daily_left))
-        if not for_web_search: 
+        if not for_web_search and not for_council:
             reserve = max(0, int(os.environ.get("LLM_WEB_SEARCH_RESERVE", "0")))
             web_enabled = os.environ.get("SPORTS_AI_WEB_SEARCH", "yes").strip().lower() not in ("0", "no", "false", "off")
             web_limit = max(0, int(os.environ.get("OPENROUTER_WEB_SEARCH_MAX_PER_RUN", "2")))
