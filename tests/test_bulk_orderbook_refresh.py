@@ -27,6 +27,7 @@ class TestBulkBookRefresh(unittest.TestCase):
         self.assertEqual(runner.books["A"].yes, {0.42: 5.0})
         self.assertEqual(runner.books["B"].no, {0.60: 2.0})
         self.assertFalse(runner.books["A"].needs_resync)
+        self.assertIsNone(runner.books["A"].seq)  # REST snapshot resets WS sequence continuity
 
     def test_bulk_missing_ticker_falls_back_to_single_market(self):
         rest = Mock()
@@ -43,9 +44,11 @@ class TestBulkBookRefresh(unittest.TestCase):
         rest.orderbook.side_effect = RuntimeError("offline")
         runner = self.runner(rest, ["A"])
         runner.books["A"].needs_resync = True
+        runner.books["A"].seq = 123
         runner.poll_books(only_resync=True)
         self.assertTrue(runner.books["A"].needs_resync)
         self.assertEqual(runner.books["A"].gaps, 1)
+        self.assertEqual(runner.books["A"].seq, 123)  # failed resync must preserve prior state
 
     def test_fresh_websocket_book_is_not_refreshed_in_quiet_mode(self):
         rest = Mock()
