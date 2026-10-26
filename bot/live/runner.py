@@ -506,22 +506,17 @@ class LiveRunner:
             t = b["ticker"]
             if t not in self.markets or t not in self.books or b["series"] == "ARB":
                 continue
-            readings, _ = self.readings_for(t, now)
-            if not readings:
-                continue
-            prob, _ = brain.blend(readings, weights)
-            p_side = prob if b["side"] == "yes" else 1 - prob
             levels = self.books[t].as_rest_book().get(b["side"], [])
             bid = levels[0][0] if levels else None
             if bid is None:
                 continue
-            # only sell what the best bid can actually absorb
+            # A 20% hard stop takes priority over the model-based early exit.\n            # Compare against the original entry price; never move the threshold.\n            stop_triggered = bid <= float(b["price"]) * 0.80\n            if not stop_triggered:\n                readings, _ = self.readings_for(t, now)\n                if not readings:\n                    continue\n                prob, _ = brain.blend(readings, weights)\n                p_side = prob if b["side"] == "yes" else 1 - prob\n            # only sell what the best bid can actually absorb
             n = int(min(b["contracts"], levels[0][1]))
             if n < 1:
                 continue
             exit_fee = risk.taker_fee(n, bid, fees.rate(t, self.s))
             # holding is worth p_side per contract; selling is worth the bid minus fees
-            if bid - exit_fee / n <= p_side + self.s.exit_margin:
+            if not stop_triggered and bid - exit_fee / n <= p_side + self.s.exit_margin:
                 continue
             if self.s.mode in ("demo", "live"):
                 try:
@@ -572,7 +567,7 @@ class LiveRunner:
                 continue
             msg = f"SOLD {t} {b['side'].upper()} x{n} @ ${bid:.2f} (P&L ${pnl:+.2f})"
             self.summary["alerts"].append(msg)
-            alerts.send("Early exit", msg)
+            alerts.send("Crypto 20% stop-loss" if stop_triggered else "Early exit", msg)
             log.info(msg)
 
     # --- self-learning volatility --------------------------------------------------------
