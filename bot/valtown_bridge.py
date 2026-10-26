@@ -28,7 +28,7 @@ def bridge_get(path, params=None, timeout=4):
     """Return (True, dict) on a valid bridge response; otherwise (False, None)."""
     base = (os.environ.get("VAL_TOWN_KALSHI_URL") or "").strip().rstrip("/")
     token = (os.environ.get("ATI_INGEST_SHARED_TOKEN") or "").strip()
-    if not base or not token or not eligible(path):
+    if not base.startswith("https://") or not token or not eligible(path):
         return False, None
     try:
         response = requests.get(base + path, params=params or {},
