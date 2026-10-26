@@ -182,7 +182,17 @@ def scan(client, store, settings=None, now=None):
 
     max_per_bet = float(getattr(settings, "max_per_bet", os.environ.get("MAX_PER_BET", 25)) or 25)
     daily_cap = float(os.environ.get("CRYPTO_COMBO_DAILY_CAP", "15"))
-    target_stake = min(float(os.environ.get("CRYPTO_COMBO_STAKE", "5")), max_per_bet, daily_cap)
+    day_start = now - (now % 86400)
+    spent_today = sum(
+        float(row.get("stake", 0) or 0) + float(row.get("fee", 0) or 0)
+        for row in history if int(row.get("ts", 0) or 0) >= day_start
+    )
+    remaining_daily = max(0.0, daily_cap - spent_today)
+    target_stake = min(float(os.environ.get("CRYPTO_COMBO_STAKE", "5")), max_per_bet, remaining_daily)
+    if target_stake <= 0:
+        result = {"ok": True, "enabled": True, "created": 0, "skipped": "crypto_combo_daily_cap_reached"}
+        store.set_kv(HEALTH_KEY, {**result, "ts": now})
+        return result
     unit_cost = combo_price + fee_per_contract
     contracts = max(1, int(target_stake / unit_cost)) if unit_cost > 0 else 0
     while contracts > 1 and contracts * unit_cost > target_stake:
