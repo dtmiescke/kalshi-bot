@@ -73,7 +73,7 @@ jobs:
           SPORTS_INTEL_MAX_BOX_SCORES: ${{ vars.SPORTS_INTEL_MAX_BOX_SCORES || '6' }}
           SPORTS_INTEL_TTL_SECONDS: ${{ vars.SPORTS_INTEL_TTL_SECONDS || '1800' }}
           SPORTS_AI_NEWS_REFRESH_MINUTES: ${{ vars.SPORTS_AI_NEWS_REFRESH_MINUTES || '30' }}
-          COMBO_RESEARCH_ENABLED: ${{ vars.COMBO_RESEARCH_ENABLED || 'no' }}
+          COMBO_RESEARCH_ENABLED: ${{ vars.COMBO_RESEARCH_ENABLED || 'yes' }}
           COMBOS_ENABLED: ${{ vars.COMBOS_ENABLED || 'no' }}
           COMBO_MIN_LEGS: ${{ vars.COMBO_MIN_LEGS || '3' }}
           COMBO_MAX_LEGS: ${{ vars.COMBO_MAX_LEGS || '8' }}
@@ -84,6 +84,10 @@ jobs:
           LLM_DAILY_LIMIT: ${{ vars.LLM_DAILY_LIMIT || '45' }}
           # Protect eight shared daily calls for the two-review AI council.
           LLM_COUNCIL_RESERVE: ${{ vars.LLM_COUNCIL_RESERVE || '8' }}
+          CRYPTO_COMBO_STAKE: ${{ vars.CRYPTO_COMBO_STAKE || '5' }}
+          CRYPTO_COMBO_MIN_LEG_EDGE: ${{ vars.CRYPTO_COMBO_MIN_LEG_EDGE || '3' }}
+          CRYPTO_COMBO_MIN_EDGE: ${{ vars.CRYPTO_COMBO_MIN_EDGE || '6' }}
+          CRYPTO_COMBO_DAILY_CAP: ${{ vars.CRYPTO_COMBO_DAILY_CAP || '15' }}
           # Keep council calls from consuming all capacity needed for sports event research.
           LLM_WEB_SEARCH_RESERVE: ${{ vars.LLM_WEB_SEARCH_RESERVE || '2' }}
           FIXED_BET: ${{ vars.FIXED_BET }}
