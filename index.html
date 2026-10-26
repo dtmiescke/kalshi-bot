@@ -94,7 +94,7 @@ input,select{width:100%;padding:11px;background:var(--panel);border:1px solid va
 .note{font-size:.84rem;color:var(--muted);background:var(--panel);border-left:3px solid var(--amber);padding:9px 12px;border-radius:6px;margin:10px 0}
 pre{white-space:pre-wrap;word-break:break-word;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;font-size:.8rem;margin:0;max-height:50vh;overflow:auto}
 
-nav{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(4,1fr);background:rgba(29,20,70,.96);
+nav{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(5,1fr);background:rgba(29,20,70,.96);
   border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0);backdrop-filter:blur(8px)}
 nav button{border:0;background:none;padding:13px 0 15px;color:var(--muted);font-family:var(--display);font-weight:600;font-size:.9rem;cursor:pointer}
 nav button[aria-current=true]{color:var(--text);box-shadow:inset 0 3px 0 var(--cyan)}
@@ -311,6 +311,27 @@ details.floor summary{padding:10px 12px;cursor:pointer;font-family:var(--display
     <pre id="briefing">Loading…</pre>
   </section>
 
+
+  <section id="account" class="view">
+    <h2 style="margin-top:4px">Kalshi account</h2>
+    <p class="sub">Live account data from Kalshi's authenticated API. Read-only reporting; the trading bot runs independently.</p>
+    <label class="field"><span>Cloudflare Worker base URL</span><input id="accountWorkerUrl" type="url" placeholder="https://your-worker.workers.dev"></label>
+    <div class="row"><button class="btn primary" id="saveAccountUrl">Save URL</button><button class="btn" id="accountRefresh">Refresh account</button></div>
+    <p class="sub" id="accountStatus" aria-live="polite">Not connected. Configure the Worker URL to load account data.</p>
+    <div class="hud accountHud" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+      <div><b id="acctCash">—</b><span>Cash balance</span></div>
+      <div><b id="acctValue">—</b><span>Portfolio value</span></div>
+      <div><b id="acctPositions">—</b><span>Open positions</span></div>
+      <div><b id="acctPnl">—</b><span>Realized P&amp;L</span></div>
+    </div>
+    <div class="edge" style="margin-top:10px" id="accountCounts">
+      <div class="r"><span>Recent fills</span><span id="acctFills">—</span></div>
+      <div class="r"><span>Settlements</span><span id="acctSettlements">—</span></div>
+    </div>
+    <p class="note" id="accountNote">Account P&amp;L is shown only when it can be reconciled from returned accounting fields. Portfolio value changes are not the same as realized profit.</p>
+    <details style="margin-top:12px"><summary>Raw account response (diagnostics)</summary><pre id="accountRaw">No account data loaded.</pre></details>
+  </section>
+
   <section id="control" class="view">
     <button class="switch" id="powerBtn" aria-label="Turn bot on or off">
       <span class="track"><span class="knob"></span></span>
@@ -332,6 +353,8 @@ details.floor summary{padding:10px 12px;cursor:pointer;font-family:var(--display
     <button class="btn primary" style="width:100%" id="saveVars">Save settings</button>
     <h2>Performance report</h2>
     <pre id="reportTxt">Loading…</pre>
+    <h2>Account monitor</h2>
+    <p class="sub">Configure the Cloudflare Worker URL in the Account tab. The API is called only while the app is visible and the Account tab is open.</p>
     <h2>This phone</h2>
     <button class="btn" style="width:100%" id="logoutBtn">Disconnect</button>
   </section>
@@ -342,6 +365,7 @@ details.floor summary{padding:10px 12px;cursor:pointer;font-family:var(--display
   <button data-tab="hub" aria-current="true">HQ</button>
   <button data-tab="council">Council</button>
   <button data-tab="trades">Trades</button>
+  <button data-tab="account">Account</button>
   <button data-tab="control">Control</button>
 </nav>
 <div id="toast" role="status"></div>
@@ -1027,6 +1051,60 @@ async function refresh(){
 }
 
 
+
+/* ================= on-demand authenticated Kalshi account report ================= */
+let accountPollHandle = null;
+function accountBase(){return (localStorage.getItem("kbotAccountWorker")||"").trim().replace(/\/+$/,"")}
+function centsMoney(v){const n=Number(v);return Number.isFinite(n)?money(n/100):"—"}
+function accountArray(section,keys){if(!section||!section.ok)return[];const d=section.data||{};for(const k of keys)if(Array.isArray(d[k]))return d[k];return Array.isArray(d)?d:[]}
+function accountExplicitPnl(rows){
+  if(!rows.length)return null;
+  const fields=["realized_pnl","realized_pnl_dollars","net_pnl","pnl"];
+  if(!rows.every(r=>fields.some(k=>r&&r[k]!==undefined&&r[k]!==null)))return null;
+  return rows.reduce((sum,r)=>sum+Number(r.realized_pnl??r.realized_pnl_dollars??r.net_pnl??r.pnl),0);
+}
+function renderAccount(payload){
+  const bal=payload.balance&&payload.balance.data||{};
+  const positions=accountArray(payload.positions,["market_positions","positions"]);
+  const fills=accountArray(payload.fills,["fills"]);
+  const settlements=accountArray(payload.settlements,["settlements"]);
+  $("acctCash").textContent=centsMoney(bal.balance);
+  $("acctValue").textContent=centsMoney(bal.portfolio_value);
+  $("acctPositions").textContent=String(positions.length);
+  const pnl=accountExplicitPnl(settlements);
+  $("acctPnl").textContent=pnl===null?"Not supplied":money(pnl);
+  $("acctPnl").className=pnl===null?"":pnl>0?"pos":pnl<0?"neg":"";
+  $("acctFills").textContent=String(fills.length);
+  $("acctSettlements").textContent=String(settlements.length);
+  $("accountRaw").textContent=JSON.stringify(payload,null,2);
+  const errs=payload.partialErrors||[];
+  $("accountStatus").textContent=(payload.fetchedAt?"Updated "+new Date(payload.fetchedAt).toLocaleString():"Data loaded")+
+    (errs.length?" · Partial data: "+errs.map(e=>e.section).join(", "):" · All sections loaded");
+  $("accountStatus").className="sub "+(errs.length?"neg":"pos");
+  $("accountNote").textContent=pnl===null
+    ?"Kalshi returned account records, but the settlement response did not expose a consistent realized-P&L field across all rows. We will not guess profit from balance changes; reconcile fills, fees, settlements, deposits and withdrawals before displaying a number."
+    :"Realized P&L is summed from explicit P&L fields in all returned settlement records. Verify fee treatment against Kalshi's account statement.";
+}
+async function refreshAccount(){
+  const base=accountBase();
+  if(!base){$("accountStatus").textContent="Set the Cloudflare Worker base URL above, then save it.";return}
+  $("accountStatus").textContent="Fetching your account from Kalshi…";
+  try{
+    const res=await fetch(base+"/api/account",{method:"GET",headers:{Accept:"application/json"},cache:"no-store"});
+    const data=await res.json().catch(()=>({error:"Worker returned invalid JSON"}));
+    if(!res.ok)throw new Error(data.error||("HTTP "+res.status));
+    renderAccount(data);
+  }catch(e){$("accountStatus").textContent="Account fetch failed: "+e.message;$("accountStatus").className="sub neg"}
+}
+$("saveAccountUrl").onclick=()=>{
+  const value=$("accountWorkerUrl").value.trim().replace(/\/+$/,"");
+  if(value&&!/^https:\/\//i.test(value)){toast("Use the HTTPS Cloudflare Worker URL.");return}
+  localStorage.setItem("kbotAccountWorker",value);toast(value?"Account monitor URL saved on this phone.":"Account monitor URL cleared.");
+  if(value)refreshAccount();
+};
+$("accountRefresh").onclick=refreshAccount;
+$("accountWorkerUrl").value=localStorage.getItem("kbotAccountWorker")||"";
+
 /* ================= tabs + loop ================= */
 const built={};
 function build(tab,force){
@@ -1038,6 +1116,7 @@ function show(tab){
   document.querySelectorAll("#app .view").forEach(v=>v.classList.toggle("show",v.id===tab));
   document.querySelectorAll("nav button").forEach(b=>b.setAttribute("aria-current",b.dataset.tab===tab));
   if(tab==="control")renderSettings();
+  if(tab==="account")refreshAccount();
   requestAnimationFrame(()=>{build(tab);drawSpark()});
 }
 $("tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(b)show(b.dataset.tab)});
@@ -1051,6 +1130,9 @@ function start(){
   $("setup").classList.remove("show");$("app").hidden=false;$("tabs").hidden=false;
   initWalkers();show("hub");refresh();requestAnimationFrame(loop);
   setInterval(()=>{if(document.visibilityState==="visible")refresh()},30000);
+  if(accountPollHandle)clearInterval(accountPollHandle);
+  accountPollHandle=setInterval(()=>{if(document.visibilityState==="visible"&&document.querySelector("#account.show"))refreshAccount()},30000);
+  document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&document.querySelector("#account.show"))refreshAccount()});
 }
 $("connectBtn").onclick=async()=>{const token=$("tokenIn").value.trim(),repo=$("repoIn").value.trim();if(!token){toast("Paste your token first.");return}
   cfg={token,repo};demo=false;try{await gh("");localStorage.setItem("kbot",JSON.stringify(cfg));start()}catch(e){cfg=null;toast(explain(e))}};
