@@ -9,10 +9,7 @@ Set these in the GitHub repository settings for `dtmiescke/kalshi-bot`:
 - `CLOUDFLARE_API_TOKEN`: Cloudflare API token with Workers Scripts edit and account access needed for Workers Builds/deployments and Durable Objects.
 - `CLOUDFLARE_ACCOUNT_ID`: the target Cloudflare account ID.
 
-After the first successful deployment, add these Worker secrets in Cloudflare (never commit them to this repository):
-
-- `KALSHI_DATA_KEY_ID`: Kalshi market-data API key ID.
-- `KALSHI_DATA_PRIVATE_KEY`: full PEM-encoded PKCS#8 private key for that key ID.
+The deploy workflow securely syncs the existing GitHub Actions secrets `KALSHI_DATA_KEY_ID` and `KALSHI_DATA_PRIVATE_KEY` into Cloudflare using Wrangler. You do not need to paste the Kalshi private key into Cloudflare manually. If either existing GitHub secret is missing, deployment stops before publishing.
 
 Use the existing Kalshi data-only key where possible. Do not paste private keys into chat, issues, commits, or workflow files. The relay uses the production market-data WebSocket and restricts client commands to read-only `ticker`, `orderbook_delta`, and `trade` channels. It rejects account/order-entry channels.
 
