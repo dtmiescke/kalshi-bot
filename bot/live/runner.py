@@ -150,6 +150,13 @@ class LiveRunner:
         log.info("live market discovery: %s", json.dumps(health, sort_keys=True))
         return changed
 
+    def _mark_kalshi_books_stale(self):
+        """Invalidate streamed books after disconnect; require REST resync."""
+        for book in self.books.values():
+            book.gaps += 1
+            book.needs_resync = True
+            book.last_update = 0.0
+
     def poll_books(self, only_resync=False, only_quiet=False):
         """Refresh only eligible books; prefer bounded bulk REST snapshots.
 
@@ -787,15 +794,6 @@ class LiveRunner:
         use_ws = bool(data_kid and data_pem)
         kalshi_task = None
 
-        def mark_kalshi_feed_gap():
-            # A disconnect can lose deltas without a sequence-gap message.
-            # Invalidate every streamed book so the next loop performs a REST
-            # snapshot before the market can pass the freshness gate again.
-            for book in self.books.values():
-                book.gaps += 1
-                book.needs_resync = True
-                book.last_update = 0.0
-
         def start_kalshi():
             signer = KalshiClient(self.s.market_data_url(), data_kid, data_pem)
             signer.path_prefix = "/trade-api/ws/v2"
@@ -803,7 +801,7 @@ class LiveRunner:
                 "kalshi", feeds.KALSHI_WS["production"],
                 lambda: feeds.kalshi_subs(list(self.books)),
                 lambda m: feeds.handle_kalshi(m, self.books, self.ticker_updates),
-                mark_kalshi_feed_gap, stop,
+                self._mark_kalshi_books_stale, stop,
                 headers_fn=lambda: signer._headers("GET", "")))
         if use_ws:
             kalshi_task = start_kalshi()
