@@ -95,13 +95,14 @@ jobs:
           # Risk and strategy settings, editable from the phone app (Control > Settings)
           BANKROLL: ${{ vars.BANKROLL || '1000' }}
           MAX_PER_BET: ${{ vars.MAX_PER_BET || '25' }}
-          MAX_PER_DAY: ${{ vars.MAX_PER_DAY || '20000' }}
-          DAILY_LOSS_LIMIT: ${{ vars.DAILY_LOSS_LIMIT || '20000' }}
+          MAX_PER_DAY: ${{ vars.MAX_PER_DAY || '150' }}
+          DAILY_LOSS_LIMIT: ${{ vars.DAILY_LOSS_LIMIT || '30' }}
           MAX_OPEN_POSITIONS: ${{ vars.MAX_OPEN_POSITIONS || '5' }}
           MAX_OPEN_COST: ${{ vars.MAX_OPEN_COST || '200' }}
           AGGRESSION_LEVEL: ${{ vars.AGGRESSION_LEVEL || 'aggressive' }}
           MIN_EDGE: ${{ vars.MIN_EDGE || '3' }}
           CRYPTO_MIN_EDGE: ${{ vars.CRYPTO_MIN_EDGE || '5' }}
+          CRYPTO_MAX_TRADES_PER_HOUR: ${{ vars.CRYPTO_MAX_TRADES_PER_HOUR || '10' }}
           LADDERS_ENABLED: ${{ vars.LADDERS_ENABLED || 'yes' }}
           COUNCIL_MODE: ${{ vars.COUNCIL_MODE || 'advisory' }}
         run: python -m bot.main scheduled
