@@ -156,6 +156,43 @@ class LiveRunner:
             book.gaps += 1
             book.needs_resync = True
             book.last_update = 0.0
+        self.ws_connected = False
+        self.publish_feed_health()
+
+    def publish_feed_health(self, now=None):
+        """Publish shared timestamped health for dashboards and execution gates.
+
+        Reuses the existing summary/KV channels instead of creating duplicate
+        telemetry storage.
+        """
+        now = time.time() if now is None else float(now)
+        ages = {ticker: book.age() for ticker, book in self.books.items()}
+        stale = [ticker for ticker, age in ages.items() if age is None or age > 5]
+        resync = [ticker for ticker, book in self.books.items() if book.needs_resync]
+        latest_ticker = max(
+            (float(row.get("received_ts", 0) or 0) for row in self.ticker_updates.values()),
+            default=0.0,
+        )
+        reconciliation = self.store.get_kv("execution_reconciliation_required")
+        health = {
+            "ts": int(now),
+            "mode": str(self.s.mode),
+            "ws_connected": bool(getattr(self, "ws_connected", False)),
+            "tracked_books": len(self.books),
+            "fresh_books": len(self.books) - len(stale),
+            "stale_book_count": len(stale),
+            "stale_book_sample": stale[:25],
+            "resync_required_count": len(resync),
+            "resync_required_sample": resync[:25],
+            "latest_ticker_received_ts": latest_ticker,
+            "ticker_age_s": round(max(0.0, now - latest_ticker), 3) if latest_ticker else None,
+            "ticker_count": len(self.ticker_updates),
+            "execution_reconciliation_required": bool(reconciliation),
+            "trading_ready": bool(self.betting_ok and not stale and not resync and not reconciliation),
+        }
+        self.summary["feed_health"] = health
+        self.store.set_kv("live_feed_health", health)
+        return health
 
     def poll_books(self, only_resync=False, only_quiet=False):
         """Refresh only eligible books; prefer bounded bulk REST snapshots.
@@ -245,6 +282,10 @@ class LiveRunner:
     def readings_for(self, ticker, now):
         """Research one contract with the shared crypto brain on live candles."""
         info, book = self.markets[ticker], self.books[ticker]
+        # Do not derive candidates from a book invalidated by a sequence gap,
+        # disconnect, or missing trustworthy timestamp.
+        if book.needs_resync or book.age() is None:
+            return None, None
         a = self.coins[info["series"]]
         terms = info["terms"]
         if not (terms["strike"] and terms["close_ts"]) or not book.yes or not book.no:
@@ -843,6 +884,9 @@ class LiveRunner:
                 asyncio.create_task(self._poll_crypto_flow(ticker, int(now)))
             for ticker, readings, ctx, plan in list(self.tick(now)):
                 asyncio.create_task(self._review(ticker, readings, ctx, plan))
+            if now - getattr(self, "last_feed_health_publish", 0) >= 1:
+                self.publish_feed_health(now)
+                self.last_feed_health_publish = now
             if now - last_dump >= 10:
                 self.dump(now)
                 last_dump = now
@@ -937,7 +981,8 @@ class LiveRunner:
                "kalshi_feed": {"channel": "ticker + orderbook_delta",
                                "subscribed_markets": len(self.books),
                                "ticker_updates": len(self.ticker_updates),
-                               "latest_received_ts": max((v.get("received_ts", 0) for v in self.ticker_updates.values()), default=0)}}
+                               "latest_received_ts": max((v.get("received_ts", 0) for v in self.ticker_updates.values()), default=0)},
+               "feed_health": self.publish_feed_health(now)}
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w") as f:
