@@ -169,14 +169,17 @@ class LiveRunner:
         ages = {ticker: book.age() for ticker, book in self.books.items()}
         stale = [ticker for ticker, age in ages.items() if age is None or age > 5]
         resync = [ticker for ticker, book in self.books.items() if book.needs_resync]
+        ticker_updates = getattr(self, "ticker_updates", {})
         latest_ticker = max(
-            (float(row.get("received_ts", 0) or 0) for row in self.ticker_updates.values()),
+            (float(row.get("received_ts", 0) or 0) for row in ticker_updates.values()),
             default=0.0,
         )
-        reconciliation = self.store.get_kv("execution_reconciliation_required")
+        store = getattr(self, "store", None)
+        reconciliation = store.get_kv("execution_reconciliation_required") if store else None
+        settings = getattr(self, "s", None)
         health = {
             "ts": int(now),
-            "mode": str(self.s.mode),
+            "mode": str(getattr(settings, "mode", "unknown")),
             "ws_connected": bool(getattr(self, "ws_connected", False)),
             "tracked_books": len(self.books),
             "fresh_books": len(self.books) - len(stale),
@@ -186,12 +189,16 @@ class LiveRunner:
             "resync_required_sample": resync[:25],
             "latest_ticker_received_ts": latest_ticker,
             "ticker_age_s": round(max(0.0, now - latest_ticker), 3) if latest_ticker else None,
-            "ticker_count": len(self.ticker_updates),
+            "ticker_count": len(ticker_updates),
             "execution_reconciliation_required": bool(reconciliation),
-            "trading_ready": bool(self.betting_ok and not stale and not resync and not reconciliation),
+            "trading_ready": bool(getattr(self, "betting_ok", False) and not stale
+                                  and not resync and not reconciliation),
         }
-        self.summary["feed_health"] = health
-        self.store.set_kv("live_feed_health", health)
+        summary = getattr(self, "summary", None)
+        if summary is not None:
+            summary["feed_health"] = health
+        if store is not None:
+            store.set_kv("live_feed_health", health)
         return health
 
     def poll_books(self, only_resync=False, only_quiet=False):
