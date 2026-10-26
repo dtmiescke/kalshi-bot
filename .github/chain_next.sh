@@ -16,7 +16,7 @@ if [ "$state" != "active" ]; then
 fi
 if [ "${1:-}" != "after-training" ]; then
   waiting=$(gh run list -R "$repo" --workflow train.yml --limit 20 --json status \
-    --jq '[.[] | select(.status == "queued" or .status == "waiting" or .status == "pending" or .status == "requested")] | length')
+    --jq '[.[] | select(.status == "queued" or .status == "waiting" or .status == "pending" or .status == "requested" or .status == "in_progress")] | length')
   if [ "${waiting:-0}" != "0" ]; then
     echo "Trainer is waiting; not queuing the next bot run (train.yml restarts the chain)."
     exit 0
