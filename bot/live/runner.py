@@ -224,6 +224,10 @@ class LiveRunner:
         trades = self.store.flow(ticker, int(now - 300))
         return flow_sig.trade_flow(trades, kalshi_mid)
 
+    def _window_lock_key(self, series, close_ts):
+        """One persistent entry reservation per coin and 15-minute expiry window."""
+        return f"crypto_entry_window:{series}:{int(close_ts)}"
+
     def tick(self, now=None):
         now = now or time.time()
         for a in self.coins.values():
@@ -233,6 +237,7 @@ class LiveRunner:
             self.check_exits(now)
         self.learn_vol(now)
         weights = brain.get_weights(self.store, "crypto")
+        candidates = {}
         for ticker, info in list(self.markets.items()):
             if ticker in self.pending or ticker in self.makers or ticker not in self.books:
                 continue
@@ -240,23 +245,52 @@ class LiveRunner:
             if not readings:
                 continue
             terms = info["terms"]
-            self.store.set_kv(f"start_{ticker}", int(terms["close_ts"]))
-            self.store.set_kv(f"settle_after_{ticker}", int(terms["close_ts"]) + 300)
-            if now - self.last_saved.get(ticker, 0) >= 30:   # learning data, not every tick
+            close_ts = int(terms["close_ts"] or 0)
+            if close_ts <= 0:
+                continue
+            self.store.set_kv(f"start_{ticker}", close_ts)
+            self.store.set_kv(f"settle_after_{ticker}", close_ts + 300)
+            if now - self.last_saved.get(ticker, 0) >= 30:
                 for r in readings:
                     self.store.add_signal(int(now), ticker, r.name, r.prob, r.confidence, r.detail)
                 self.last_saved[ticker] = now
-            mins_left = (terms["close_ts"] - now) / 60
+            mins_left = (close_ts - now) / 60
             if not (self.s.crypto_min_minutes <= mins_left <= self.s.crypto_max_minutes):
                 continue
             if not self.betting_ok or guard.league_benched(self.store, info["series"], mode=self.s.mode):
                 continue
+            lock_key = self._window_lock_key(info["series"], close_ts)
+            if self.store.get_kv(lock_key):
+                # A trade or in-flight attempt already owns this coin/window.
+                continue
             plan = self.plan_for(ticker, readings, weights)
-            if plan:
+            if not plan:
+                continue
+            snap, p, prob, conf = plan
+            group_key = (info["series"], close_ts)
+            candidate = (float(p.get("edge", 0.0)), float(conf or 0.0),
+                         ticker, readings, ctx, plan, lock_key, close_ts)
+            if group_key not in candidates or candidate[:2] > candidates[group_key][:2]:
+                candidates[group_key] = candidate
+
+        # Markets can expose several strikes/contracts for the same coin/window.
+        # Rank them by the live chart/model edge and review only the strongest one.
+        for (series, close_ts), candidate in candidates.items():
+            edge, conf, ticker, readings, ctx, plan, lock_key, _ = candidate
+            if self.store.get_kv(lock_key):
+                continue
+            reservation = {"state": "pending", "series": series, "close_ts": close_ts,
+                           "ticker": ticker, "created_ts": int(now), "mode": self.s.mode}
+            self.store.set_kv(lock_key, reservation)
+            self.pending.add(ticker)
+            try:
                 snap, p, prob, conf = plan
                 council.convene(self.store, self.s, snap, p, readings, prob, conf, now=now)
-                self.pending.add(ticker)
-                yield ticker, readings, ctx, plan
+            except Exception:
+                self.pending.discard(ticker)
+                self.store.set_kv(lock_key, None)
+                raise
+            yield ticker, readings, ctx, plan
 
     def plan_for(self, ticker, readings, weights, maker=None):
         if not any(r.name == "crypto_model" for r in readings):
