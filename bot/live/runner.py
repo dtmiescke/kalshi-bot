@@ -151,19 +151,87 @@ class LiveRunner:
         return changed
 
     def poll_books(self, only_resync=False, only_quiet=False):
-        """Without a Kalshi key there's no Kalshi WebSocket: poll books instead.
-        With the WebSocket, only books that missed an update are re-fetched."""
-        for t, book in self.books.items():
+        """Refresh only eligible books; prefer bounded bulk REST snapshots.
+
+        WebSocket-fed books are refreshed only when they need resync or are
+        stale. A bulk failure falls back to the established per-market method.
+        A REST snapshot never clears a sequence-gap marker unless it contains
+        a valid book for that ticker.
+        """
+        now = time.time()
+        eligible = {}
+        for ticker, book in list(self.books.items()):
+            age = book.age()
             if only_resync and not book.needs_resync:
                 continue
-            if only_quiet and not (book.needs_resync or (book.age() or 99) > 8):
+            if only_quiet and not (book.needs_resync or age is None or age > 8):
                 continue
+            # In WS mode, don't churn fresh books. In REST-only mode the normal
+            # poll remains eligible, while only_quiet/only_resync stay bounded.
+            if not only_resync and not only_quiet and getattr(self, "ws_connected", False):
+                if not book.needs_resync and age is not None and age <= 8:
+                    continue
+            eligible[ticker] = (book, book.last_update)
+
+        if not eligible:
+            return
+
+        def apply_snapshot(ticker, book, previous_update, ob):
+            if not isinstance(ob, dict) or not isinstance(ob.get("yes"), (list, dict)) or not isinstance(ob.get("no"), (list, dict)):
+                raise ValueError("malformed Kalshi orderbook snapshot")
+            # If an async feed updated this book while REST was in flight, keep
+            # the newer feed state instead of overwriting it with an older REST read.
+            if book.last_update != previous_update and book.last_update > 0:
+                return
+            yes = dict(ob.get("yes") or [])
+            no = dict(ob.get("no") or [])
+            if any(not isinstance(p, (int, float)) or not isinstance(q, (int, float))
+                   or not math.isfinite(float(p)) or not math.isfinite(float(q))
+                   or not 0 <= float(p) <= 1 or float(q) < 0 for p, q in list(yes.items()) + list(no.items())):
+                raise ValueError("invalid price/quantity in Kalshi orderbook snapshot")
+            book.yes = yes
+            book.no = no
+            book.last_update = time.time()
+            book.needs_resync = False
+
+        bulk = getattr(self.rest, "market_orderbooks", None)
+        tickers = list(eligible)
+        if callable(bulk):
+            # Official bulk endpoint accepts at most 100 tickers per request.
+            for offset in range(0, len(tickers), 100):
+                chunk = tickers[offset:offset + 100]
+                try:
+                    snapshots = bulk(chunk)
+                    if not isinstance(snapshots, dict):
+                        raise ValueError("malformed bulk orderbook response")
+                    for ticker in chunk:
+                        if ticker not in snapshots:
+                            # Missing rows are not proof of an empty book; use
+                            # the known-good single-market endpoint as fallback.
+                            try:
+                                book, previous_update = eligible[ticker]
+                                apply_snapshot(ticker, book, previous_update, self.rest.orderbook(ticker))
+                            except Exception:
+                                eligible[ticker][0].gaps += 1
+                            continue
+                        try:
+                            book, previous_update = eligible[ticker]
+                            apply_snapshot(ticker, book, previous_update, snapshots[ticker])
+                        except Exception:
+                            eligible[ticker][0].gaps += 1
+                except Exception as exc:
+                    log.warning("bulk Kalshi orderbook refresh failed for %d markets: %s", len(chunk), exc)
+                    for ticker in chunk:
+                        book, previous_update = eligible[ticker]
+                        try:
+                            apply_snapshot(ticker, book, previous_update, self.rest.orderbook(ticker))
+                        except Exception:
+                            book.gaps += 1
+            return
+
+        for ticker, (book, previous_update) in eligible.items():
             try:
-                ob = self.rest.orderbook(t)
-                book.yes = dict(ob.get("yes", []))
-                book.no = dict(ob.get("no", []))
-                book.last_update = time.time()
-                book.needs_resync = False
+                apply_snapshot(ticker, book, previous_update, self.rest.orderbook(ticker))
             except Exception:
                 book.gaps += 1
 
