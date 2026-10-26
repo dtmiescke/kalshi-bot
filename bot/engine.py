@@ -1187,7 +1187,7 @@ class Engine:
                 "stake": round(filled * px, 2), "fee": risk.taker_fee(filled, px, fees.rate(ticker, self.s)),
                 "model_prob": None, "edge": None, "confidence": 1.0,
                 "signals": {"arbitrage": {"pair": [a["low"], a["high"]],
-                                          "locked": round(filled * (1 - pl - ph) - fees, 2)}},
+                                          "locked": round(filled * (1 - pl - ph) - cost_fees, 2)}},
                 "order_id": oid, "style": "taker"})
         summary["bets"] += 2
 
