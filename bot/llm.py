@@ -100,9 +100,29 @@ class LLM:
     def _day_key(self):
         return "llm_calls_" + time.strftime("%Y%m%d", time.gmtime())
 
-    def budget_left(self):
-        used = self.store.get_kv(self._day_key(), 0)
-        return min(self.daily_limit - used, self.max_per_run - self.calls_this_run)
+    def budget_left(self, for_web_search=False):
+        """Return usable calls while optionally protecting the sports web-research budget.
+
+        Ordinary council/analysis calls reserve a small number of calls for current
+        event research. Web searches can consume that reserved capacity themselves.
+        The reservation is opt-in so integrations/tests and non-sports deployments
+        retain their existing budget semantics.
+        """
+        used = int(self.store.get_kv(self._day_key(), 0) or 0)
+        daily_left = self.daily_limit - used
+        run_left = self.max_per_run - self.calls_this_run
+        if not for_web_search:
+            reserve = max(0, int(os.environ.get("LLM_WEB_SEARCH_RESERVE", "0")))
+            web_enabled = os.environ.get("SPORTS_AI_WEB_SEARCH", "yes").strip().lower() not in ("0", "no", "false", "off")
+            web_limit = max(0, int(os.environ.get("OPENROUTER_WEB_SEARCH_MAX_PER_RUN", "2")))
+            web_daily_limit = max(0, int(os.environ.get("OPENROUTER_WEB_SEARCH_DAILY_LIMIT", "6")))
+            day_key = "openrouter_web_searches_" + time.strftime("%Y%m%d", time.gmtime())
+            web_daily_left = web_daily_limit - int(self.store.get_kv(day_key, 0) or 0)
+            if web_enabled and "openrouter" in self.endpoints and web_limit > self.web_searches_this_run and web_daily_left > 0:
+                reserve = min(reserve, web_limit - self.web_searches_this_run, web_daily_left)
+                daily_left -= reserve
+                run_left -= reserve
+        return min(daily_left, run_left)
 
     def ask(self, prompt, model=None, temperature=0.1, max_tokens=400, minimalism=True):
         """Return (text, model_used) or (None, None). Falls back across models."""
@@ -140,7 +160,7 @@ class LLM:
         The ordinary model path remains OmniRoute-first with OpenRouter fallback.
         """
         endpoint = self.endpoints.get("openrouter")
-        if not endpoint or not endpoint[1] or self.budget_left() <= 0:
+        if not endpoint or not endpoint[1] or self.budget_left(for_web_search=True) <= 0:
             return None, None, []
         run_limit = max(0, int(os.environ.get("OPENROUTER_WEB_SEARCH_MAX_PER_RUN", 2)))
         daily_limit = max(0, int(os.environ.get("OPENROUTER_WEB_SEARCH_DAILY_LIMIT", 6)))
@@ -158,7 +178,7 @@ class LLM:
             if not candidate or "|" in candidate or candidate in self.dead:
                 continue
             with self._lock:
-                if self.budget_left() <= 0 or self.web_searches_this_run >= run_limit:
+                if self.budget_left(for_web_search=True) <= 0 or self.web_searches_this_run >= run_limit:
                     break
                 used_today = int(self.store.get_kv(day_key, 0) or 0)
                 if used_today >= daily_limit:
