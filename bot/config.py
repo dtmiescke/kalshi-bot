@@ -149,15 +149,18 @@ class Settings:
     kelly_fraction: float = field(default_factory=lambda: _env_float("KELLY_FRACTION", 0.25))
 
     # --- risk caps (dollars) ------------------------------------------------
-    bankroll: float = field(default_factory=lambda: _env_float("BANKROLL", 1000.0))
-    max_per_bet: float = field(default_factory=lambda: _env_float("MAX_PER_BET", 25.0))
-    max_per_game: float = field(default_factory=lambda: _env_float("MAX_PER_GAME", 50.0))
-    max_per_day: float = field(default_factory=lambda: _env_float("MAX_PER_DAY", 150.0))
+    bankroll: float = field(default_factory=lambda: _env_float("BANKROLL", 200000.0))
+    min_per_bet: float = field(default_factory=lambda: _env_float("MIN_PER_BET", 500.0))
+    max_per_bet: float = field(default_factory=lambda: _env_float("MAX_PER_BET", 750.0))
+    max_per_game: float = field(default_factory=lambda: _env_float("MAX_PER_GAME", 750.0))
+    max_per_day: float = field(default_factory=lambda: _env_float("MAX_PER_DAY", 20000.0))
 
     # --- account limits (from the Council Lab design) ----------------------------
     max_open_positions: int = field(default_factory=lambda: _env_int("MAX_OPEN_POSITIONS", 5))
-    max_open_cost: float = field(default_factory=lambda: _env_float("MAX_OPEN_COST", 200.0))
-    daily_loss_limit: float = field(default_factory=lambda: _env_float("DAILY_LOSS_LIMIT", 30.0))
+    max_open_cost: float = field(default_factory=lambda: _env_float("MAX_OPEN_COST", 3750.0))
+    daily_loss_limit: float = field(default_factory=lambda: _env_float("DAILY_LOSS_LIMIT", 0.0))
+    # Lifetime realized-loss circuit breaker, independent of the daily limit.
+    max_total_loss: float = field(default_factory=lambda: _env_float("MAX_TOTAL_LOSS", 20000.0))
 
     # --- council (DON_THEO_SPEC): members start advisory and EARN power ---------
     # Veto: >= COUNCIL_VETO_MIN_VOTES graded votes with a Brier better than the
@@ -176,15 +179,15 @@ class Settings:
     # --- crypto 15-minute markets ----------------------------------------------
     crypto_enabled: bool = field(default_factory=lambda: _env("CRYPTO_ENABLED", "yes") == "yes")
     crypto_min_edge: float = field(default_factory=lambda: _env_pct("CRYPTO_MIN_EDGE", 5))
-    crypto_min_bet: float = field(default_factory=lambda: _env_float("CRYPTO_MIN_BET", 15.0))
+    crypto_min_bet: float = field(default_factory=lambda: _env_float("CRYPTO_MIN_BET", 500.0))
     # Maximum crypto entries across all 15-minute series in a rolling hour.
     # This is a ceiling, not a quota; weak or unsafe opportunities are skipped.
     crypto_max_trades_per_hour: int = field(
         default_factory=lambda: _env_int("CRYPTO_MAX_TRADES_PER_HOUR", 12))
-    crypto_max_per_bet: float = field(default_factory=lambda: _env_float("CRYPTO_MAX_PER_BET", 20.0))
+    crypto_max_per_bet: float = field(default_factory=lambda: _env_float("CRYPTO_MAX_PER_BET", 750.0))
     # one window = BTC+ETH+SOL bets that settle together (they move together)
     crypto_max_per_window: float = field(
-        default_factory=lambda: _env_float("CRYPTO_MAX_PER_WINDOW", 20.0))
+        default_factory=lambda: _env_float("CRYPTO_MAX_PER_WINDOW", 750.0))
     # Crypto sides priced below this (dollars) are long shots: bought only when the
     # raw exact-contract model, not just the blend, also shows the edge. 0 disables.
     crypto_longshot_price: float = field(
@@ -311,11 +314,13 @@ class Settings:
         # Validate numeric risk settings before any scheduler or execution path
         # can use them. NaN/inf bypass ordinary comparisons and must be rejected.
         nonnegative = {
+            "MIN_PER_BET": self.min_per_bet,
             "MAX_PER_BET": self.max_per_bet,
             "MAX_PER_GAME": self.max_per_game,
             "MAX_PER_DAY": self.max_per_day,
             "MAX_OPEN_COST": self.max_open_cost,
             "DAILY_LOSS_LIMIT": self.daily_loss_limit,
+            "MAX_TOTAL_LOSS": self.max_total_loss,
             "CRYPTO_MIN_BET": self.crypto_min_bet,
             "CRYPTO_MAX_PER_BET": self.crypto_max_per_bet,
             "CRYPTO_MAX_PER_WINDOW": self.crypto_max_per_window,
@@ -326,6 +331,10 @@ class Settings:
                 raise ValueError(f"{name} must be a finite non-negative dollar amount")
         if not math.isfinite(self.bankroll) or self.bankroll <= 0:
             raise ValueError("BANKROLL must be a finite positive dollar amount")
+        if self.min_per_bet < 0 or self.min_per_bet > self.max_per_bet:
+            raise ValueError("MIN_PER_BET must be non-negative and no greater than MAX_PER_BET")
+        if self.max_total_loss <= 0:
+            raise ValueError("MAX_TOTAL_LOSS must be a finite positive dollar amount")
         if self.max_open_positions < 0:
             raise ValueError("MAX_OPEN_POSITIONS must be non-negative")
         if not math.isfinite(self.kelly_fraction) or not 0 <= self.kelly_fraction <= 1:

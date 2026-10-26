@@ -122,6 +122,18 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
     min_edge = s.min_edge if min_edge is None else min_edge
     max_per_bet = s.max_per_bet if max_per_bet is None else max_per_bet
     min_confidence = s.min_confidence
+    # Hard lifetime stop: count only graded realized P&L for this account mode.
+    # It is independent of the rolling daily and 7-day circuit breakers.
+    total_loss_limit = float(getattr(s, "max_total_loss", 20000.0))
+    if not math.isfinite(total_loss_limit) or total_loss_limit <= 0:
+        return None, "invalid total-loss limit; betting paused"
+    lifetime = store.q(
+        "SELECT COALESCE(SUM(pnl),0) AS p FROM bets WHERE status='graded' AND mode=?",
+        (s.mode,),
+    )
+    lifetime_pnl = float(lifetime[0]["p"] if lifetime else 0.0)
+    if lifetime_pnl <= -total_loss_limit:
+        return None, f"lifetime net-loss limit reached ($" + f"{abs(lifetime_pnl):.2f} / $" + f"{total_loss_limit:.2f})"
     effective_kelly_fraction = s.kelly_fraction
     if s.mode == "paper":
         aggression_level = getattr(s, "aggression_level", "off")
@@ -212,18 +224,17 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
         cost = price + taker_fee(100, price, rate) / 100
         kelly = max(0.0, (p_win - cost) / (1 - cost))
         want = s.bankroll * effective_kelly_fraction * kelly * confidence * earned
-    crypto_min_bet = max(0.0, float(getattr(s, "crypto_min_bet", 15.0))) if crypto_domain else 0.0
-    # The minimum is contract premium (stake), not premium-plus-fees. Round
-    # contract count UP so the planned stake actually reaches the threshold;
-    # then include fees in the budget. Rounding down here can make a $15 target
-    # become $14.85 and incorrectly reject an otherwise affordable crypto trade.
-    min_contracts = max(1, math.ceil((crypto_min_bet - 1e-9) / max(price, 0.01))) if crypto_domain else 0
-    min_stake_cost = min_contracts * price if crypto_domain else 0.0
-    min_total_cost = min_stake_cost + (taker_fee(min_contracts, price, rate) if crypto_domain else 0.0)
-    if crypto_domain:
-        # Budget includes fees, so raise the target to cover enough contracts to
-        # meet the minimum stake plus fees. If caps cannot support it, skip.
-        want = max(want, min_total_cost)
+    crypto_min_bet = max(0.0, float(getattr(s, "crypto_min_bet", 0.0))) if crypto_domain else 0.0
+    # The minimum applies to contract premium; fees are additional but count
+    # against the hard per-bet cash cap. Never round a qualifying bet below it.
+    min_stake = max(float(getattr(s, "min_per_bet", 0.0)), crypto_min_bet)
+    min_contracts = max(1, math.ceil((min_stake - 1e-9) / max(price, 0.01)))
+    min_stake_cost = min_contracts * price
+    min_total_cost = min_stake_cost + taker_fee(min_contracts, price, rate)
+    # A qualifying opportunity must reach the configured minimum. If Kelly's
+    # target is smaller, raise only to the minimum; all edge and safety gates
+    # still apply, and any insufficient budget causes a pass.
+    want = max(want, min_total_cost)
 
     acct = store.account(s.bankroll, mode=s.mode)
     if acct["open_positions"] >= s.max_open_positions:
@@ -239,8 +250,8 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
     budget = min(caps)
     if budget < 1.0:
         return None, "risk caps reached"
-    if crypto_domain and budget + 1e-9 < min_total_cost:
-        return None, f"crypto minimum ${crypto_min_bet:.2f} unavailable under risk/account caps"
+    if budget + 1e-9 < min_total_cost:
+        return None, f"minimum bet ${min_stake:.2f} unavailable under risk/account caps"
 
     if style == "maker":
         contracts, avg = int(budget // price), price
@@ -269,8 +280,8 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
     if contracts < 1:
         return None, "fees exceed available budget"
     fee = taker_fee(contracts, avg, rate)
-    if crypto_domain and contracts * avg + 1e-9 < crypto_min_bet:
-        return None, f"crypto minimum ${crypto_min_bet:.2f} cannot be filled at an eligible price"
+    if contracts * avg + 1e-9 < min_stake:
+        return None, f"minimum bet ${min_stake:.2f} cannot be filled at an eligible price"
     # Final check on the REAL order: fees round up per order, so small orders
     # and deeper fills can turn a "5% edge" into 3%. Re-test after actual costs.
     real_edge = p_win - avg - fee / contracts

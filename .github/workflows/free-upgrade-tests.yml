@@ -31,4 +31,9 @@ jobs:
       - name: Compile all Python modules
         run: python -m compileall -q bot tests
       - name: Run regression tests
+        # Existing unit fixtures use small synthetic stakes; production defaults
+        # are asserted separately with a clean environment in test_total_loss_limit.py.
+        env:
+          MIN_PER_BET: "0"
+          CRYPTO_MIN_BET: "0"
         run: python -m unittest discover -s tests -v
