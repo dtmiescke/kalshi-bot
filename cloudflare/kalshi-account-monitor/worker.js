@@ -1,4 +1,4 @@
-const API_BASE = "https://api.elections.kalshi.com/trade-api/v2";
+const API_BASE = "https://external-api.kalshi.com/trade-api/v2";
 
 function corsHeaders(origin, env) {
   const allowed = (env.APP_ORIGIN || "").trim();
