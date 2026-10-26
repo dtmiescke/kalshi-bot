@@ -12,6 +12,7 @@ The same function builds features for training (history) and live trading,
 so the model never sees a feature computed differently than it was trained on.
 """
 import math
+import time
 
 import numpy as np
 
@@ -201,7 +202,7 @@ def build(candles, strike, secs_left, kalshi_bid=None, kalshi_ask=None, vol_per_
     return {k: _safe(x) for k, x in f.items()}
 
 
-def timeframe_indicator_snapshot(candles, timeframes=(1, 5, 15, 30)):
+def timeframe_indicator_snapshot(candles, timeframes=(1, 5, 15, 30), now_ts=None):
     """Chart indicators from clock-aligned OHLCV bars without changing ML columns.
 
     A timeframe is omitted until enough completed bars exist for its indicators.
@@ -211,8 +212,11 @@ def timeframe_indicator_snapshot(candles, timeframes=(1, 5, 15, 30)):
     out = {}
     if not candles:
         return out
+    now_ts = float(now_ts) if now_ts is not None else time.time()
     for tf in timeframes:
         bars = list(candles) if tf == 1 else resample(candles, tf)
+        # Ignore any currently forming bar so timeframes compare completed candles only.
+        bars = [bar for bar in bars if int(bar["ts"]) + tf * 60 <= now_ts]
         if len(bars) < 35:
             continue
         close = _arr(bars, "close")
