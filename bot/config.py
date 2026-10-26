@@ -153,7 +153,7 @@ class Settings:
     min_per_bet: float = field(default_factory=lambda: _env_float("MIN_PER_BET", 500.0))
     max_per_bet: float = field(default_factory=lambda: _env_float("MAX_PER_BET", 750.0))
     max_per_game: float = field(default_factory=lambda: _env_float("MAX_PER_GAME", 750.0))
-    max_per_day: float = field(default_factory=lambda: _env_float("MAX_PER_DAY", 6000.0))
+    max_per_day: float = field(default_factory=lambda: _env_float("MAX_PER_DAY", 20000.0))
 
     # --- account limits (from the Council Lab design) ----------------------------
     max_open_positions: int = field(default_factory=lambda: _env_int("MAX_OPEN_POSITIONS", 5))
