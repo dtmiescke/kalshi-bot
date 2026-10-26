@@ -110,6 +110,28 @@ def league_benched(store, series, n=40, mode=None):
     return bool(clvs) and sum(clvs) / len(clvs) < 0
 
 
+def total_loss_tripped(store, limit=None, mode=None):
+    """Hard all-time net-realized-loss stop for the selected account mode."""
+    if limit is None:
+        try:
+            limit = float(os.environ.get("MAX_TOTAL_LOSS", 20000))
+        except (TypeError, ValueError, OverflowError):
+            return True
+    try:
+        limit = float(limit)
+    except (TypeError, ValueError, OverflowError):
+        return True
+    if not math.isfinite(limit) or limit <= 0:
+        return True
+    mode = mode or os.environ.get("BOT_MODE", "paper")
+    rows = store.q(
+        "SELECT COALESCE(SUM(pnl),0) p FROM bets WHERE status='graded' AND mode=?",
+        (mode,),
+    )
+    pnl = float(rows[0]["p"] if rows else 0.0)
+    return pnl <= -limit
+
+
 def status(store, bankroll, daily_loss_limit=None, mode=None):
     """(betting_allowed, reason)."""
     from .risk import day_start_ts
@@ -130,6 +152,8 @@ def status(store, bankroll, daily_loss_limit=None, mode=None):
     lost = store.realized_today(day_start_ts(), mode=mode)
     if lost <= -limit:
         return False, f"daily loss limit hit (${-lost:.2f} lost today; resets at midnight in {os.environ.get('BOT_TIMEZONE', 'America/Chicago')})"
+    if total_loss_tripped(store, mode=mode):
+        return False, "lifetime net-loss limit reached; betting paused"
     if drawdown_tripped(store, bankroll, mode=mode):
         return False, "drawdown limit hit (7-day losses)"
     if clv_tripped(store, mode=mode):
