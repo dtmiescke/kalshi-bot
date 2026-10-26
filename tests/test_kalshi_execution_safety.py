@@ -36,6 +36,7 @@ class TestKalshiExecutionSafety(unittest.TestCase):
     def test_order_write_rate_limit_is_not_retried(self):
         client = KalshiClient("https://example.com/trade-api/v2")
         response = Mock(status_code=429, headers={"Retry-After": "1"})
+        response.request = type("Request", (), {"headers": {}})()
         response.raise_for_status.side_effect = requests.HTTPError("429")
         client.session.request = Mock(return_value=response)
         with self.assertRaises(requests.HTTPError):
