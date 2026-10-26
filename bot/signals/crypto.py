@@ -10,6 +10,8 @@ Coinbase's public price as a close proxy, so tiny gaps near the strike are noise
 """
 import math
 import re
+import time
+from datetime import datetime, timezone
 
 import requests
 
@@ -22,18 +24,42 @@ def norm_cdf(x):
     return 0.5 * (1 + math.erf(x / math.sqrt(2)))
 
 
-def fetch_candles(pair, timeout=10):
-    """Last ~5 hours of 1-minute candles, oldest first: ts, open, high, low, close, volume."""
-    try:
-        r = requests.get(COINBASE.format(pair=pair), params={"granularity": 60},
-                         timeout=timeout, headers={"User-Agent": "kalshi-bot"})
-        r.raise_for_status()
-        rows = sorted(r.json(), key=lambda c: c[0])
-        return [{"ts": int(c[0]), "low": float(c[1]), "high": float(c[2]), "open": float(c[3]),
-                 "close": float(c[4]), "volume": float(c[5])} for c in rows]
-    except (requests.RequestException, ValueError, IndexError, TypeError):
-        return []
+_CANDLE_CACHE = {}
+CANDLE_CACHE_SECONDS = 45
+CANDLE_HISTORY_MINUTES = 1160
 
+def fetch_candles(pair, timeout=10):
+    """Fetch ~19 hours of 1-minute OHLCV in API-safe chunks, oldest first."""
+    now = time.time()
+    cached = _CANDLE_CACHE.get(pair)
+    if cached and now - cached[0] < CANDLE_CACHE_SECONDS:
+        return list(cached[1])
+    try:
+        # Coinbase limits each candle response to roughly 300 rows.
+        end_ts = int(now // 60 * 60)
+        rows_by_ts = {}
+        chunk_minutes = 290
+        chunks = (CANDLE_HISTORY_MINUTES + chunk_minutes - 1) // chunk_minutes
+        for chunk in range(chunks):
+            end = end_ts - chunk * chunk_minutes * 60
+            start = end - chunk_minutes * 60
+            start_iso = datetime.fromtimestamp(start, timezone.utc).isoformat().replace("+00:00", "Z")
+            end_iso = datetime.fromtimestamp(end, timezone.utc).isoformat().replace("+00:00", "Z")
+            response = requests.get(COINBASE.format(pair=pair),
+                                    params={"granularity": 60, "start": start_iso, "end": end_iso},
+                                    timeout=timeout, headers={"User-Agent": "kalshi-bot"})
+            response.raise_for_status()
+            for row in response.json():
+                ts = int(row[0])
+                rows_by_ts[ts] = {"ts": ts, "low": float(row[1]), "high": float(row[2]),
+                                  "open": float(row[3]), "close": float(row[4]),
+                                  "volume": float(row[5])}
+        rows = [rows_by_ts[k] for k in sorted(rows_by_ts)]
+        _CANDLE_CACHE[pair] = (now, rows)
+        return list(rows)
+    except (requests.RequestException, ValueError, IndexError, TypeError, OverflowError):
+        # Do not return old cached candles as if they were fresh after failure.
+        return []
 
 TICKER = "https://api.exchange.coinbase.com/products/{pair}/ticker"
 
