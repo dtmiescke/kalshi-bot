@@ -200,10 +200,11 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
         kelly = max(0.0, (p_win - cost) / (1 - cost))
         want = s.bankroll * effective_kelly_fraction * kelly * confidence * earned
     crypto_min_bet = max(0.0, float(getattr(s, "crypto_min_bet", 15.0))) if crypto_domain else 0.0
+    min_total_cost = crypto_min_bet + taker_fee(max(1, int(crypto_min_bet / max(price, 0.01))), price, rate)
     if crypto_domain:
-        # Never place a smaller crypto trade merely because Kelly sizing is small.
-        # If the full minimum cannot pass every cap and fee check, skip the trade.
-        want = max(want, crypto_min_bet)
+        # Budget includes fees, so raise the target to cover the minimum stake plus fees.
+        # If the full minimum cannot pass every cap, skip instead of downsizing.
+        want = max(want, min_total_cost)
 
     acct = store.account(s.bankroll, mode=s.mode)
     if acct["open_positions"] >= s.max_open_positions:
@@ -219,7 +220,6 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
     budget = min(caps)
     if budget < 1.0:
         return None, "risk caps reached"
-    min_total_cost = crypto_min_bet + taker_fee(max(1, int(crypto_min_bet / max(price, 0.01))), price, rate)
     if crypto_domain and budget + 1e-9 < min_total_cost:
         return None, f"crypto minimum ${crypto_min_bet:.2f} unavailable under risk/account caps"
 
