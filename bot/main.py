@@ -435,7 +435,7 @@ def main(argv=None):
         days = float(argv[1]) if len(argv) > 1 else 3
         # Keep CI history replays bounded. A per-run cap prevents a long-tail
         # market catalog or rate-limit cooldown from monopolizing the runner.
-        max_markets = max(1, min(300, int(os.environ.get("HISTORY_MAX_MARKETS", "60"))))
+        max_markets = max(1, min(300, int(os.environ.get("HISTORY_MAX_MARKETS", "20"))))
         print(history.text(history.run(store, data, days=days, fee_rate=s.taker_fee_rate,
                                        max_markets=max_markets)))
         return
