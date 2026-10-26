@@ -6,7 +6,7 @@ This is an additive integration; it does not replace the existing bot or switch 
 
 - `KalshiClient.market_orderbooks(tickers)`: reads up to 100 market books in one request to `GET /markets/orderbooks?tickers=...`, normalizes dollar/cents-style price values to dollar floats, sorts levels best-first, and rejects invalid tickers before making a request.
 - `KalshiClient.place_order_v2(...)`: isolated opt-in client method for the documented V2 `POST /portfolio/events/orders` endpoint. It validates inputs, emits fixed-point dollar prices and contract counts, and includes a unique client order ID and explicit self-trade prevention.
-- Unit tests use mocks only; they do not place orders or contact Kalshi.
+- Unit tests use mocks only; they do not place orders or contact Kalshi. Bulk refresh integration tests cover chunk-compatible refresh, missing-row fallback, malformed-data rejection, and skipping fresh WebSocket books.
 
 ## Why V2 is not automatically wired into the existing engine
 
@@ -16,7 +16,7 @@ The existing engine and ledger use legacy YES/NO order methods and response assu
 
 - [ ] Migrate order create, get, cancel, amend, and fills together to V2 after reviewing every engine and recovery call site.
 - [ ] Add order-group integration only after confirming current API schema, group limit semantics, and the desired exchange-side limits; keep existing local risk checks authoritative.
-- [ ] Connect bulk orderbook retrieval to a bounded discovery/refresh path only where it reduces requests without overwriting fresher WebSocket books.
+- [x] Connect bulk orderbook retrieval to bounded stale/resync refresh in chunks of at most 100; fallback to per-market REST for missing/failed rows and reject malformed snapshots. Fresh WebSocket books are skipped in quiet mode.
 - [ ] Add a freshness gate for sports live data (score/status/clock), and ensure missing or unsupported game statistics cannot be treated as current.
 - [ ] Verify WebSocket reconnect/resubscribe, sequence-gap resync, keepalive, and stale-feed no-trade behavior with deterministic tests.
 - [ ] Verify historical cutoff, archive pagination, duplicate trade IDs, and settlement-result handling with recorded fixtures.
