@@ -88,7 +88,7 @@ class TestWorkflowWiring(unittest.TestCase):
             self.assertIn(part, chain)
         self.assertTrue(wf.rstrip().endswith("run: bash .github/chain_next.sh"))  # last step
         # the cron fallback and the shared concurrency group stay in place
-        self.assertIn('cron: "*/15 * * * *"', wf)
+        self.assertIn('cron: "*/12 * * * *"', wf)
         self.assertIn("group: kalshi-bot", wf)
         self.assertIn("group: kalshi-bot", self.load("train.yml"))
 
