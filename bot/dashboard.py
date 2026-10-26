@@ -188,7 +188,7 @@ def build(store, settings, live_path="data/live_summary.json", briefing_path="da
     last_run = store.get_kv("last_run_ts")
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="refresh" content="120"><title>Kalshi bot</title>
+<meta http-equiv="refresh" content="30"><title>Kalshi bot</title>
 <style>
 :root{{--bg:#fbfaf7;--fg:#1d1d1b;--mut:#6b6a66;--card:#fff;--line:#e7e4dd;--good:#1b7f4b;--bad:#b3261e;--warn:#9a6700}}
 @media (prefers-color-scheme:dark){{:root{{--bg:#141413;--fg:#efede8;--mut:#9c9a94;--card:#1d1d1b;--line:#2e2d2a;--good:#5fd39a;--bad:#ff8a80;--warn:#e3b341}}}}
@@ -204,7 +204,8 @@ pre{{white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.5;mar
 td div.mut{{white-space:normal}}.mut{{color:var(--mut);font-size:12px}}a{{color:inherit}}
 </style></head><body>
 <h1>Kalshi bot <span class="mut">· {E(settings.mode.upper())}</span></h1>
-<div class="mut">Updated {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(now))} · last run {_age(last_run, now)} · refreshes every 2 min</div>
+<div class="mut">Snapshot published {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(now))} · last bot run {_age(last_run, now)} · page checks for a newer published snapshot every 30 sec</div>
+<div class="{'bad' if not last_run or now - last_run > 900 else 'good'}"><b>{'STALE DATA' if not last_run or now - last_run > 900 else 'Snapshot recent'}</b>{' — no successful bot run in the last 15 minutes; refresh cannot create new data.' if not last_run or now - last_run > 900 else ' — this is the latest saved snapshot, not a live API stream.'}</div>
 <div class="card"><h2>Status</h2>
 <div class="{'good' if ok else 'bad'}"><b>{'Betting active' if ok else 'PAUSED'}</b> — {E(why)}</div>
 <div class="{k_cls}">Kalshi connection: {k_ok} ok · {k_429} rate-limited (429) last run</div></div>
