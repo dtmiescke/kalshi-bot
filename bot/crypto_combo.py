@@ -53,6 +53,16 @@ def _percent_env(name, default):
     return value / 100.0 if value > 1 else value
 
 
+def _stake_budget(edge, confidence, cap=15.0):
+    """Choose a variable paper stake from measured edge/confidence, capped at $15."""
+    edge = max(0.0, min(1.0, float(edge)))
+    confidence = max(0.0, min(1.0, float(confidence)))
+    cap = max(0.0, min(15.0, float(cap)))
+    # Scale up with edge, but do not allocate the full cap to marginal edges.
+    edge_scale = min(1.0, max(0.20, edge / 0.15))
+    return round(cap * edge_scale * confidence, 2)
+
+
 def _latest_crypto_markets(store, now):
     rows = store.q(
         """SELECT m.* FROM market_snapshots m
@@ -180,17 +190,15 @@ def scan(client, store, settings=None, now=None):
         store.set_kv(HEALTH_KEY, {**result, "ts": now})
         return result
 
-    max_per_bet = float(getattr(settings, "max_per_bet", os.environ.get("MAX_PER_BET", 25)) or 25)
-    daily_cap = float(os.environ.get("CRYPTO_COMBO_DAILY_CAP", "15"))
-    day_start = risk.day_start_ts(now)
-    spent_today = sum(
-        float(row.get("stake", 0) or 0) + float(row.get("fee", 0) or 0)
-        for row in history if int(row.get("ts", 0) or 0) >= day_start
-    )
-    remaining_daily = max(0.0, daily_cap - spent_today)
-    target_stake = min(float(os.environ.get("CRYPTO_COMBO_STAKE", "5")), max_per_bet, remaining_daily)
-    if target_stake <= 0:
-        result = {"ok": True, "enabled": True, "created": 0, "skipped": "crypto_combo_daily_cap_reached"}
+    configured_cap = _float(os.environ.get("CRYPTO_COMBO_MAX_PER_BET", "15"))
+    configured_cap = 15.0 if configured_cap is None else max(0.0, min(15.0, configured_cap))
+    global_cap = _float(getattr(settings, "max_per_bet", os.environ.get("MAX_PER_BET", 25)))
+    max_per_bet = min(15.0, configured_cap, global_cap if global_cap is not None else 15.0)
+    mean_confidence = sum(float(leg["confidence"]) for leg in legs) / len(legs)
+    target_stake = _stake_budget(edge, mean_confidence, max_per_bet)
+    if target_stake < 1.0:
+        result = {"ok": True, "enabled": True, "created": 0, "skipped": "confidence_adjusted_stake_below_minimum",
+                  "target_stake": target_stake}
         store.set_kv(HEALTH_KEY, {**result, "ts": now})
         return result
     unit_cost = combo_price + fee_per_contract
@@ -200,7 +208,7 @@ def scan(client, store, settings=None, now=None):
     stake = round(contracts * combo_price, 4)
     fee = round(contracts * fee_per_contract, 4)
     if (contracts < 1 or stake + fee > max_per_bet + 1e-8
-            or stake + fee > remaining_daily + 1e-8):
+            or stake + fee > target_stake + 1e-8):
         result = {"ok": True, "enabled": True, "created": 0, "skipped": "stake_or_fee_limit"}
         store.set_kv(HEALTH_KEY, {**result, "ts": now})
         return result
