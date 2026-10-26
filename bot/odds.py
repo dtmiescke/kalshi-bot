@@ -93,19 +93,23 @@ class OddsClient:
         self.last_remaining = None
 
     def fetch(self, sport, regions="us"):
+        # Missing credentials are a feed failure, not a valid empty schedule.
+        # Raising lets the engine record a visible health warning and preserve
+        # the last known-good cache rather than silently disabling sportsbook data.
         if not self.api_key:
-            return []
+            raise RuntimeError("ODDS_API_KEY is missing; live sportsbook consensus is unavailable")
         r = requests.get(ODDS_URL.format(sport=sport), params={
             "apiKey": self.api_key, "regions": regions, "markets": "h2h",
             "oddsFormat": "american"}, timeout=self.timeout)
         # Authentication and unsupported-market errors are not valid empty
-        # schedules. Raise so callers preserve the last known-good odds cache and
-        # emit a source-health warning instead of silently treating every game as
-        # unmatched.
+        # schedules. Raise so callers preserve the last known-good odds cache.
         r.raise_for_status()
+        payload = r.json()
+        if not isinstance(payload, list):
+            raise RuntimeError("Odds API returned an unexpected payload; expected a list of events")
         self.last_remaining = r.headers.get("x-requests-remaining")
         self.last_used = r.headers.get("x-requests-used")
-        return r.json()
+        return payload
 
 
 def odds_due(store, sport, refresh_minutes):
