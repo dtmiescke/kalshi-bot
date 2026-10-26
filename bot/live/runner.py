@@ -359,7 +359,7 @@ class LiveRunner:
                                           f"edge {p['edge']:+.1%} ({verdict['by']})")
         finally:
             self.pending.discard(ticker)
-            info = self.markets.get(ticker, {})
+            info = getattr(self, "markets", {}).get(ticker, {})
             terms = info.get("terms", {})
             close_ts = int(terms.get("close_ts") or 0)
             if info.get("series") and close_ts:
