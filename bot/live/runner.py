@@ -532,7 +532,7 @@ class LiveRunner:
                 self.store.log_maker(ticker, 1, "filled", now - mk["placed"])
                 if real_order:
                     self.store.set_kv("maker_recovery", None)
-                info = self.markets.get(ticker, {})
+                info = getattr(self, "markets", {}).get(ticker, {})
                 close_ts = int((info.get("terms") or {}).get("close_ts") or 0)
                 if info.get("series") and close_ts:
                     lock_key = self._window_lock_key(info["series"], close_ts)
@@ -553,7 +553,7 @@ class LiveRunner:
                 self.store.log_maker(ticker, 0, outcome, now - mk["placed"])
                 if real_order:
                     self.store.set_kv("maker_recovery", None)
-                info = self.markets.get(ticker, {})
+                info = getattr(self, "markets", {}).get(ticker, {})
                 close_ts = int((info.get("terms") or {}).get("close_ts") or 0)
                 if info.get("series") and close_ts:
                     self.store.set_kv(self._window_lock_key(info["series"], close_ts), None)
