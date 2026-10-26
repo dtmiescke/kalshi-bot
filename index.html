@@ -218,6 +218,17 @@ details.floor summary{padding:10px 12px;cursor:pointer;font-family:var(--display
 @media (prefers-reduced-motion:reduce){.ring,.tablering,.planet.open{animation:none}}
 
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* Kalshi official ticker snapshot */
+.kTicker{border:1px solid var(--line);background:var(--panel);border-radius:14px;padding:12px;margin:10px 0}
+.kTickerHead{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px}
+.kTickerGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.kTickerCell{background:var(--panel2);border-radius:10px;padding:9px;min-width:0}
+.kTickerCell b{display:block;font-family:var(--display);font-size:1rem;overflow-wrap:anywhere}
+.kTickerCell span{display:block;color:var(--muted);font-size:.72rem}
+.kTickerMeta{font-size:.75rem;color:var(--muted);margin-top:8px}
+@media(max-width:380px){.kTickerGrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
 </style>
 </head>
 <body>
@@ -244,6 +255,11 @@ details.floor summary{padding:10px 12px;cursor:pointer;font-family:var(--display
     <div><b id="hOpen">0</b><span>Open</span></div>
   </div>
 
+  <section class="kTicker" aria-live="polite" aria-label="Kalshi ticker snapshot">
+    <div class="kTickerHead"><strong>Kalshi market ticker</strong><span class="pill" id="kTickerStatus">Waiting for snapshot</span></div>
+    <div class="kTickerGrid" id="kTickerGrid"><div class="kTickerCell"><b>—</b><span>BTC 15-minute</span></div><div class="kTickerCell"><b>—</b><span>ETH 15-minute</span></div><div class="kTickerCell"><b>—</b><span>SOL 15-minute</span></div></div>
+    <div class="kTickerMeta" id="kTickerMeta">Reads the bot's latest saved snapshot. This is not a direct streaming connection.</div>
+  </section>
   <p class="sub" id="theoHQ" hidden></p>
   <div class="spark"><canvas id="spCv" aria-label="Profit over time"></canvas></div>
   <section id="hub" class="view">
@@ -946,6 +962,56 @@ $("saveVars").onclick=async()=>{const btn=$("saveVars");btn.disabled=true;let n=
     toast(n?"Settings saved":"Nothing changed")}catch(e){toast(explain(e))}btn.disabled=false};
 $("logoutBtn").onclick=()=>{localStorage.removeItem("kbot");location.reload()};
 
+/* Kalshi ticker display: render only real fields present in the saved live summary. */
+let liveSnapshot = null;
+function tickerNum(v){
+  if(v===null||v===undefined||v==="")return null;
+  const n=Number(v);return Number.isFinite(n)?n:null;
+}
+function tickerPrice(v){
+  const n=tickerNum(v);return n===null?"—":(n<=1?"$"+n.toFixed(3):n.toLocaleString(undefined,{maximumFractionDigits:2}));
+}
+function renderKalshiTicker(){
+  const grid=$("kTickerGrid"),status=$("kTickerStatus"),meta=$("kTickerMeta");
+  if(!grid||!status||!meta)return;
+  const snap=liveSnapshot;
+  if(!snap||!snap.data||!snap.data.ts){
+    status.textContent="No snapshot";status.className="pill off";
+    meta.textContent="No saved live summary is available yet. The ticker feed requires a successful bot run.";
+    return;
+  }
+  const d=snap.data, age=Math.max(0,Math.floor(Date.now()/1000-Number(d.ts||0)));
+  const fresh=age<=180, labels=[["KXBTC15M","BTC"],["KXETH15M","ETH"],["KXSOL15M","SOL"]];
+  grid.innerHTML=labels.map(([series,label])=>{
+    const rows=Object.entries(d.markets||{}).filter(([t,m])=>String(t).includes(series)||String(t).startsWith(series));
+    const found=rows.map(([t,m])=>({t,m:m||{}})).sort((a,b)=>(tickerNum(a.m.secs_left)??999999)-(tickerNum(b.m.secs_left)??999999))[0];
+    if(!found)return '<div class="kTickerCell"><b>—</b><span>'+label+' · no active market</span></div>';
+    const tick=found.m.ticker||{};
+    const price=tick.price_dollars??found.m.kalshi_mid;
+    const bid=tick.yes_bid_dollars,ask=tick.yes_ask_dollars;
+    const bidText=bid===undefined?"—":tickerPrice(bid),askText=ask===undefined?"—":tickerPrice(ask);
+    return '<div class="kTickerCell"><b>'+tickerPrice(price)+'</b><span>'+label+' · '+(tick.market_ticker||found.t)+'</span><span>YES bid '+bidText+' / ask '+askText+'</span></div>';
+  }).join("");
+  const feed=d.kalshi_feed||{};
+  status.textContent=fresh?"Snapshot recent":"Snapshot stale";
+  status.className="pill "+(fresh?"on":"off");
+  const updates=Number(feed.ticker_updates||0),subs=Number(feed.subscribed_markets||Object.keys(d.markets||{}).length);
+  meta.textContent="Snapshot "+age+"s old · "+updates+" ticker markets updated · "+subs+" markets subscribed. The page refreshes automatically, but prices advance only when the bot publishes a new snapshot.";
+}
+async function loadKalshiTicker(){
+  try{
+    const txt=await file("LIVE.json");
+    if(!txt){liveSnapshot=null;renderKalshiTicker();return}
+    const data=JSON.parse(txt);
+    liveSnapshot={data};
+    renderKalshiTicker();
+  }catch(e){
+    const status=$("kTickerStatus"),meta=$("kTickerMeta");
+    if(status){status.textContent="Unavailable";status.className="pill off"}
+    if(meta)meta.textContent="Could not read the latest ticker snapshot: "+(e.message||"unknown error");
+  }
+}
+
 /* ================= data refresh ================= */
 async function refresh(){
   if(!demo){
@@ -955,7 +1021,7 @@ async function refresh(){
     file("BRIEFING.txt").then(t=>$("briefing").textContent=t||"No briefing yet. It appears after a run with the AI key set.").catch(e=>$("briefing").textContent=explain(e));
     file("REPORT.txt").then(t=>$("reportTxt").textContent=t||"No report yet. It appears after the first saved run.").catch(e=>$("reportTxt").textContent=explain(e));
   }else{sample=true;bets=sampleBets();$("briefing").textContent="Sample mode. Your bot’s AI briefing shows here once connected.";$("reportTxt").textContent="Sample mode."}
-  await loadDB().catch(()=>{});
+  await Promise.all([loadDB().catch(()=>{}),loadKalshiTicker()]);
   renderHud();renderPower();renderMode();renderRuns();renderFeed();renderBetList();renderEdge();renderAudit();leaderboard();renderVerdict();renderChamber();drawSpark();celebrate();
   if(document.querySelector("#control.show"))renderSettings();
 }
