@@ -252,6 +252,15 @@ class KalshiClient:
             raise ValueError("invalid Kalshi series ticker")
         return self._req("GET", f"/series/{ticker}").get("series", {})
 
+    def contract_context(self, ticker):
+        """Read-only contract rules and settlement-source metadata.
+
+        Reuses this client's existing paced, cached public GET requests.
+        No order access, PDF execution, or independent MCP trading process.
+        """
+        from bot.contract_intelligence import contract_context
+        return contract_context(self, ticker)
+
     def orderbook(self, ticker, depth=20):
         """Returns {'yes': [(price, qty), ...], 'no': [...]} as bids, best first."""
         data = self._req("GET", f"/markets/{ticker}/orderbook", params={"depth": depth})
