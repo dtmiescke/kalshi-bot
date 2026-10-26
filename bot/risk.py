@@ -146,6 +146,7 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
         # YES on Boston and NO on New York are the same bet; never double up
         return None, "already holding this game"
     is_crypto = str(mkt.get("series", "")).endswith("15M")
+    crypto_domain = brain.domain_of(mkt.get("series") or mkt.get("ticker")) == "crypto"
     if is_crypto and store.q("SELECT 1 FROM bets WHERE event_ticker=? AND mode=? LIMIT 1",
                              (mkt["event_ticker"], s.mode)):
         # one entry per 15-minute window: after an early exit, re-buying the same
@@ -198,6 +199,18 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
         cost = price + taker_fee(100, price, rate) / 100
         kelly = max(0.0, (p_win - cost) / (1 - cost))
         want = s.bankroll * effective_kelly_fraction * kelly * confidence * earned
+    crypto_min_bet = max(0.0, float(getattr(s, "crypto_min_bet", 15.0))) if crypto_domain else 0.0
+    # The minimum is contract premium (stake), not premium-plus-fees. Round
+    # contract count UP so the planned stake actually reaches the threshold;
+    # then include fees in the budget. Rounding down here can make a $15 target
+    # become $14.85 and incorrectly reject an otherwise affordable crypto trade.
+    min_contracts = max(1, math.ceil((crypto_min_bet - 1e-9) / max(price, 0.01))) if crypto_domain else 0
+    min_stake_cost = min_contracts * price if crypto_domain else 0.0
+    min_total_cost = min_stake_cost + (taker_fee(min_contracts, price, rate) if crypto_domain else 0.0)
+    if crypto_domain:
+        # Budget includes fees, so raise the target to cover enough contracts to
+        # meet the minimum stake plus fees. If caps cannot support it, skip.
+        want = max(want, min_total_cost)
 
     acct = store.account(s.bankroll, mode=s.mode)
     if acct["open_positions"] >= s.max_open_positions:
@@ -213,6 +226,8 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
     budget = min(caps)
     if budget < 1.0:
         return None, "risk caps reached"
+    if crypto_domain and budget + 1e-9 < min_total_cost:
+        return None, f"crypto minimum ${crypto_min_bet:.2f} unavailable under risk/account caps"
 
     if style == "maker":
         contracts, avg = int(budget // price), price
@@ -241,6 +256,8 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
     if contracts < 1:
         return None, "fees exceed available budget"
     fee = taker_fee(contracts, avg, rate)
+    if crypto_domain and contracts * avg + 1e-9 < crypto_min_bet:
+        return None, f"crypto minimum ${crypto_min_bet:.2f} cannot be filled at an eligible price"
     # Final check on the REAL order: fees round up per order, so small orders
     # and deeper fills can turn a "5% edge" into 3%. Re-test after actual costs.
     real_edge = p_win - avg - fee / contracts

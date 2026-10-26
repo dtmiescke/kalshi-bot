@@ -84,7 +84,7 @@ jobs:
           LLM_DAILY_LIMIT: ${{ vars.LLM_DAILY_LIMIT || '45' }}
           # Protect eight shared daily calls for the two-review AI council.
           LLM_COUNCIL_RESERVE: ${{ vars.LLM_COUNCIL_RESERVE || '8' }}
-          CRYPTO_COMBO_MAX_PER_BET: ${{ vars.CRYPTO_COMBO_MAX_PER_BET || '15' }}
+          CRYPTO_COMBO_MAX_PER_BET: ${{ vars.CRYPTO_COMBO_MAX_PER_BET || '25' }}
           CRYPTO_COMBO_MIN_LEG_EDGE: ${{ vars.CRYPTO_COMBO_MIN_LEG_EDGE || '3' }}
           CRYPTO_COMBO_MIN_EDGE: ${{ vars.CRYPTO_COMBO_MIN_EDGE || '6' }}
           # Keep council calls from consuming all capacity needed for sports event research.

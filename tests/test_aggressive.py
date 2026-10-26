@@ -74,7 +74,7 @@ class TestAggressive(unittest.TestCase):
         self.assertEqual(len(bets), 1)                       # one strike per event
         self.assertEqual(bets[0]["ticker"], "KXBTCD-H1-T100000")
         self.assertEqual(bets[0]["side"], "yes")
-        self.assertLessEqual(bets[0]["stake"], 5)            # stricter ladder bet cap
+        self.assertGreaterEqual(bets[0]["stake"], 15)       # all crypto trades meet minimum\n        self.assertLessEqual(bets[0]["stake"], 20)            # default ladder cap includes fees
         self.assertEqual(brain.domain_of("KXBTCD-H1"), "crypto")
 
     def test_earned_size_ramps_with_proof(self):

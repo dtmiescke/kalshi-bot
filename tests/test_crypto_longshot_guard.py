@@ -193,7 +193,8 @@ class TestCryptoLongshotGuard(unittest.TestCase):
         plan, why = risk.decide(self.s, self.st, sports, 0.30, 0.9, LONGSHOT_BOOK, min_edge=0.05)
         self.assertIsNotNone(plan, why)
         mid_book = {"yes": [(0.40, 500)], "no": [(0.55, 500)]}         # YES ask 45c
-        plan, why = risk.decide(self.s, self.st, CRYPTO, 0.60, 0.9, mid_book, min_edge=0.05)
+        plan, why = risk.decide(self.s, self.st, CRYPTO, 0.60, 0.9, mid_book,
+                                min_edge=0.05, max_per_bet=20)
         self.assertIsNotNone(plan, why)
 
     def test_exactly_twenty_cents_is_not_a_long_shot(self):
@@ -249,7 +250,7 @@ class TestEngineWiring(unittest.TestCase):
         with mock.patch("bot.engine.brain.blend", return_value=(0.30, 0.9)), \
                 mock.patch("bot.engine.brain.calibrate", side_effect=lambda p, *a, **k: p):
             got = self.eng.evaluate(dict(CRYPTO), readings, {}, summary, required="crypto_model",
-                                    min_edge=0.05, max_per_bet=10)
+                                    min_edge=0.05, max_per_bet=20)
         return got, summary
 
     def test_market_anchored_blend_cannot_buy_a_model_long_shot(self):

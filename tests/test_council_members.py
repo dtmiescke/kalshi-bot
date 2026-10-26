@@ -210,7 +210,7 @@ class TestEngineAdvisory(Base):
         with mock.patch("bot.engine.brain.blend", return_value=(0.30, 0.9)), \
                 mock.patch("bot.engine.brain.calibrate", side_effect=lambda p, *a, **k: p):
             got = self.eng.evaluate(dict(CRYPTO), readings, {}, summary, required="crypto_model",
-                                    min_edge=0.05, max_per_bet=10)
+                                    min_edge=0.05, max_per_bet=20)
         return got, summary
 
     def test_advisory_stage_never_changes_the_decision(self):
