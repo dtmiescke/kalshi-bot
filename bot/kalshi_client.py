@@ -122,7 +122,10 @@ class KalshiClient:
             retries = 1
         url = self.base_url + path
         ttl = _cache_ttl(path) if method == "GET" else 0
-        ck = (path, tuple(sorted((params or {}).items())))
+        # Normalize list-valued query parameters (e.g. tickers) so the
+        # request cache key remains hashable without changing requests' encoding.
+        ck = (path, tuple(sorted((k, tuple(v) if isinstance(v, list) else v)
+                                 for k, v in (params or {}).items())))
         if ttl:
             hit = self._cache.get(ck)
             if hit and time.time() - hit[0] < ttl:
