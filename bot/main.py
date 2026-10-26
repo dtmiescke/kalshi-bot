@@ -54,7 +54,10 @@ def training_due(store, now, every_hours=24.0, retry_hours=6.0):
     if now - last_attempt < max(0.25, float(retry_hours)) * 3600:
         return False
     status = store.get_kv("last_train_status")
-    if status in (None, "", "not enough data", "error", "running", "time limit"):
+    if status in (None, "", "not enough data", "error", "running", "time limit", "not promoted"):
+        # A completed fit that failed promotion is NOT a successful learning
+        # milestone. Re-evaluate after the retry backoff instead of suppressing
+        # candidate evaluation for a full day. The champion remains unchanged.
         return True
     last_success = float(store.get_kv("last_train", 0) or 0)
     return now - last_success >= max(0.25, float(every_hours)) * 3600
