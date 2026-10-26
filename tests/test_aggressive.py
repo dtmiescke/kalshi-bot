@@ -167,6 +167,7 @@ class TestDashboard(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             st = Store(os.path.join(d, "t.db"))
             s = Settings()
+            s.bankroll = 1000.0  # isolated dashboard fixture; production default is $200k
             st.add_bet({"ts": int(time.time()), "mode": "paper", "ticker": "KXBTC15M-X-00",
                         "event_ticker": "KXBTC15M-X", "series": "KXBTC15M", "team": "UP",
                         "side": "yes", "price": .45, "contracts": 10, "stake": 4.5, "fee": .17,
