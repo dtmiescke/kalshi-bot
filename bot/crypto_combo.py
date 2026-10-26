@@ -203,7 +203,7 @@ def scan(client, store, settings=None, now=None):
         store.set_kv(HEALTH_KEY, {**result, "ts": now})
         return result
     contracts = max(1, int(target_stake / unit_cost), math.ceil(15.0 / combo_price))
-    while contracts > 1 and contracts * unit_cost > target_stake:
+    while contracts > 1 and contracts * unit_cost > max_per_bet:
         contracts -= 1
     stake = round(contracts * combo_price, 4)
     fee = round(contracts * fee_per_contract, 4)
