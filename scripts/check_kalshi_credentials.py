@@ -4,8 +4,9 @@ import time
 import base64
 import urllib.request
 import urllib.error
+
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
 
 key_id = os.environ.get("KALSHI_API_KEY_ID", "").strip()
 private_pem = os.environ.get("KALSHI_PRIVATE_KEY", "")
@@ -22,11 +23,26 @@ except Exception:
 timestamp = str(int(time.time() * 1000))
 path = "/trade-api/v2/portfolio/balance"
 message = (timestamp + "GET" + path).encode()
-signature = private_key.sign(
-    message,
-    padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.DIGEST_LENGTH),
-    hashes.SHA256(),
-)
+
+try:
+    if isinstance(private_key, ed25519.Ed25519PrivateKey):
+        signature = private_key.sign(message)
+    elif isinstance(private_key, rsa.RSAPrivateKey):
+        signature = private_key.sign(
+            message,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.DIGEST_LENGTH,
+            ),
+            hashes.SHA256(),
+        )
+    else:
+        print("FAIL: unsupported private-key type; Kalshi supports Ed25519 and RSA keys.")
+        sys.exit(2)
+except Exception:
+    print("FAIL: could not sign the read-only Kalshi request.")
+    sys.exit(2)
+
 url = "https://external-api.kalshi.com" + path
 request = urllib.request.Request(url, method="GET", headers={
     "KALSHI-ACCESS-KEY": key_id,
@@ -34,6 +50,7 @@ request = urllib.request.Request(url, method="GET", headers={
     "KALSHI-ACCESS-SIGNATURE": base64.b64encode(signature).decode(),
     "Accept": "application/json",
 })
+
 try:
     with urllib.request.urlopen(request, timeout=20) as response:
         if response.status == 200:
