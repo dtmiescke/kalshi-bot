@@ -150,20 +150,138 @@ class LiveRunner:
         log.info("live market discovery: %s", json.dumps(health, sort_keys=True))
         return changed
 
+    def _mark_kalshi_books_stale(self):
+        """Invalidate streamed books after disconnect; require REST resync."""
+        for book in self.books.values():
+            book.gaps += 1
+            book.needs_resync = True
+            book.last_update = 0.0
+        self.ws_connected = False
+        self.publish_feed_health()
+
+    def publish_feed_health(self, now=None):
+        """Publish shared timestamped health for dashboards and execution gates.
+
+        Reuses the existing summary/KV channels instead of creating duplicate
+        telemetry storage.
+        """
+        now = time.time() if now is None else float(now)
+        ages = {ticker: book.age() for ticker, book in self.books.items()}
+        stale = [ticker for ticker, age in ages.items() if age is None or age > 5]
+        resync = [ticker for ticker, book in self.books.items() if book.needs_resync]
+        ticker_updates = getattr(self, "ticker_updates", {})
+        latest_ticker = max(
+            (float(row.get("received_ts", 0) or 0) for row in ticker_updates.values()),
+            default=0.0,
+        )
+        store = getattr(self, "store", None)
+        reconciliation = store.get_kv("execution_reconciliation_required") if store else None
+        settings = getattr(self, "s", None)
+        health = {
+            "ts": int(now),
+            "mode": str(getattr(settings, "mode", "unknown")),
+            "ws_connected": bool(getattr(self, "ws_connected", False)),
+            "tracked_books": len(self.books),
+            "fresh_books": len(self.books) - len(stale),
+            "stale_book_count": len(stale),
+            "stale_book_sample": stale[:25],
+            "resync_required_count": len(resync),
+            "resync_required_sample": resync[:25],
+            "latest_ticker_received_ts": latest_ticker,
+            "ticker_age_s": round(max(0.0, now - latest_ticker), 3) if latest_ticker else None,
+            "ticker_count": len(ticker_updates),
+            "execution_reconciliation_required": bool(reconciliation),
+            "trading_ready": bool(getattr(self, "betting_ok", False) and not stale
+                                  and not resync and not reconciliation),
+        }
+        summary = getattr(self, "summary", None)
+        if summary is not None:
+            summary["feed_health"] = health
+        if store is not None:
+            store.set_kv("live_feed_health", health)
+        return health
+
     def poll_books(self, only_resync=False, only_quiet=False):
-        """Without a Kalshi key there's no Kalshi WebSocket: poll books instead.
-        With the WebSocket, only books that missed an update are re-fetched."""
-        for t, book in self.books.items():
+        """Refresh only eligible books; prefer bounded bulk REST snapshots.
+
+        WebSocket-fed books are refreshed only when they need resync or are
+        stale. A bulk failure falls back to the established per-market method.
+        A REST snapshot never clears a sequence-gap marker unless it contains
+        a valid book for that ticker.
+        """
+        now = time.time()
+        eligible = {}
+        for ticker, book in list(self.books.items()):
+            age = book.age()
             if only_resync and not book.needs_resync:
                 continue
-            if only_quiet and not (book.needs_resync or (book.age() or 99) > 8):
+            if only_quiet and not (book.needs_resync or age is None or age > 8):
                 continue
+            # In WS mode, don't churn fresh books. In REST-only mode the normal
+            # poll remains eligible, while only_quiet/only_resync stay bounded.
+            if not only_resync and not only_quiet and getattr(self, "ws_connected", False):
+                if not book.needs_resync and age is not None and age <= 8:
+                    continue
+            eligible[ticker] = (book, book.last_update)
+
+        if not eligible:
+            return
+
+        def apply_snapshot(ticker, book, previous_update, ob):
+            if not isinstance(ob, dict) or not isinstance(ob.get("yes"), (list, dict)) or not isinstance(ob.get("no"), (list, dict)):
+                raise ValueError("malformed Kalshi orderbook snapshot")
+            # If an async feed updated this book while REST was in flight, keep
+            # the newer feed state instead of overwriting it with an older REST read.
+            if book.last_update != previous_update and book.last_update > 0:
+                return
+            yes = dict(ob.get("yes") or [])
+            no = dict(ob.get("no") or [])
+            if any(not isinstance(p, (int, float)) or not isinstance(q, (int, float))
+                   or not math.isfinite(float(p)) or not math.isfinite(float(q))
+                   or not 0 <= float(p) <= 1 or float(q) < 0 for p, q in list(yes.items()) + list(no.items())):
+                raise ValueError("invalid price/quantity in Kalshi orderbook snapshot")
+            # A REST snapshot has no WebSocket sequence number. Reset seq so
+            # the next WS delta cannot be compared against an obsolete sequence.
+            book.snapshot({"yes": list(yes.items()), "no": list(no.items())}, seq=None)
+
+        bulk = getattr(self.rest, "market_orderbooks", None)
+        tickers = list(eligible)
+        if callable(bulk):
+            # Official bulk endpoint accepts at most 100 tickers per request.
+            for offset in range(0, len(tickers), 100):
+                chunk = tickers[offset:offset + 100]
+                try:
+                    snapshots = bulk(chunk)
+                    if not isinstance(snapshots, dict):
+                        raise ValueError("malformed bulk orderbook response")
+                    for ticker in chunk:
+                        if ticker not in snapshots:
+                            # Missing rows are not proof of an empty book; use
+                            # the known-good single-market endpoint as fallback.
+                            try:
+                                book, previous_update = eligible[ticker]
+                                apply_snapshot(ticker, book, previous_update, self.rest.orderbook(ticker))
+                            except Exception:
+                                eligible[ticker][0].gaps += 1
+                            continue
+                        try:
+                            book, previous_update = eligible[ticker]
+                            apply_snapshot(ticker, book, previous_update, snapshots[ticker])
+                        except Exception:
+                            eligible[ticker][0].gaps += 1
+                except Exception as exc:
+                    log.warning("bulk Kalshi orderbook refresh failed for %d markets: %s", len(chunk), exc)
+                    for ticker in chunk:
+                        book, previous_update = eligible[ticker]
+                        try:
+                            apply_snapshot(ticker, book, previous_update, self.rest.orderbook(ticker))
+                        except Exception:
+                            book.gaps += 1
+            return
+
+        for ticker, (book, previous_update) in eligible.items():
             try:
-                ob = self.rest.orderbook(t)
-                book.yes = dict(ob.get("yes", []))
-                book.no = dict(ob.get("no", []))
-                book.last_update = time.time()
-                book.needs_resync = False
+                apply_snapshot(ticker, book, previous_update, self.rest.orderbook(ticker))
             except Exception:
                 book.gaps += 1
 
@@ -171,6 +289,10 @@ class LiveRunner:
     def readings_for(self, ticker, now):
         """Research one contract with the shared crypto brain on live candles."""
         info, book = self.markets[ticker], self.books[ticker]
+        # Do not derive candidates from a book invalidated by a sequence gap,
+        # disconnect, or missing trustworthy timestamp.
+        if book.needs_resync or book.age() is None:
+            return None, None
         a = self.coins[info["series"]]
         terms = info["terms"]
         if not (terms["strike"] and terms["close_ts"]) or not book.yes or not book.no:
@@ -724,10 +846,12 @@ class LiveRunner:
             signer = KalshiClient(self.s.market_data_url(), data_kid, data_pem)
             signer.path_prefix = "/trade-api/ws/v2"
             return asyncio.create_task(feeds.run_feed(
-                "kalshi", feeds.KALSHI_WS["production"],
+                "kalshi", feeds.KALSHI_WS["demo" if self.s.mode == "demo" else "production"],
                 lambda: feeds.kalshi_subs(list(self.books)),
-                lambda m: feeds.handle_kalshi(m, self.books, self.ticker_updates), lambda: None, stop,
-                headers_fn=lambda: signer._headers("GET", "")))
+                lambda m: feeds.handle_kalshi(m, self.books, self.ticker_updates),
+                self._mark_kalshi_books_stale, stop,
+                headers_fn=lambda: signer._headers("GET", ""),
+                on_connect=lambda: setattr(self, "ws_connected", True)))
         if use_ws:
             kalshi_task = start_kalshi()
 
@@ -768,6 +892,9 @@ class LiveRunner:
                 asyncio.create_task(self._poll_crypto_flow(ticker, int(now)))
             for ticker, readings, ctx, plan in list(self.tick(now)):
                 asyncio.create_task(self._review(ticker, readings, ctx, plan))
+            if now - getattr(self, "last_feed_health_publish", 0) >= 1:
+                self.publish_feed_health(now)
+                self.last_feed_health_publish = now
             if now - last_dump >= 10:
                 self.dump(now)
                 last_dump = now
@@ -862,7 +989,8 @@ class LiveRunner:
                "kalshi_feed": {"channel": "ticker + orderbook_delta",
                                "subscribed_markets": len(self.books),
                                "ticker_updates": len(self.ticker_updates),
-                               "latest_received_ts": max((v.get("received_ts", 0) for v in self.ticker_updates.values()), default=0)}}
+                               "latest_received_ts": max((v.get("received_ts", 0) for v in self.ticker_updates.values()), default=0)},
+               "feed_health": self.publish_feed_health(now)}
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w") as f:

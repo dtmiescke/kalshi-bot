@@ -111,7 +111,8 @@ async def _connect(url, headers=None):
                                         ping_interval=20, max_size=2 ** 22)
 
 
-async def run_feed(name, url, subscribe_msgs, handler, on_gap, stop, headers_fn=None):
+async def run_feed(name, url, subscribe_msgs, handler, on_gap, stop, headers_fn=None,
+                    on_connect=None):
     """Generic reconnecting loop. subscribe_msgs: callable -> list of dicts."""
     backoff = 1
     while not stop.is_set():
@@ -121,6 +122,8 @@ async def run_feed(name, url, subscribe_msgs, handler, on_gap, stop, headers_fn=
                 for m in subscribe_msgs():
                     await ws.send(json.dumps(m))
                 backoff = 1
+                if on_connect is not None:
+                    on_connect()
                 log.info("%s connected", name)
                 while not stop.is_set():
                     raw = await asyncio.wait_for(ws.recv(), timeout=30)

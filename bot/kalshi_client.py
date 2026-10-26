@@ -122,7 +122,10 @@ class KalshiClient:
             retries = 1
         url = self.base_url + path
         ttl = _cache_ttl(path) if method == "GET" else 0
-        ck = (path, tuple(sorted((params or {}).items())))
+        # Normalize list-valued query parameters (e.g. tickers) so the
+        # request cache key remains hashable without changing requests' encoding.
+        ck = (path, tuple(sorted((k, tuple(v) if isinstance(v, list) else v)
+                                 for k, v in (params or {}).items())))
         if ttl:
             hit = self._cache.get(ck)
             if hit and time.time() - hit[0] < ttl:
@@ -281,6 +284,91 @@ class KalshiClient:
                 parsed.append((p, qty))
             out[side] = sorted(parsed, key=lambda x: -x[0])
         return out
+
+    def market_orderbooks(self, tickers):
+        """Fetch 1-100 market order books in one official bulk REST request.
+
+        Returns {ticker: {'yes': [(price_dollars, qty), ...],
+                          'no': [(price_dollars, qty), ...]}}.
+        Prices are normalized to dollars, levels best-first. Read-only.
+        """
+        if not isinstance(tickers, (list, tuple)) or not 1 <= len(tickers) <= 100:
+            raise ValueError("tickers must be a list of 1-100 market tickers")
+        clean = []
+        for ticker in tickers:
+            if not isinstance(ticker, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,199}", ticker):
+                raise ValueError("invalid market ticker")
+            if ticker not in clean:
+                clean.append(ticker)
+        if not clean:
+            raise ValueError("at least one unique ticker is required")
+        data = self._req("GET", "/markets/orderbooks", params={"tickers": clean})
+        out = {}
+        for row in data.get("orderbooks", []):
+            ticker = row.get("ticker")
+            ob = row.get("orderbook_fp") or row.get("orderbook") or {}
+            sides = {}
+            for side in ("yes", "no"):
+                levels = ob.get(f"{side}_dollars") or ob.get(side) or []
+                parsed = []
+                for level in levels:
+                    if not isinstance(level, (list, tuple)) or len(level) < 2:
+                        continue
+                    try:
+                        p, qty = float(level[0]), float(level[1])
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+                    if p > 1.0:
+                        p /= 100.0
+                    if math.isfinite(p) and 0.0 <= p <= 1.0 and math.isfinite(qty) and qty >= 0:
+                        parsed.append((p, qty))
+                sides[side] = sorted(parsed, key=lambda x: -x[0])
+            if isinstance(ticker, str):
+                out[ticker] = sides
+        return out
+
+    def place_order_v2(self, ticker, side, contracts, limit_price, *,
+                       time_in_force="immediate_or_cancel", post_only=False,
+                       expiration_time=None, cancel_order_on_pause=False,
+                       reduce_only=False):
+        """Submit a V2 order using the documented YES-book schema.
+
+        side is 'bid' (buy YES) or 'ask' (sell YES), not legacy YES/NO.
+        Kept separate until callers and fill reconciliation are migrated.
+        """
+        if not isinstance(ticker, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,199}", ticker):
+            raise ValueError("invalid market ticker")
+        if side not in ("bid", "ask"):
+            raise ValueError("side must be bid or ask")
+        if isinstance(contracts, bool) or not isinstance(contracts, int) or contracts <= 0:
+            raise ValueError("contracts must be a positive integer")
+        if isinstance(limit_price, bool) or not isinstance(limit_price, (int, float)):
+            raise ValueError("limit_price must be numeric")
+        if not math.isfinite(limit_price) or not 0.01 <= limit_price <= 0.99:
+            raise ValueError("limit_price must be finite and between $0.01 and $0.99")
+        price_dollars = f"{limit_price:.4f}"
+        if abs(float(price_dollars) - limit_price) > 1e-8:
+            raise ValueError("limit_price must be representable to four decimal places")
+        if time_in_force not in ("fill_or_kill", "good_till_canceled", "immediate_or_cancel"):
+            raise ValueError("unsupported V2 time_in_force")
+        if not isinstance(post_only, bool) or not isinstance(cancel_order_on_pause, bool) or not isinstance(reduce_only, bool):
+            raise ValueError("V2 order flags must be booleans")
+        if expiration_time is not None and (
+            isinstance(expiration_time, bool) or not isinstance(expiration_time, int) or expiration_time <= int(time.time())
+        ):
+            raise ValueError("expiration_time must be a future Unix timestamp")
+        if expiration_time is not None and time_in_force != "good_till_canceled":
+            raise ValueError("expiration_time requires good_till_canceled")
+        body = {
+            "ticker": ticker, "client_order_id": str(uuid.uuid4()), "side": side,
+            "count": f"{contracts:.2f}", "price": price_dollars,
+            "time_in_force": time_in_force, "self_trade_prevention_type": "taker_at_cross",
+            "post_only": post_only, "cancel_order_on_pause": cancel_order_on_pause,
+            "reduce_only": reduce_only, "subaccount": 0, "exchange_index": 0,
+        }
+        if expiration_time is not None:
+            body["expiration_time"] = expiration_time
+        return self._req("POST", "/portfolio/events/orders", body=body)
 
     def trades(self, ticker, min_ts=None, limit=500):
         params = {"ticker": ticker, "limit": limit}
