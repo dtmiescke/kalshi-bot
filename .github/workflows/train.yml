@@ -10,6 +10,11 @@ name: kalshi-train
 on:
   schedule:
     - cron: "7 9 * * *"         # daily 09:07 UTC; UTC avoids DST-dependent local-time claims
+  # Narrow recovery hook: only a deliberate marker-file commit starts an extra run.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/train-recovery-trigger"
   workflow_dispatch:
     inputs:
       days:
