@@ -27,6 +27,7 @@ DEFAULT_WEIGHTS = {
     "schedule_spot": 0.3,
     "crypto_model": 1.2,       # spot vs strike vs volatility
     "crypto_momentum": 0.2,
+    "crypto_orderbook": 0.5,  # cross-venue L2; learned from settled outcomes
     "crypto_model_iv": 0.8,    # same model on option-implied (Deribit) volatility
     "spot_flow": 0.2,
     "ml_model": 2.0,           # trained model; only exists after passing out-of-sample tests          # live executed flow + book imbalance on Kraken

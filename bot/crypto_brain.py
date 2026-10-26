@@ -72,21 +72,28 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
                              "vol_scale": shape.get("vol_scale", 1.0),
                              "z": None if info["live_z"] is None
                              else round(info["live_z"], 5)}))
-    # Cross-venue order-book pressure is a small auxiliary signal only. It is
-    # not the Kalshi book and must never outweigh the contract/volatility model.
+    # Cross-venue L2 is a directional input, not a substitute for Kalshi's
+    # executable book. Combine depth imbalance and size-weighted microprice;
+    # cap the effect so a noisy snapshot cannot overwhelm the contract model.
     book = ctx.get("orderbook") if isinstance(ctx, dict) else None
     if isinstance(book, dict) and isinstance(book.get("depth_imbalance"), (int, float)):
         imbalance = max(-1.0, min(1.0, float(book["depth_imbalance"])))
         spread_bps = max(0.0, float(book.get("spread_bps", 0.0) or 0.0))
-        shift = max(-0.02, min(0.02, 0.02 * imbalance))
+        micro_bps = max(-20.0, min(20.0, float(book.get("microprice_delta_bps", 0.0) or 0.0)))
+        # Microprice is in basis points; combine it with depth imbalance and
+        # cap the adjustment at 3 probability points. Historical results learn its weight.
+        shift = max(-0.03, min(0.03, 0.02 * imbalance + 0.0005 * micro_bps))
         book_prob = clamp(p + shift, 0.02, 0.98)
-        book_conf = clamp(0.35 * (1.0 - min(spread_bps, 30.0) / 40.0), 0.05, 0.35)
+        levels = max(0, int(book.get("levels", 0) or 0))
+        quality = min(1.0, levels / 5.0) if levels else 0.5
+        book_conf = clamp(0.4 * (1.0 - min(spread_bps, 30.0) / 40.0) * quality,
+                          0.05, 0.4)
         readings.append(Reading("crypto_orderbook", book_prob, book_conf, {
             "venue": book.get("venue", "coinbase"),
             "depth_imbalance": round(imbalance, 4),
             "spread_bps": round(spread_bps, 3),
-            "microprice_delta_bps": round(float(book.get("microprice_delta_bps", 0.0) or 0.0), 3),
-            "levels": book.get("levels", 0),
+            "microprice_delta_bps": round(micro_bps, 3),
+            "levels": levels,
             "cross_venue_proxy": True,
         }))
 
