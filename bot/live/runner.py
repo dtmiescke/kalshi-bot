@@ -359,6 +359,30 @@ class LiveRunner:
                                           f"edge {p['edge']:+.1%} ({verdict['by']})")
         finally:
             self.pending.discard(ticker)
+            info = self.markets.get(ticker, {})
+            terms = info.get("terms", {})
+            close_ts = int(terms.get("close_ts") or 0)
+            if info.get("series") and close_ts:
+                lock_key = self._window_lock_key(info["series"], close_ts)
+                reservation = self.store.get_kv(lock_key) or {}
+                created_ts = int(reservation.get("created_ts") or 0)
+                filled_rows = self.store.q(
+                    "SELECT id, order_id FROM bets WHERE ticker=? AND mode=? AND ts>=? LIMIT 1",
+                    (ticker, self.s.mode, created_ts),
+                )
+                if filled_rows:
+                    self.store.set_kv(lock_key, {
+                        **reservation, "state": "traded",
+                        "order_id": filled_rows[0].get("order_id"),
+                    })
+                elif self.store.get_kv("execution_reconciliation_required"):
+                    # The exchange may have accepted an order despite a lost response.
+                    # Keep this coin/window blocked until reconciled.
+                    self.store.set_kv(lock_key, {**reservation, "state": "uncertain"})
+                else:
+                    # No order was recorded and submission was not ambiguous: permit
+                    # a later chart-qualified candidate in this same window.
+                    self.store.set_kv(lock_key, None)
 
     # --- maker orders: rest at a better price, cancel if not filled ---------------------
     def start_maker(self, ticker, snap, plan, readings, prob, conf):
