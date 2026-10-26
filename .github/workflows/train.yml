@@ -1,6 +1,6 @@
 name: kalshi-train
 
-# Daily at 09:07 UTC: download the last 14 days of REAL settled Kalshi
+# Daily at 09:07 UTC: download a bounded sample of REAL settled Kalshi
 # 15-minute windows, add them to the training set, retrain, and promote only if
 # the new model beats Kalshi AND the current champion on unseen data. Then a
 # backtest, the regression tests and the report go to the log (read-only).
@@ -14,7 +14,7 @@ on:
     inputs:
       days:
         description: "Days of history to download (1-90)"
-        default: "14"
+        default: "3"
         required: true
 
 concurrency:
@@ -40,8 +40,12 @@ jobs:
         run: bash .github/load.sh
       - name: Download history + train
         id: train-cycle
+        timeout-minutes: 55
         env:
-          DAYS: ${{ github.event.inputs.days || '14' }}
+          # Bound the amount of history per series so slow historical endpoints
+          # cannot consume the whole runner allocation. Override in repo vars.
+          DAYS: ${{ github.event.inputs.days || '3' }}
+          HISTORY_MAX_MARKETS: ${{ vars.HISTORY_MAX_MARKETS || '60' }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           ML_MIN_WINDOWS: ${{ vars.ML_MIN_WINDOWS || '300' }}
           ML_MIN_TEST_WINDOWS: ${{ vars.ML_MIN_TEST_WINDOWS || '100' }}
