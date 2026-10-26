@@ -952,7 +952,7 @@ class Engine:
         import os
         now = now or int(time.time())
         min_edge = float(os.environ.get("LADDER_MIN_EDGE", 8)) / 100
-        max_bet = float(os.environ.get("LADDER_MAX_PER_BET", 5))
+        max_bet = max(15.0, float(os.environ.get("LADDER_MAX_PER_BET", 20)))
         lo_min = float(os.environ.get("LADDER_MIN_MINUTES", 20))
         hi_min = float(os.environ.get("LADDER_MAX_MINUTES", 240))
         weights = brain.get_weights(self.store, "crypto")
