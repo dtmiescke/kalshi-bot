@@ -152,6 +152,19 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
         # one entry per 15-minute window: after an early exit, re-buying the same
         # window just pays the spread and fees twice
         return None, "already traded this window"
+    if crypto_domain:
+        # Hourly target is a hard ceiling, never a quota. Only actual ledger
+        # entries count; if evidence is weak, no trade is forced to hit the target.
+        hourly_cap = max(0, int(getattr(s, "crypto_max_trades_per_hour", 10)))
+        if hourly_cap:
+            cutoff = int(time.time()) - 3600
+            recent = store.q(
+                "SELECT COUNT(*) AS n FROM bets WHERE ts>=? AND mode=? AND series LIKE '%15M'",
+                (cutoff, s.mode),
+            )
+            recent_count = int(recent[0]["n"] if recent else 0)
+            if recent_count >= hourly_cap:
+                return None, f"crypto hourly trade cap reached ({hourly_cap}/hour)"
 
     asks = asks_from_book(book)
     options = []
