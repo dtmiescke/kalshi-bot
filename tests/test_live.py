@@ -366,7 +366,7 @@ class TestRunnerExecution(unittest.TestCase):
                             "series": "KXBTC15M", "team": "UP", "side": "yes", "price": 0.60,
                             "contracts": 10, "stake": 6, "fee": 0.17, "model_prob": .6,
                             "edge": .1, "confidence": .8, "signals": {}})
-        # Bid is exactly 80% of original entry. Hard stop must override holding logic.
+        # Bid is exactly 80% of original entry. Verify the stop is evaluated before model access.
         self.r.books[t].yes = {0.48: 50}
         self.r.books[t].no = {0.50: 50}
         with mock.patch.object(self.r, "readings_for", side_effect=AssertionError("stop must not need model readings")):
