@@ -20,15 +20,36 @@ from cryptography.hazmat.primitives.asymmetric import padding
 
 
 def price(obj, field):
-    """Return a price in dollars (0.0-1.0) from either `field` (cents) or
-    `field_dollars` (string dollars). None if missing."""
-    d = obj.get(f"{field}_dollars")
-    if d not in (None, ""):
-        return float(d)
-    c = obj.get(field)
-    if c in (None, ""):
+    """Return a validated 0..1 dollar price from Kalshi dollar or cent fields.
+
+    Reject malformed, non-finite, and out-of-range data rather than passing an
+    impossible quote to research, sizing, or execution. If both formats are
+    supplied, prefer the newer dollar field but require consistency within one
+    cent to avoid silently accepting contradictory exchange data.
+    """
+    if not isinstance(obj, dict):
         return None
-    return float(c) / 100.0
+    raw_dollars = obj.get(f"{field}_dollars")
+    raw_cents = obj.get(field)
+
+    def _parse(value, scale):
+        if value in (None, "") or isinstance(value, bool):
+            return None
+        try:
+            amount = float(value) / scale
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return amount if math.isfinite(amount) and 0.0 <= amount <= 1.0 else None
+
+    has_dollars = raw_dollars not in (None, "")
+    has_cents = raw_cents not in (None, "")
+    dollars = _parse(raw_dollars, 1.0) if has_dollars else None
+    cents = _parse(raw_cents, 100.0) if has_cents else None
+    if (has_dollars and dollars is None) or (has_cents and cents is None):
+        return None
+    if has_dollars and has_cents and abs(dollars - cents) > 0.010000001:
+        return None
+    return dollars if has_dollars else cents
 
 
 def num(obj, field):
