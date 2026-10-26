@@ -199,7 +199,8 @@ def scan(client, store, settings=None, now=None):
         contracts -= 1
     stake = round(contracts * combo_price, 4)
     fee = round(contracts * fee_per_contract, 4)
-    if (contracts < 1 or stake + fee > max_per_bet + 1e-8\n            or stake + fee > remaining_daily + 1e-8):
+    if (contracts < 1 or stake + fee > max_per_bet + 1e-8
+            or stake + fee > remaining_daily + 1e-8):
         result = {"ok": True, "enabled": True, "created": 0, "skipped": "stake_or_fee_limit"}
         store.set_kv(HEALTH_KEY, {**result, "ts": now})
         return result
