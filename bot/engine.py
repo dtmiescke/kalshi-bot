@@ -340,8 +340,50 @@ class Engine:
         # the event start time explicitly carried from Kalshi's event payload.
         start = (iso_to_ts(ev_match.get("commence_time")) if ev_match else
                  iso_to_ts(mkt.get("start_time") or mkt.get("commence_time")))
-        if not (self.llm and team and start and 0 < start - now < 24 * 3600):
+        # Record the exact eligibility failure instead of silently dropping
+        # every event from the sports evidence path. Research is useful several
+        # days ahead (injury reports, rotations, travel and lineups), but never
+        # research an event whose start is unknown, past, or too far in future.
+        if not self.llm:
+            reason = "llm_unavailable"
+        elif not team:
+            reason = "team_unresolved"
+        elif not start:
+            reason = "event_start_missing"
+        elif start <= now:
+            reason = "event_already_started"
+        elif start - now >= 72 * 3600:
+            reason = "event_outside_72h_window"
+        else:
+            reason = None
+        if reason:
+            try:
+                key = "sports_research_gate_diagnostics"
+                diag = self.store.get_kv(key, {}) or {}
+                if not isinstance(diag, dict):
+                    diag = {}
+                counts = diag.get("counts", {})
+                if not isinstance(counts, dict):
+                    counts = {}
+                counts[reason] = int(counts.get(reason, 0) or 0) + 1
+                diag.update({"ts": int(now), "counts": counts})
+                self.store.set_kv(key, diag)
+            except Exception:
+                log.debug("could not persist sports research gate diagnostics", exc_info=True)
+            log.debug("sports research skipped %s: %s", mkt.get("ticker", "?"), reason)
             return None
+        try:
+            diag = self.store.get_kv("sports_research_gate_diagnostics", {}) or {}
+            if not isinstance(diag, dict):
+                diag = {}
+            counts = diag.get("counts", {})
+            if not isinstance(counts, dict):
+                counts = {}
+            counts["eligible"] = int(counts.get("eligible", 0) or 0) + 1
+            diag.update({"ts": int(now), "counts": counts})
+            self.store.set_kv("sports_research_gate_diagnostics", diag)
+        except Exception:
+            log.debug("could not persist sports research gate diagnostics", exc_info=True)
 
         category_for = {
             "americanfootball_nfl": "football", "americanfootball_ncaaf": "football",
