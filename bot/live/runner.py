@@ -798,7 +798,7 @@ class LiveRunner:
             signer = KalshiClient(self.s.market_data_url(), data_kid, data_pem)
             signer.path_prefix = "/trade-api/ws/v2"
             return asyncio.create_task(feeds.run_feed(
-                "kalshi", feeds.KALSHI_WS["production"],
+                "kalshi", feeds.KALSHI_WS["demo" if self.s.mode == "demo" else "production"],
                 lambda: feeds.kalshi_subs(list(self.books)),
                 lambda m: feeds.handle_kalshi(m, self.books, self.ticker_updates),
                 self._mark_kalshi_books_stale, stop,
