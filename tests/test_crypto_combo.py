@@ -27,6 +27,17 @@ class FakeSettings:
 
 
 class TestCryptoComboPaperBets(unittest.TestCase):
+
+    def test_dynamic_stake_scales_with_edge_and_never_exceeds_fifteen(self):
+        small = crypto_combo._stake_budget(0.06, 0.7, 15)
+        large = crypto_combo._stake_budget(0.20, 0.95, 15)
+        self.assertGreaterEqual(small, 1.0)
+        self.assertGreater(large, small)
+        self.assertLessEqual(large, 15.0)
+
+    def test_configured_cap_cannot_raise_hard_fifteen_dollar_limit(self):
+        self.assertEqual(crypto_combo._stake_budget(0.5, 1.0, 100), 15.0)
+
     def test_non_paper_mode_never_creates_combo(self):
         store = FakeStore()
         result = crypto_combo.scan(object(), store, settings=FakeSettings(), now=1_800_000_000)
