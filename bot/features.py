@@ -201,6 +201,48 @@ def build(candles, strike, secs_left, kalshi_bid=None, kalshi_ask=None, vol_per_
     return {k: _safe(x) for k, x in f.items()}
 
 
+def timeframe_indicator_snapshot(candles, timeframes=(1, 5, 15, 30)):
+    """Chart indicators from clock-aligned OHLCV bars without changing ML columns.
+
+    A timeframe is omitted until enough completed bars exist for its indicators.
+    In particular, 30m RSI/EMA/MACD/ADX need at least 35 completed 30-minute bars
+    (about 17.5 hours of 1m history); insufficient history is never fabricated.
+    """
+    out = {}
+    if not candles:
+        return out
+    for tf in timeframes:
+        bars = list(candles) if tf == 1 else resample(candles, tf)
+        if len(bars) < 35:
+            continue
+        close = _arr(bars, "close")
+        high, low, volume = _arr(bars, "high"), _arr(bars, "low"), _arr(bars, "volume")
+        spot = float(close[-1])
+        if not math.isfinite(spot) or spot <= 0:
+            continue
+        e9, e21 = ema(close, 9)[-1], ema(close, 21)[-1]
+        macd = ema(close, 12) - ema(close, 26)
+        macd_hist = (macd[-1] - ema(macd, 9)[-1]) / spot * 10000
+        window = close[-20:]
+        sd = float(window.std(ddof=1))
+        pct_b = float((spot - (window.mean() - 2 * sd)) / (4 * sd)) if sd > 0 else 0.5
+        recent_vol = float(volume[-3:].mean())
+        baseline_vol = float(volume[-20:].mean())
+        out[f"{tf}m"] = {
+            "bars": len(bars),
+            "rsi": _safe(rsi(close, 14)),
+            "ema_9_21_bps": _safe((e9 - e21) / spot * 10000),
+            "macd_hist_bps": _safe(macd_hist),
+            "adx": _safe(adx(high, low, close, 14)),
+            "bb_pct_b": _safe(pct_b),
+            "bb_width_pct": _safe(4 * sd / spot * 100),
+            "atr_pct": _safe((atr(high, low, close, 14) or 0.0) / spot * 100),
+            "volume_ratio": _safe(recent_vol / baseline_vol if baseline_vol > 0 else None),
+            "return_3bar_pct": _safe((spot / close[-4] - 1) * 100),
+        }
+    return out
+
+
 def names():
     """Stable feature order for the model."""
     demo = [{"ts": 1_700_000_000 + 60 * i, "open": 100 + i * .01, "high": 100.1 + i * .01,
