@@ -15,14 +15,14 @@ class TestHourlyCryptoTradeCap(unittest.TestCase):
         self.store = Store(os.path.join(self.tmp.name, "test.db"))
         self.settings = Settings()
         self.settings.mode = "paper"
-        self.settings.crypto_max_trades_per_hour = 10
+        self.settings.crypto_max_trades_per_hour = 12
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_crypto_entries_stop_at_ten_per_rolling_hour(self):
+    def test_crypto_entries_stop_at_twelve_per_rolling_hour(self):
         now = int(time.time())
-        for i in range(10):
+        for i in range(12):
             self.store.add_bet({
                 "ts": now - i * 60, "mode": "paper",
                 "ticker": f"KXBTC15M-W{i}", "event_ticker": f"KXBTC15M-E{i}",
@@ -38,10 +38,10 @@ class TestHourlyCryptoTradeCap(unittest.TestCase):
             0.80, 0.95, {},
         )
         self.assertIsNone(plan)
-        self.assertIn("hourly trade cap reached (10/hour)", reason)
+        self.assertIn("hourly trade cap reached (12/hour)", reason)
 
     def test_non_crypto_trade_not_limited_by_crypto_hourly_cap(self):
-        self.settings.crypto_max_trades_per_hour = 10
+        self.settings.crypto_max_trades_per_hour = 12
         # No price book is supplied; reaching the ordinary pricing check proves
         # this sports candidate was not rejected by the crypto-only hourly cap.
         plan, reason = risk.decide(
