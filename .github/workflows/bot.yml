@@ -137,8 +137,8 @@ jobs:
           # mode/bankroll/timezone as the run. Without these it always showed PAPER.
           BOT_MODE: ${{ steps.daily-limits.outputs.bot_mode }}
           LIVE_TRADING_CONFIRMED: ${{ vars.LIVE_TRADING_OPERATIONAL_APPROVED == 'yes' && vars.LIVE_TRADING_CONFIRMED == 'yes' && 'yes' || 'no' }}
-          BANKROLL: ${{ vars.BANKROLL || '1000' }}
-          DAILY_LOSS_LIMIT: ${{ vars.DAILY_LOSS_LIMIT || '30' }}
+          BANKROLL: ${{ vars.BANKROLL || '200000' }}
+          DAILY_LOSS_LIMIT: ${{ vars.DAILY_LOSS_LIMIT || '2000' }}
           BOT_TIMEZONE: ${{ vars.BOT_TIMEZONE || 'America/Chicago' }}
         run: bash .github/save.sh
       - name: Queue the next run
