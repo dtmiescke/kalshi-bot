@@ -216,10 +216,12 @@ class TestExecution(unittest.TestCase):
             {"yes": [(0.40, 10)], "no": []},
             {"yes": [], "no": [(0.40, 10)]},
         ))
-        with patch("bot.engine.risk.asks_from_book", side_effect=lambda book: next(books)), \
-             patch("bot.engine.fees.rate", return_value=0.07), \\
-             patch("bot.engine.risk.taker_fee", return_value=0.02), \\
-             patch("bot.engine.guard.status", return_value=(True, "ok")):
+        with (
+            patch("bot.engine.risk.asks_from_book", side_effect=lambda book: next(books)),
+            patch("bot.engine.fees.rate", return_value=0.07),
+            patch("bot.engine.risk.taker_fee", return_value=0.02),
+            patch("bot.engine.guard.status", return_value=(True, "ok")),
+        ):
             obj.execute_ladder({"low": "LOW", "high": "HIGH", "series": "KXBTCD",
                                 "event_ticker": "EV"}, 123, summary)
 
