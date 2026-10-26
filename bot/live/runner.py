@@ -189,10 +189,9 @@ class LiveRunner:
                    or not math.isfinite(float(p)) or not math.isfinite(float(q))
                    or not 0 <= float(p) <= 1 or float(q) < 0 for p, q in list(yes.items()) + list(no.items())):
                 raise ValueError("invalid price/quantity in Kalshi orderbook snapshot")
-            book.yes = yes
-            book.no = no
-            book.last_update = time.time()
-            book.needs_resync = False
+            # A REST snapshot has no WebSocket sequence number. Reset seq so
+            # the next WS delta cannot be compared against an obsolete sequence.
+            book.snapshot({"yes": list(yes.items()), "no": list(no.items())}, seq=None)
 
         bulk = getattr(self.rest, "market_orderbooks", None)
         tickers = list(eligible)
