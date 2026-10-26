@@ -34,7 +34,7 @@ DEFAULT_WEIGHTS = {
     # New strategy signals start small and must earn weight through settled outcomes.
     "crypto_trend_strategy": 0.15,
     "crypto_mean_reversion_strategy": 0.12,
-    "crypto_breakout_strategy": 0.10,
+    "crypto_breakout_strategy": 0.10,\n    "crypto_multi_timeframe_chart": 0.15,
 }
 MIN_W, MAX_W = 0.05, 5.0
 ETA = 0.05            # learning rate: small = slow, steady learning
