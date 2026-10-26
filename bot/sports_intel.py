@@ -443,6 +443,26 @@ def _source_status(store, key, status):
 def _due(store, key, ttl, now):
     return now - float(store.get_kv("sports_intel_fetch:" + key, 0) or 0) >= ttl
 
+def _has_fresh_items(store, category, kind, now, max_age):
+    """Return whether the cache contains recent evidence for a source category.
+
+    A recent fetch timestamp is not evidence that a source returned usable data.
+    Empty or stale caches must be retried after a failed/empty fetch rather than
+    being treated as healthy for the entire TTL window.
+    """
+    try:
+        rows = recent(store, limit=1, category=category, kind=kind)
+    except Exception:
+        log.debug("could not inspect sports evidence cache for %s/%s", category, kind, exc_info=True)
+        return False
+    if not rows:
+        return False
+    try:
+        observed = int(rows[0].get("observed_ts") or 0)
+    except (TypeError, ValueError):
+        return False
+    return observed > 0 and 0 <= now - observed <= max(120, int(max_age))
+
 def _record_items(store, items):
     inserted = 0
     for item in items:
@@ -555,7 +575,8 @@ def collect(store, force=False, now=None, categories=None):
         if category not in selected_categories:
             continue
         key = "gnews:" + category
-        if not force and not _due(store, key, ttl, now):
+        if (not force and not _due(store, key, ttl, now)
+                and _has_fresh_items(store, category, "news", now, ttl * 4)):
             continue
         query = urllib.parse.quote(f'({terms}) when:2d')
         url = "https://news.google.com/rss/search?q=" + query + "&hl=en-US&gl=US&ceid=US:en"
@@ -586,7 +607,8 @@ def collect(store, force=False, now=None, categories=None):
             continue
         key = "espn:" + category
         source_ttl = ttl if category in high_frequency_scoreboards else max(ttl, 3600)
-        if not force and not _due(store, key, source_ttl, now):
+        if (not force and not _due(store, key, source_ttl, now)
+                and _has_fresh_items(store, category, "score", now, source_ttl * 4)):
             continue
         url = f"https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/scoreboard"
         try:
