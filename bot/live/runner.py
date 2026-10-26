@@ -843,7 +843,8 @@ class LiveRunner:
                 lambda: feeds.kalshi_subs(list(self.books)),
                 lambda m: feeds.handle_kalshi(m, self.books, self.ticker_updates),
                 self._mark_kalshi_books_stale, stop,
-                headers_fn=lambda: signer._headers("GET", "")))
+                headers_fn=lambda: signer._headers("GET", ""),
+                on_connect=lambda: setattr(self, "ws_connected", True)))
         if use_ws:
             kalshi_task = start_kalshi()
 
