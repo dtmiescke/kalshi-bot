@@ -83,7 +83,10 @@ def review(llm, store, ticker, summary, cooldown_s=180):
         return numeric_fallback(
             "LLM unavailable; numeric risk gate decides and rule-based council still votes")
     try:
-        budget = llm.budget_left()
+        try:
+            budget = llm.budget_left(for_council=True)
+        except TypeError:  # compatibility with test doubles / older custom clients
+            budget = llm.budget_left()
     except Exception:
         budget = 0
         log.exception("council %s could not read LLM budget", ticker)
@@ -96,9 +99,17 @@ def review(llm, store, ticker, summary, cooldown_s=180):
     chair_model = models[0] if models else None
     skeptic_model = models[1] if len(models) > 1 else chair_model
     try:
+        def ask_council_json(prompt, model):
+            # Explicitly mark council traffic so it can use its reserved slice.
+            # Keep compatibility with injected/test clients that expose the older API.
+            try:
+                return llm.ask_json(prompt, model=model, council=True)
+            except TypeError:
+                return llm.ask_json(prompt, model=model)
+
         with ThreadPoolExecutor(max_workers=2) as pool:
-            f1 = pool.submit(llm.ask_json, COUNCIL_PROMPT.format(summary=text), chair_model)
-            f2 = pool.submit(llm.ask_json, SKEPTIC_PROMPT.format(summary=text), skeptic_model)
+            f1 = pool.submit(ask_council_json, COUNCIL_PROMPT.format(summary=text), chair_model)
+            f2 = pool.submit(ask_council_json, SKEPTIC_PROMPT.format(summary=text), skeptic_model)
             council, cm = f1.result()
             skeptic, sm = f2.result()
     except Exception as exc:
