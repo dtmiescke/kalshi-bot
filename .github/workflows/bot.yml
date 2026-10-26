@@ -82,6 +82,8 @@ jobs:
           BURST_MINUTES: ${{ vars.BURST_MINUTES || '8' }}
           BRIEFING_EVERY_MINUTES: ${{ vars.BRIEFING_EVERY_MINUTES || '12' }}
           LLM_DAILY_LIMIT: ${{ vars.LLM_DAILY_LIMIT || '45' }}
+          # Keep council calls from consuming all capacity needed for sports event research.
+          LLM_WEB_SEARCH_RESERVE: ${{ vars.LLM_WEB_SEARCH_RESERVE || '2' }}
           FIXED_BET: ${{ vars.FIXED_BET }}
           BOT_TIMEZONE: ${{ vars.BOT_TIMEZONE || 'America/Chicago' }}
           ORDER_STYLE: ${{ vars.ORDER_STYLE || 'maker' }}
