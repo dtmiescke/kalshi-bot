@@ -35,23 +35,15 @@ jobs:
       - name: Load memory
         id: load-memory
         run: bash .github/load.sh
-      # Temporary request: for Oct 26, 2026 in the bot's configured Central timezone,
-      # run paper-only and permit up to 25 crypto entries per rolling hour. This is a
-      # ceiling, not a quota; existing edge, council, and risk gates still decide.
-      # On other dates, preserve the repository's normal mode and hourly cap.
-      - name: Set temporary crypto research limits
+      # Persistent hourly opportunity cap. This limits entries; it does not force
+      # bets when model edge, fresh data, council, or risk checks say pass.
+      - name: Set crypto research limits
         id: daily-limits
         shell: bash
         run: |
-          if [ "$(TZ=America/Chicago date +%F)" = "2026-10-26" ]; then
-            echo "bot_mode=paper" >> "$GITHUB_OUTPUT"
-            echo "crypto_cap=25" >> "$GITHUB_OUTPUT"
-            echo "Temporary Oct 26 settings: paper mode, crypto cap 25/hour."
-          else
-            echo "bot_mode=${{ vars.BOT_MODE == 'live' && vars.LIVE_TRADING_OPERATIONAL_APPROVED != 'yes' && 'paper' || vars.BOT_MODE || 'paper' }}" >> "$GITHUB_OUTPUT"
-            echo "crypto_cap=${{ vars.CRYPTO_MAX_TRADES_PER_HOUR || '10' }}" >> "$GITHUB_OUTPUT"
-            echo "Using normal repository settings."
-          fi
+          echo "bot_mode=${{ vars.BOT_MODE == 'live' && vars.LIVE_TRADING_OPERATIONAL_APPROVED != 'yes' && 'paper' || vars.BOT_MODE || 'paper' }}" >> "$GITHUB_OUTPUT"
+          echo "crypto_cap=${{ vars.CRYPTO_MAX_TRADES_PER_HOUR || '25' }}" >> "$GITHUB_OUTPUT"
+          echo "Persistent crypto entry ceiling: ${{ vars.CRYPTO_MAX_TRADES_PER_HOUR || '25' }}/rolling hour."
       - name: Run
         id: run
         env:
