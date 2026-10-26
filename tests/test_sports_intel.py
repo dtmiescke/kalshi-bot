@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from bot.sports_intel import (_event_evidence_profile, _football_matchup_profile, _parse_espn, _parse_rss, _request,
-                              _select_summary_candidates, ensure_schema, recent, _record_items)
+                              _select_summary_candidates, ensure_schema, recent, _record_items, _has_fresh_items)
 from bot.storage import Store
 
 
@@ -145,6 +145,18 @@ class TestSportsIntelligence(unittest.TestCase):
         self.assertEqual(len(first_categories), 6)
         self.assertEqual(len(second_categories), 6)
         self.assertNotEqual(first_categories[5], second_categories[5])
+
+    def test_empty_or_stale_cache_does_not_suppress_source_retry(self):
+        # A recent fetch timestamp alone is not evidence that the source worked.
+        self.store.set_kv("sports_intel_fetch:gnews:football", 990)
+        self.assertFalse(_has_fresh_items(self.store, "football", "news", 1000, 1800))
+        item = {"id": "fresh-score", "kind": "score", "category": "nfl",
+                "source": "fixture", "title": "Home vs Away", "url": "",
+                "summary": "", "published_ts": None, "observed_ts": 950,
+                "confidence": 0.5}
+        _record_items(self.store, [item])
+        self.assertTrue(_has_fresh_items(self.store, "nfl", "score", 1000, 1800))
+        self.assertFalse(_has_fresh_items(self.store, "nfl", "score", 10000, 1800))
 
     def test_store_deduplicates_repeated_items(self):
         item = {"id": "same", "kind": "news", "category": "football", "source": "fixture",
