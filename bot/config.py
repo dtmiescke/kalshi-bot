@@ -176,7 +176,8 @@ class Settings:
     # --- crypto 15-minute markets ----------------------------------------------
     crypto_enabled: bool = field(default_factory=lambda: _env("CRYPTO_ENABLED", "yes") == "yes")
     crypto_min_edge: float = field(default_factory=lambda: _env_pct("CRYPTO_MIN_EDGE", 5))
-    crypto_max_per_bet: float = field(default_factory=lambda: _env_float("CRYPTO_MAX_PER_BET", 10.0))
+    crypto_min_bet: float = field(default_factory=lambda: _env_float("CRYPTO_MIN_BET", 15.0))
+    crypto_max_per_bet: float = field(default_factory=lambda: _env_float("CRYPTO_MAX_PER_BET", 20.0))
     # one window = BTC+ETH+SOL bets that settle together (they move together)
     crypto_max_per_window: float = field(
         default_factory=lambda: _env_float("CRYPTO_MAX_PER_WINDOW", 20.0))
@@ -311,6 +312,7 @@ class Settings:
             "MAX_PER_DAY": self.max_per_day,
             "MAX_OPEN_COST": self.max_open_cost,
             "DAILY_LOSS_LIMIT": self.daily_loss_limit,
+            "CRYPTO_MIN_BET": self.crypto_min_bet,
             "CRYPTO_MAX_PER_BET": self.crypto_max_per_bet,
             "CRYPTO_MAX_PER_WINDOW": self.crypto_max_per_window,
             "FIXED_BET": self.fixed_bet,
