@@ -18,7 +18,7 @@ The existing engine and ledger use legacy YES/NO order methods and response assu
 - [ ] Add order-group integration only after confirming current API schema, group limit semantics, and the desired exchange-side limits; keep existing local risk checks authoritative.
 - [x] Connect bulk orderbook retrieval to bounded stale/resync refresh in chunks of at most 100; fallback to per-market REST for missing/failed rows and reject malformed snapshots. Fresh WebSocket books are skipped in quiet mode.
 - [ ] Add a freshness gate for sports live data (score/status/clock), and ensure missing or unsupported game statistics cannot be treated as current.
-- [ ] Verify WebSocket reconnect/resubscribe, sequence-gap resync, keepalive, and stale-feed no-trade behavior with deterministic tests.
+- [x] Add deterministic regression coverage that a Kalshi WebSocket disconnect invalidates all streamed books and the refresh loop requests fresh REST snapshots. Reconnect/resubscribe is implemented in the generic feed loop; dedicated keepalive and full stale-feed no-trade integration tests remain.
 - [ ] Verify historical cutoff, archive pagination, duplicate trade IDs, and settlement-result handling with recorded fixtures.
 - [ ] Record API response status, Retry-After, rate-limit headers, and request volume without logging credentials or sensitive account data.
 - [ ] Run the full regression suite and paper/demo smoke tests. Never enable live mode as part of this change.
