@@ -34,7 +34,7 @@ async function importSigningKey(pem) {
 
 async function kalshiGet(path, env, key) {
   const timestamp = String(Date.now());
-  const message = timestamp + "GET" + "/trade-api/v2" + path;
+  const signedPath = path.split("?")[0]; // Kalshi signatures exclude query parameters.\n  const message = timestamp + "GET" + "/trade-api/v2" + signedPath;
   const signature = await crypto.subtle.sign(
     { name: "RSA-PSS", saltLength: 32 }, key, new TextEncoder().encode(message)
   );
