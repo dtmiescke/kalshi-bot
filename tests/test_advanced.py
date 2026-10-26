@@ -198,6 +198,38 @@ class TestExecution(unittest.TestCase):
         ms[1].update(yes_bid=.30, yes_ask=.32)
         self.assertEqual(guard.ladder_arbs(ms[:2], 0.07), [])
 
+    def test_ladder_execution_records_locked_profit_after_aggregate_fees(self):
+        from bot.engine import Engine
+        from unittest.mock import patch
+
+        obj = Engine.__new__(Engine)
+        obj.s = Settings()
+        obj.s.mode = "paper"
+        obj.s.max_per_bet = 10.0
+        obj.s.bankroll = 1000.0
+        obj.store = type("StoreStub", (), {"add_bet": lambda self, row: saved.append(row)})()
+        obj.data = type("DataStub", (), {"orderbook": lambda self, ticker: {}})()
+        saved = []
+        obj._arbitrage_budget = lambda event: 10.0
+        summary = {"bets": 0}
+        books = iter((
+            {"yes": [(0.40, 10)], "no": []},
+            {"yes": [], "no": [(0.40, 10)]},
+        ))
+        with (
+            patch("bot.engine.risk.asks_from_book", side_effect=lambda book: next(books)),
+            patch("bot.engine.fees.rate", return_value=0.07),
+            patch("bot.engine.risk.taker_fee", return_value=0.02),
+            patch("bot.engine.guard.status", return_value=(True, "ok")),
+        ):
+            obj.execute_ladder({"low": "LOW", "high": "HIGH", "series": "KXBTCD",
+                                "event_ticker": "EV"}, 123, summary)
+
+        self.assertEqual(summary["bets"], 2)
+        self.assertEqual(len(saved), 2)
+        for row in saved:
+            self.assertAlmostEqual(row["signals"]["arbitrage"]["locked"], 1.96)
+
 
 class TestMarketData(unittest.TestCase):
     def test_context_parsing(self):
