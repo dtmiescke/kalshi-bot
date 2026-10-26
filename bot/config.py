@@ -152,12 +152,12 @@ class Settings:
     bankroll: float = field(default_factory=lambda: _env_float("BANKROLL", 1000.0))
     max_per_bet: float = field(default_factory=lambda: _env_float("MAX_PER_BET", 25.0))
     max_per_game: float = field(default_factory=lambda: _env_float("MAX_PER_GAME", 50.0))
-    max_per_day: float = field(default_factory=lambda: _env_float("MAX_PER_DAY", 20000.0))
+    max_per_day: float = field(default_factory=lambda: _env_float("MAX_PER_DAY", 150.0))
 
     # --- account limits (from the Council Lab design) ----------------------------
     max_open_positions: int = field(default_factory=lambda: _env_int("MAX_OPEN_POSITIONS", 5))
     max_open_cost: float = field(default_factory=lambda: _env_float("MAX_OPEN_COST", 200.0))
-    daily_loss_limit: float = field(default_factory=lambda: _env_float("DAILY_LOSS_LIMIT", 20000.0))
+    daily_loss_limit: float = field(default_factory=lambda: _env_float("DAILY_LOSS_LIMIT", 30.0))
 
     # --- council (DON_THEO_SPEC): members start advisory and EARN power ---------
     # Veto: >= COUNCIL_VETO_MIN_VOTES graded votes with a Brier better than the
@@ -177,6 +177,10 @@ class Settings:
     crypto_enabled: bool = field(default_factory=lambda: _env("CRYPTO_ENABLED", "yes") == "yes")
     crypto_min_edge: float = field(default_factory=lambda: _env_pct("CRYPTO_MIN_EDGE", 5))
     crypto_min_bet: float = field(default_factory=lambda: _env_float("CRYPTO_MIN_BET", 15.0))
+    # Maximum crypto entries across all 15-minute series in a rolling hour.
+    # This is a ceiling, not a quota; weak or unsafe opportunities are skipped.
+    crypto_max_trades_per_hour: int = field(
+        default_factory=lambda: _env_int("CRYPTO_MAX_TRADES_PER_HOUR", 10))
     crypto_max_per_bet: float = field(default_factory=lambda: _env_float("CRYPTO_MAX_PER_BET", 20.0))
     # one window = BTC+ETH+SOL bets that settle together (they move together)
     crypto_max_per_window: float = field(
