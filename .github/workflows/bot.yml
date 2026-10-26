@@ -3,7 +3,7 @@ name: kalshi-bot
 # Every 15 minutes (scheduled fallback):
 #   crypto  - an 8-minute LIVE streaming burst (BURST_MINUTES) on the 15-minute markets
 #   sports  - full scan every 5.5 hours (SPORTS_EVERY_HOURS)
-#   always  - grading, learning, AI briefing, weekly model retraining
+#   always  - grading, learning, AI briefing, gated model retraining
 # Unlimited free minutes on a PUBLIC repo.
 
 on:
@@ -90,6 +90,11 @@ jobs:
           COMBO_AUDIT_LEAD_SECONDS: ${{ vars.COMBO_AUDIT_LEAD_SECONDS || '300' }}
           BURST_MINUTES: ${{ vars.BURST_MINUTES || '8' }}
           BRIEFING_EVERY_MINUTES: ${{ vars.BRIEFING_EVERY_MINUTES || '12' }}
+          # Evaluate fresh model candidates twice daily; retry insufficient-data,
+          # failed or unpromoted candidates after 3 hours. Existing out-of-sample
+          # promotion gates stay in force; this does not force bets or promotions.
+          TRAIN_EVERY_HOURS: ${{ vars.TRAIN_EVERY_HOURS || '12' }}
+          TRAIN_RETRY_HOURS: ${{ vars.TRAIN_RETRY_HOURS || '3' }}
           LLM_DAILY_LIMIT: ${{ vars.LLM_DAILY_LIMIT || '45' }}
           # Protect eight shared daily calls for the two-review AI council.
           LLM_COUNCIL_RESERVE: ${{ vars.LLM_COUNCIL_RESERVE || '8' }}
@@ -140,7 +145,7 @@ jobs:
           BOT_TIMEZONE: ${{ vars.BOT_TIMEZONE || 'America/Chicago' }}
         run: bash .github/save.sh
       - name: Queue the next run
-        # GitHub's cron skips most */12 runs (about 37 of ~240 fired in two days),
+        # GitHub's cron has historically skipped scheduled runs (about 37 of ~240 fired in two days),
         # so each successful cycle queues the next one on main. The cron stays as
         # the fallback that restarts the chain. A run started with this token via
         # workflow_dispatch is allowed to trigger a new run.
