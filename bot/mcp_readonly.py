@@ -13,7 +13,7 @@ from .market_rules import summarize_rules
 from .contract_pdf import load_series_contract_pdf
 
 _TICKER = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
-_ALLOWED = frozenset({"market", "series", "orderbook", "rules", "rules_pdf"})
+_ALLOWED = frozenset({"market", "series", "orderbook", "rules", "rules_pdf", "trades"})
 
 
 def research_tool(client, tool, ticker, *, store=None, now=None):
@@ -33,6 +33,10 @@ def research_tool(client, tool, ticker, *, store=None, now=None):
         return client.series(ticker)
     if tool == "orderbook":
         return client.orderbook(ticker)
+    if tool == "trades":
+        # Reuse the existing paced client and cap one research lookup.
+        # Public prints are observations, never order instructions.
+        return client.trades(ticker, limit=100)
     if tool == "rules_pdf":
         if store is None:
             raise ValueError("rules_pdf requires the existing store")
