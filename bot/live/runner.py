@@ -36,11 +36,14 @@ from .kalshi_book import KalshiBook
 
 log = logging.getLogger("bot.live")
 
-COINS_TO_COIN = {"KXBTC15M": "BTC", "KXETH15M": "ETH", "KXSOL15M": "SOL"}
-COINS = {  # Kalshi series -> (Kraken symbol, Coinbase product, Deribit currency)
+COINS_TO_COIN = {"KXBTC15M": "BTC", "KXETH15M": "ETH", "KXSOL15M": "SOL", "KXBNB15M": "BNB"}
+# Kalshi series -> (Kraken USD pair, optional Coinbase USD product, optional Deribit currency).
+# Coinbase does not list BNB-USD; BNB uses Kraken USD trades/book and live-mids fallback candles.
+COINS = {
     "KXBTC15M": ("BTC/USD", "BTC-USD", "BTC"),
     "KXETH15M": ("ETH/USD", "ETH-USD", "ETH"),
     "KXSOL15M": ("SOL/USD", "SOL-USD", None),
+    "KXBNB15M": ("BNB/USD", None, None),
 }
 
 
@@ -97,10 +100,15 @@ class LiveRunner:
         """Fill the first hour of 1-second mids from Coinbase 1-minute candles so
         volatility and momentum work from the first second, not after an hour."""
         for series, (kr, cb, _) in COINS.items():
-            candles = crypto_sig.fetch_candles(cb)
+            candles = []
+            if cb:
+                try:
+                    candles = crypto_sig.fetch_candles(cb)
+                except Exception as exc:
+                    log.warning("history seed %s unavailable; using live mids until enough history accrues: %s", series, exc)
             self.seed_candles[series] = candles
-            for c in candles:
-                self.coins[series].mids.append((c["ts"], c["close"]))
+            for candle in candles:
+                self.coins[series].mids.append((candle["ts"], candle["close"]))
 
     def discover(self):
         """Find open 15-minute windows and retain per-series coverage diagnostics."""
@@ -829,7 +837,7 @@ class LiveRunner:
         await asyncio.to_thread(self.discover)
         await asyncio.to_thread(self.refresh_context)
         by_kraken = {kr: self.coins[s] for s, (kr, _, _) in COINS.items()}
-        by_cb = {cb: self.coins[s] for s, (_, cb, _) in COINS.items()}
+        by_cb = {cb: self.coins[s] for s, (_, cb, _) in COINS.items() if cb}
         tasks = [
             asyncio.create_task(feeds.run_feed(
                 "kraken", feeds.KRAKEN_WS, lambda: feeds.kraken_subs(list(by_kraken)),
