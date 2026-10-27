@@ -227,8 +227,12 @@ export class KalshiFeed extends DurableObject {
         client.send(JSON.stringify({ type: "relay_error", message: "Upstream market-data connection failed; retry shortly" })); return;
       }
     }
-    try { this.upstream.send(JSON.stringify(msg)); }
-    catch { client.send(JSON.stringify({ type: "relay_error", message: "Upstream is reconnecting; reconnect the dashboard" })); }
+    try {
+      this.upstream.send(JSON.stringify(msg));
+      client.send(JSON.stringify({ type: "relay_status", status: "command_forwarded", command: cmd, id: msg.id ?? null, at: Date.now() }));
+    } catch {
+      client.send(JSON.stringify({ type: "relay_error", message: "Upstream is reconnecting; reconnect the dashboard" }));
+    }
   }
 
   webSocketMessage(ws, message) {
