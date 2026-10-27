@@ -14,6 +14,7 @@
     python -m bot.main train    # train + test the model; promoted only if it wins on unseen data
     python -m bot.main history  # download real settled Kalshi 15-min windows and replay them
     python -m bot.main backtest # replay recorded research: what thresholds would have worked
+    python -m bot.main accuracy90 # validate 90% high-confidence predictions and paper bets
     python -m bot.main brief    # AI briefing on the bot's results now
     python -m bot.main auto     # what the 12-min scheduler calls: spot check
                                 # every run, full scan + grading once an hour
@@ -441,6 +442,10 @@ def main(argv=None):
         return
     if cmd == "backtest":
         print(backtest.text(backtest.run(store, s.taker_fee_rate)))
+        return
+    if cmd in ("accuracy90", "confidence-report"):
+        from . import high_confidence
+        print(high_confidence.format_report(high_confidence.report(store)))
         return
     if cmd == "auto":
         last = store.get_kv("last_full_scan", 0)
