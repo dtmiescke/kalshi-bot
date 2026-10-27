@@ -131,7 +131,7 @@ jobs:
             try { msg = JSON.parse(String(event.data)); } catch { return; }
             console.log("Relay message type:", String(msg.type || "unknown").slice(0, 40));
             if (msg.type === "relay_status" && msg.status === "connected" && !subscribed) {
-              ws.send(JSON.stringify({ id: 1, cmd: "subscribe", params: { channels: ["ticker"], market_ticker: market.ticker } }));
+              ws.send(JSON.stringify({ id: 1, cmd: "subscribe", params: { channels: ["ticker"], market_tickers: [market.ticker], send_initial_snapshot: true } }));
               console.log("Requested ticker channel for an open market.");
               return;
             }
