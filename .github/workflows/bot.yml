@@ -1,6 +1,6 @@
 name: kalshi-bot
 
-# Every 12 minutes (scheduled fallback):
+# PAPER-ONLY LOCK: scheduled and manual runs stay in paper mode. To change modes,\n# the owner must deliberately edit this workflow; repository variables cannot unlock live trading.\n# Every 12 minutes (scheduled fallback):
 #   crypto  - an 8-minute LIVE streaming burst (BURST_MINUTES) on the 15-minute markets
 #   sports  - full scan every 5.5 hours (SPORTS_EVERY_HOURS)
 #   always  - grading, learning, AI briefing, gated model retraining
@@ -41,15 +41,15 @@ jobs:
         id: daily-limits
         shell: bash
         run: |
-          echo "bot_mode=${{ vars.BOT_MODE == 'live' && vars.LIVE_TRADING_OPERATIONAL_APPROVED != 'yes' && 'paper' || vars.BOT_MODE || 'paper' }}" >> "$GITHUB_OUTPUT"
+          echo "bot_mode=paper" >> "$GITHUB_OUTPUT"
           echo "crypto_cap=${{ vars.CRYPTO_MAX_TRADES_PER_HOUR || '12' }}" >> "$GITHUB_OUTPUT"
           echo "Crypto hourly ceiling set; entries are not forced."
       - name: Run
         id: run
         timeout-minutes: 18
         env:
-          BOT_MODE: ${{ steps.daily-limits.outputs.bot_mode == 'paper' && 'paper' || vars.BOT_MODE == 'live' && vars.LIVE_TRADING_OPERATIONAL_APPROVED != 'yes' && 'paper' || vars.BOT_MODE || 'paper' }}
-          LIVE_TRADING_CONFIRMED: ${{ vars.LIVE_TRADING_OPERATIONAL_APPROVED == 'yes' && vars.LIVE_TRADING_CONFIRMED == 'yes' && 'yes' || 'no' }}
+          BOT_MODE: paper
+          LIVE_TRADING_CONFIRMED: "no"
           KALSHI_API_KEY_ID: ${{ secrets.KALSHI_API_KEY_ID }}
           KALSHI_PRIVATE_KEY: ${{ secrets.KALSHI_PRIVATE_KEY }}
           KALSHI_DATA_URL: ${{ vars.KALSHI_DATA_URL }}
@@ -140,8 +140,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           # The save step rebuilds the dashboard + bets.csv, so it needs the same
           # mode/bankroll/timezone as the run. Without these it always showed PAPER.
-          BOT_MODE: ${{ steps.daily-limits.outputs.bot_mode }}
-          LIVE_TRADING_CONFIRMED: ${{ vars.LIVE_TRADING_OPERATIONAL_APPROVED == 'yes' && vars.LIVE_TRADING_CONFIRMED == 'yes' && 'yes' || 'no' }}
+          BOT_MODE: paper
+          LIVE_TRADING_CONFIRMED: "no"
           BANKROLL: ${{ vars.BANKROLL || '200000' }}
           BOT_TIMEZONE: ${{ vars.BOT_TIMEZONE || 'America/Chicago' }}
         run: bash .github/save.sh
