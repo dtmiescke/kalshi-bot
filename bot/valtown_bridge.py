@@ -6,6 +6,7 @@ process. Repeated bridge failures trigger a short circuit-breaker cooldown so th
 bot immediately falls back to its direct Kalshi client instead of burning Val
 Town executions on an outage. This cache is never used for prices/order books.
 """
+import copy
 import json
 import os
 import re
@@ -72,7 +73,7 @@ def _cached(key, now):
         _CACHE.pop(key, None)
         return None
     _CACHE.move_to_end(key)
-    return payload
+    return copy.deepcopy(payload)
 
 
 def _record_failure(now):
@@ -130,17 +131,17 @@ def bridge_get(path, params=None, timeout=4):
             _record_failure(time.monotonic())
             return False, None
         payload = response.json()
-        if not isinstance(payload, dict):
+        if not isinstance(payload, dict) or "error" in payload:
             _record_failure(time.monotonic())
             return False, None
         _record_success()
         if ttl:
             with _LOCK:
-                _CACHE[key] = (time.monotonic() + ttl, payload)
+                _CACHE[key] = (time.monotonic() + ttl, copy.deepcopy(payload))
                 _CACHE.move_to_end(key)
                 while len(_CACHE) > _CACHE_MAX:
                     _CACHE.popitem(last=False)
-        return True, payload
+        return True, copy.deepcopy(payload)
     except (requests.RequestException, ValueError, TypeError, OverflowError):
         _record_failure(time.monotonic())
         return False, None
