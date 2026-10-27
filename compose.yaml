@@ -9,6 +9,7 @@ services:
       BOT_MODE: paper
       LIVE_TRADING_CONFIRMED: "no"
       CONTINUOUS_SESSION_MINUTES: "525600"
+      ALIGN_15M_START: "yes"
       BOT_DB: /app/data/bot.sqlite
     volumes:
       - ./data:/app/data
