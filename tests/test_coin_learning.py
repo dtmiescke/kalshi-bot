@@ -1,6 +1,6 @@
 import json
 import unittest
-from bot.coin_learning import (build_trade_review, coin_from_market, coin_performance, coin_report, format_coin_report, learning_summary, setup_performance, signal_forecast_summary)
+from bot.coin_learning import (build_trade_review, coin_from_market, coin_performance, coin_report, format_coin_report, learning_summary, setup_performance, signal_forecast_summary, historical_setup_penalty)
 
 class CoinLearningTests(unittest.TestCase):
     def test_coin_mapping_handles_all_four_crypto_series(self):
@@ -85,6 +85,21 @@ class CoinLearningTests(unittest.TestCase):
         self.assertEqual(rows[0]["samples"], 2)
         self.assertEqual(rows[0]["directional_accuracy"], 0.5)
         self.assertAlmostEqual(rows[0]["mean_brier"], (0.01 + 0.64) / 2, places=5)
+
+
+    def test_coin_specific_poor_setup_history_only_tightens_required_edge(self):
+        class Store:
+            def q(self, sql, args=()):
+                if "trade_reviews" not in sql:
+                    return []
+                return [{"review_json": json.dumps({"observed": {
+                    "result":"no","pnl":-1.0,"clv":-0.02,
+                    "signal_snapshot":{"chart_setups":[{"name":"range_breakout"}]}}})}
+                    for _ in range(20)]
+        result = historical_setup_penalty(Store(), ["range_breakout"], report={},
+                                          coin="BTC", min_samples=20)
+        self.assertEqual(result["surcharge"], 0.0025)
+        self.assertEqual(result["evidence"][0]["source"], "graded_paper_trade_reviews")
 
     def test_missing_signal_context_is_explicit(self):
         review = build_trade_review({"ticker": "KXETH15M-X", "side": "no", "result": "yes", "pnl": -1})
