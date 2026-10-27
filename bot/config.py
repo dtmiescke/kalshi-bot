@@ -55,8 +55,8 @@ SPORTS = {
     "KXSAUDIPLGAME": "soccer_saudi_professional_league",
 }
 
-# Kalshi 15-minute crypto Up/Down series -> Coinbase spot pair.
-# KXBTC15M is confirmed; check the ETH/SOL tickers in the Kalshi app.
+# Kalshi 15-minute crypto Up/Down series -> reference USD pair identifier.
+# BTC/ETH/SOL use Coinbase; BNB is routed to Kraken by the runtime adapters.
 CRYPTO_15M = {
     "KXBTC15M": "BTC-USD",
     "KXETH15M": "ETH-USD",
