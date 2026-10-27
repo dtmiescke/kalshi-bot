@@ -1,6 +1,7 @@
 import json
 import unittest
-from bot.coin_learning import (build_trade_review, coin_from_market, coin_performance, coin_report, format_coin_report, learning_summary, setup_performance, signal_forecast_summary, historical_setup_penalty)
+from bot.live.adaptive_learning import historical_setup_penalty
+from bot.coin_learning import (build_trade_review, coin_from_market, coin_performance, coin_report, format_coin_report, learning_summary, setup_performance, signal_forecast_summary)
 
 class CoinLearningTests(unittest.TestCase):
     def test_coin_mapping_handles_all_four_crypto_series(self):
