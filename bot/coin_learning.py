@@ -25,6 +25,8 @@ def coin_performance(rows):
     buckets = {}
     for row in rows:
         coin = coin_from_market(row.get("series"), row.get("ticker"))
+        if coin == "OTHER":
+            continue
         b = buckets.setdefault(coin, {"coin": coin, "bets": 0, "wins": 0, "losses": 0,
                                       "net_profit": 0.0, "total_stake": 0.0, "flat": 0,
                                       "gross_wins": 0.0, "gross_losses": 0.0})
@@ -136,7 +138,18 @@ def persist_trade_review(store, bet):
 def coin_report(store):
     rows = store.q("""SELECT series, ticker, side, result, pnl, stake FROM bets
         WHERE mode='paper' AND status='graded' ORDER BY graded_ts, id""")
-    return {"mode": "paper", "graded_bets": len(rows), "coins": coin_performance(rows)}
+    ranked = coin_performance(rows)
+    by_coin = {row["coin"]: row for row in ranked}
+    # Always show BTC, BNB, SOL and ETH, even before each has settled paper bets.
+    for coin in ("BTC", "BNB", "SOL", "ETH"):
+        by_coin.setdefault(coin, {
+            "coin": coin, "bets": 0, "wins": 0, "losses": 0, "flat": 0,
+            "net_profit": 0.0, "total_stake": 0.0, "gross_wins": 0.0,
+            "gross_losses": 0.0, "win_rate": None, "roi_on_stake": None,
+            "profit_factor": None,
+        })
+    coins = sorted(by_coin.values(), key=lambda x: (x["net_profit"], x["win_rate"] or 0), reverse=True)
+    return {"mode": "paper", "graded_bets": len(rows), "coins": coins}
 
 
 def format_coin_report(result):
@@ -195,7 +208,7 @@ def learning_summary(store, min_samples=20, limit=5000):
     return sorted(result, key=lambda x: (x["net_profit"], x["samples"]), reverse=True)
 
 
-def format_learning_summary(rows, min_samples=20):
+def format_learning_summary(rows, min_samples=20, setups=None):
     lines = [f"TRADE-LEARNING ASSOCIATIONS | minimum sample for review={min_samples}",
              "Associations are descriptive, not proof that a tool or signal caused the outcome."]
     if not rows:
@@ -205,4 +218,59 @@ def format_learning_summary(rows, min_samples=20):
         note = row["evidence_level"].upper()
         lines.append(f"{i}. {row['signal']}: {row['samples']} trades | profitable {rate} | "
                      f"net P&L ${row['net_profit']:.2f} | {note}")
-    return "\n".join(lines)
+    if setups is not None:
+        lines.append("\\nCHART SETUPS BY COIN")
+        if not setups:
+            lines.append("No named chart setups found in persisted trade snapshots yet.")
+        for row in setups[:30]:
+            rate = "n/a" if row["win_rate"] is None else f"{row['win_rate']:.1%}"
+            lines.append(f"{row['coin']} / {row['setup']}: n={row['samples']} | win rate {rate} | "
+                         f"net P&L ${row['net_profit']:.2f} | {row['evidence_level']}")
+    return "\\n".join(lines)
+
+
+def setup_performance(store, min_samples=20):
+    """Rank observed chart setups per coin using settled trade outcomes."""
+    rows = store.q("SELECT review_json FROM trade_reviews ORDER BY ts DESC LIMIT 5000")
+    buckets = {}
+    for row in rows:
+        try:
+            review = json.loads(row.get("review_json") or "{}")
+            obs = review.get("observed") or {}
+            coin = obs.get("coin")
+            result = str(obs.get("result") or "").lower()
+            side = str(obs.get("side") or "").lower()
+            pnl = float(obs.get("pnl") or 0.0)
+            payload = obs.get("signal_snapshot") or {}
+            raw = payload.get("chart_setups") or payload.get("setups") or []
+            names = set()
+            if isinstance(raw, str):
+                names.add(raw)
+            elif isinstance(raw, list):
+                for item in raw:
+                    if isinstance(item, str):
+                        names.add(item)
+                    elif isinstance(item, dict) and item.get("name"):
+                        names.add(str(item["name"]))
+            if coin in ("BTC", "BNB", "SOL", "ETH") and result in ("yes", "no"):
+                for name in names:
+                    b = buckets.setdefault((coin, name), {"coin": coin, "setup": name,
+                        "samples": 0, "wins": 0, "net_profit": 0.0, "clv_values": []})
+                    b["samples"] += 1
+                    b["wins"] += int(side == result)
+                    b["net_profit"] += pnl
+                    clv = obs.get("clv")
+                    if clv is not None:
+                        b["clv_values"].append(float(clv))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    out = []
+    for b in buckets.values():
+        b["win_rate"] = b["wins"] / b["samples"] if b["samples"] else None
+        b["net_profit"] = round(b["net_profit"], 2)
+        values = b.pop("clv_values")
+        b["avg_clv"] = sum(values) / len(values) if values else None
+        b["evidence_level"] = "reviewable" if b["samples"] >= int(min_samples) else "low_sample"
+        b["note"] = "Observed association only; use matched chronological holdouts before strategy changes."
+        out.append(b)
+    return sorted(out, key=lambda x: (x["net_profit"], x["samples"]), reverse=True)
