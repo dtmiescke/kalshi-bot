@@ -492,7 +492,7 @@ class LiveRunner:
                 "book_imbalance": ctx.get("spot", {}).get("book_imbalance_0.1%", 0),
                 "trend_strength": min(1.0, max(0.0, float(ctx.get("indicators", {}).get("adx_1m", 0) or 0) / 100.0)),
             })
-            adaptive = historical_setup_penalty(self.store, setup_names, regime=regime, report=self.adaptive_report_cache["report"])
+            adaptive = historical_setup_penalty(self.store, setup_names, regime=regime, report=self.adaptive_report_cache["report"], coin=COINS_TO_COIN.get(info["series"]))
             required_after_learning = float(self.s.crypto_min_edge) + adaptive["surcharge"]
             p["adaptive_learning"] = adaptive
             p["adaptive_required_edge"] = round(required_after_learning, 5)
