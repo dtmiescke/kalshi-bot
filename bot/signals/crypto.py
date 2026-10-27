@@ -93,7 +93,7 @@ def fetch_kraken_candles(pair, timeout=10):
         for row in result[key]:
             ts, opn, high, low, close, _vwap, volume, *_ = row
             values = [float(opn), float(high), float(low), float(close), float(volume)]
-            if not all(math.isfinite(v) for v in values) or min(values[:4]) <= 0 or volume < 0:
+            if not all(math.isfinite(v) for v in values) or min(values[:4]) <= 0 or values[4] < 0:
                 continue
             rows.append({"ts": int(ts), "open": values[0], "high": values[1],
                          "low": values[2], "close": values[3], "volume": values[4]})
