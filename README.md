@@ -11,7 +11,7 @@ on unseen data** (crypto).
 ## Schedule (GitHub Actions, free on a public repo)
 | Every | What |
 |---|---|
-| 12 min | 8-minute **live streaming burst** on BTC/ETH/SOL 15-minute markets, grading, learning, AI briefing |
+| 12 min | 8-minute **live streaming burst** on BTC/ETH/SOL/BNB 15-minute markets, grading, learning, AI briefing |
 | 12 min | eight read-only specialists scan all events in the five **currently configured sports**; a bounded rotating subset gets deep research, and open positions are always revisited |
 | daily | **retrain** the model on all history + live decisions; promote only if it wins on unseen data |
 | weekly | download fresh real Kalshi history |
@@ -65,7 +65,7 @@ monitors their live books and signals rather than placing a forced bet at each b
 - The fleet's fast coverage scan runs over the full eligible event set. Expensive per-market history and research is capped by `SPORTS_SCAN_EVENT_BUDGET` (default 150 events) and `SPORTS_SCAN_MARKET_BUDGET` (default 100 markets) so the scheduled job can finish and persist memory. Increase budgets only after observing runtime; held events bypass the deep-market cap.
 
 ## Crypto microstructure and chart diagnostics
-- The existing BTC/ETH/SOL 15-minute Kalshi workflow is extended in place; sports discovery, event research, risk gates, execution, storage, and the existing dashboard are not replaced.
+- The existing BTC/ETH/SOL/BNB 15-minute Kalshi workflow is extended in place; sports discovery, event research, risk gates, execution, storage, and the existing dashboard are not replaced.
 - A public Coinbase Level-2 order book is sampled through the existing market-data context and cached for 5 seconds. It records spread, top-10-level bid/ask depth imbalance, and microprice displacement. This is explicitly a **cross-venue proxy**, not Kalshi liquidity. The bot also uses its existing KalshiClient to sample the actual Kalshi YES/NO bid-depth book, cache it per ticker for 5 seconds, and emit a separate low-confidence depth reading. Neither book is a standalone trade trigger.
 - The existing stable OHLCV feature pipeline already calculates multi-timeframe returns, RSI, EMA trend, MACD histogram, ADX, Bollinger bands, ATR, VWAP distance, OBV slope, volume spikes, and volatility regime. Those features remain unchanged so the training/live feature schema does not silently drift. A compact indicator snapshot is exposed alongside the existing crypto research info.
 - Crypto research info includes a TradingView chart link for the matching Coinbase spot pair. This is a chart hand-off, not a claim that TradingView supplies an official free market-data API to this bot.
