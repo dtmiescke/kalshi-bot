@@ -36,11 +36,13 @@ from .kalshi_book import KalshiBook
 
 log = logging.getLogger("bot.live")
 
-COINS_TO_COIN = {"KXBTC15M": "BTC", "KXETH15M": "ETH", "KXSOL15M": "SOL"}
-COINS = {  # Kalshi series -> (Kraken symbol, Coinbase product, Deribit currency)
+COINS_TO_COIN = {"KXBTC15M": "BTC", "KXETH15M": "ETH", "KXSOL15M": "SOL", "KXBNB15M": "BNB"}
+# Coinbase is optional: BNB must not be subscribed as a nonexistent Coinbase product.
+COINS = {
     "KXBTC15M": ("BTC/USD", "BTC-USD", "BTC"),
     "KXETH15M": ("ETH/USD", "ETH-USD", "ETH"),
     "KXSOL15M": ("SOL/USD", "SOL-USD", None),
+    "KXBNB15M": ("BNB/USD", None, None),
 }
 
 
@@ -97,7 +99,9 @@ class LiveRunner:
         """Fill the first hour of 1-second mids from Coinbase 1-minute candles so
         volatility and momentum work from the first second, not after an hour."""
         for series, (kr, cb, _) in COINS.items():
-            candles = crypto_sig.fetch_candles(cb)
+            # No Coinbase product is assumed for every asset; unsupported
+            # products seed from the live Kraken stream instead.
+            candles = crypto_sig.fetch_candles(cb) if cb else []
             self.seed_candles[series] = candles
             for c in candles:
                 self.coins[series].mids.append((c["ts"], c["close"]))
@@ -829,7 +833,7 @@ class LiveRunner:
         await asyncio.to_thread(self.discover)
         await asyncio.to_thread(self.refresh_context)
         by_kraken = {kr: self.coins[s] for s, (kr, _, _) in COINS.items()}
-        by_cb = {cb: self.coins[s] for s, (_, cb, _) in COINS.items()}
+        by_cb = {cb: self.coins[s] for s, (_, cb, _) in COINS.items() if cb}
         tasks = [
             asyncio.create_task(feeds.run_feed(
                 "kraken", feeds.KRAKEN_WS, lambda: feeds.kraken_subs(list(by_kraken)),
