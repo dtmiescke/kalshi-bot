@@ -53,6 +53,25 @@ class TestStorageRetention(unittest.TestCase):
         # the crypto readers' windows (5 and 15 minutes) are still fully covered
         self.assertEqual(len(self.store.flow("KXBTC15M-W1-00", self.now - 3600)), 1)
 
+    def test_crypto_readings_and_snapshots_kept_three_days_sports_longer(self):
+        for ticker, age in (("KXBTC15M-W1-00", DAY), ("KXBNB15M-W0-00", 4 * DAY),
+                            ("KXETHD-26OCT2517-T4000", 4 * DAY), ("KXNBAGAME-X-BOS", 4 * DAY)):
+            self.store.add_signal(self.now - age, ticker, "kalshi_market", 0.5, 0.9, {})
+            self.store.add_market_snapshot({"ts": self.now - age, "ticker": ticker,
+                                            "event_ticker": "E", "series": "S", "title": "",
+                                            "team": "", "yes_bid": .4, "yes_ask": .6,
+                                            "last_price": .5, "volume": 0, "open_interest": 0,
+                                            "close_time": None, "status": "active"})
+        janitor_retention(self.store, now=self.now)
+        for table in ("signal_readings", "market_snapshots"):
+            left = {r["ticker"] for r in self.store.q(f"SELECT ticker FROM {table}")}
+            self.assertEqual(left, {"KXBTC15M-W1-00", "KXNBAGAME-X-BOS"}, table)
+
+    def test_bnb_is_a_crypto_area(self):
+        from bot import nerd
+        self.assertEqual(nerd.health_area("KXBNB15M"), "crypto")
+        self.assertEqual(nerd.health_area("KXBNBD"), "ladders")
+
     def test_sports_intel_items_trimmed_by_observed_time(self):
         sports_intel.ensure_schema(self.store)
         for i, age in enumerate((DAY, 20 * DAY)):

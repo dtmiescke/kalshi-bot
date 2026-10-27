@@ -121,7 +121,7 @@ HEALTH_PAUSE_KEY = "health_paused_areas"
 def health_area(series):
     """Which betting area a series belongs to, as health_checks names them."""
     s = str(series or "").upper()
-    if s.startswith(("KXBTC", "KXETH", "KXSOL")):
+    if s.startswith(("KXBTC", "KXETH", "KXSOL", "KXBNB")):
         return "crypto" if "15M" in s else "ladders"
     return "sports"
 
