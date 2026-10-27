@@ -4,6 +4,7 @@ Refreshed about once per second. Everything here is plain arithmetic, so it's
 fast; the slow LLM council only ever sees these summaries, never raw ticks.
 """
 import math
+import os as _os
 import time
 from collections import deque
 
@@ -70,16 +71,78 @@ class SymbolAnalytics:
                 "aggressor_imbalance": round((buy - sell) / tot, 3) if tot else 0.0,
                 "trades": len(recent)}
 
-    def composite_price(self, now, max_age=5):
-        """Median of fresh exchange prices: a rough stand-in for the multi-
-        exchange index Kalshi settles on (CF Benchmarks)."""
-        prices = [p for ts, p in self.other_prices.values() if now - ts <= max_age]
-        m = self.book.mid()
-        if m and now - self.book.last_update <= max_age:
-            prices.append(m)
-        if not prices:
+    def fresh_source_prices(self, now=None, max_age=5):
+        """Return timestamp-fresh source prices, labelled by venue.
+
+        The Kraken local book mid is a source; other_prices contains independent
+        reference venues such as Coinbase. Stale prices are excluded rather than
+        silently reused in the consensus.
+        """
+        now = time.time() if now is None else float(now)
+        out = {
+            name: float(price)
+            for name, (ts, price) in self.other_prices.items()
+            if price is not None and 0 <= now - float(ts) <= max_age
+            and math.isfinite(float(price)) and float(price) > 0
+        }
+        mid = self.book.mid()
+        book_ts = getattr(self.book, "last_update", 0) or 0
+        if mid and 0 <= now - book_ts <= max_age and math.isfinite(float(mid)) and float(mid) > 0:
+            out["kraken"] = float(mid)
+        return out
+
+    def source_divergence_bps(self, now=None, max_age=5):
+        """Full cross-venue price spread in basis points; None with <2 sources."""
+        prices = list(self.fresh_source_prices(now, max_age).values())
+        if len(prices) < 2:
             return None
         prices.sort()
+        mid = len(prices) // 2
+        center = prices[mid] if len(prices) % 2 else (prices[mid - 1] + prices[mid]) / 2
+        if center <= 0:
+            return None
+        return (max(prices) - min(prices)) / center * 10000
+
+    def source_consensus(self, now=None, max_age=5, max_divergence_bps=25):
+        """Explain cross-venue agreement without treating it as a trade signal.
+
+        A score is available only when at least two independent fresh prices
+        exist. It is deterministic diagnostics, not a probability of winning.
+        """
+        sources = self.fresh_source_prices(now, max_age)
+        prices = sorted(sources.values())
+        if len(prices) < 2:
+            return {
+                "source_count": len(prices),
+                "median_price": prices[0] if prices else None,
+                "spread_bps": None,
+                "median_abs_deviation_bps": None,
+                "agreement_score": None,
+            }
+        mid = len(prices) // 2
+        median = prices[mid] if len(prices) % 2 else (prices[mid - 1] + prices[mid]) / 2
+        deviations = sorted(abs(price - median) for price in prices)
+        dev_mid = len(deviations) // 2
+        mad = deviations[dev_mid] if len(deviations) % 2 else (deviations[dev_mid - 1] + deviations[dev_mid]) / 2
+        spread = (prices[-1] - prices[0]) / median * 10000 if median else None
+        mad_bps = mad / median * 10000 if median else None
+        # 100 means tight agreement; 0 means spread is at/above the configured
+        # safety threshold. Do not let more venues mask a bad disagreement.
+        threshold = max(float(max_divergence_bps), 0.01)
+        score = max(0.0, min(100.0, 100.0 * (1.0 - float(spread or 0.0) / threshold)))
+        return {
+            "source_count": len(prices),
+            "median_price": median,
+            "spread_bps": spread,
+            "median_abs_deviation_bps": mad_bps,
+            "agreement_score": round(score, 1),
+        }
+
+    def composite_price(self, now, max_age=5):
+        """Median of fresh independent exchange prices, excluding stale feeds."""
+        prices = sorted(self.fresh_source_prices(now, max_age).values())
+        if not prices:
+            return None
         n = len(prices)
         return prices[n // 2] if n % 2 else (prices[n // 2 - 1] + prices[n // 2]) / 2
 
@@ -107,13 +170,18 @@ class SymbolAnalytics:
         div = None
         cb = self.other_prices.get("coinbase")
         m = self.book.mid()
-        if cb and m and now - cb[0] <= 5:
+        if cb and m and 0 <= now - cb[0] <= 5:
             div = abs(cb[1] / m - 1) * 1e4
-        import os as _os
+        fresh_sources = self.fresh_source_prices(now, max_age=5)
+        source_div = self.source_divergence_bps(now, max_age=5)
+        consensus = self.source_consensus(now, max_age=5, max_divergence_bps=float(_os.environ.get("MAX_FEED_DIVERGENCE_BPS", 25)))
         max_div = float(_os.environ.get("MAX_FEED_DIVERGENCE_BPS", 25))
         return {
             "symbol": self.symbol, "mid": self.book.mid(),
             "composite": self.composite_price(now),
+            "source_prices": {k: round(v, 8) for k, v in fresh_sources.items()},
+            "source_divergence_bps": round(source_div, 2) if source_div is not None else None,
+            "source_consensus": consensus,
             "spread_bps": round(self.book.spread_bps() or 0, 2),
             "returns": {k: (round(v, 5) if v is not None else None) for k, v in r.items()},
             "vol_per_min": round(vol, 6) if vol else None, "regime": regime,
@@ -124,12 +192,11 @@ class SymbolAnalytics:
             "walls": self.book.wall_events[-5:],
             "data_quality": {
                 "book_age_s": round(age, 2) if age is not None else None,
-                "stale": age is None or age > 5 or (div is not None and div > max_div),
+                "stale": age is None or age > 5 or (source_div is not None and source_div > max_div),
                 "feed_divergence_bps": round(div, 2) if div is not None else None,
                 "feed_gaps": self.gaps,
                 "checksum_ok": self.book.checksum_ok, "checksum_fail": self.book.checksum_fail,
-                "exchanges_fresh": len([1 for ts, _ in self.other_prices.values()
-                                        if now - ts <= 5]) + (1 if age is not None and age <= 5 else 0),
+                "exchanges_fresh": len(fresh_sources),
             },
         }
 
