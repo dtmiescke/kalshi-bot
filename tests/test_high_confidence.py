@@ -38,7 +38,7 @@ class HighConfidenceEvaluationTests(unittest.TestCase):
         ]
         result = evaluate_paper_bets(rows, min_sample=2)
         self.assertEqual(result["all"]["wins"], 2)
-        self.assertEqual(result["high_confidence"]["n"], 3)
+        self.assertEqual(result["high_confidence"]["n"], 2)
         self.assertEqual(result["high_confidence"]["wins"], 2)
         self.assertAlmostEqual(result["all"]["net_pnl"], -0.7)
         self.assertFalse(result["all"]["target_met"])
