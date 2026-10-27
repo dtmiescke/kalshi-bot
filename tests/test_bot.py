@@ -648,6 +648,35 @@ class TestCryptoFourCoinConfiguration(unittest.TestCase):
         self.assertEqual(len(CRYPTO_15M), len(set(CRYPTO_15M)))
         self.assertEqual(len(CRYPTO_15M.values()), len(set(CRYPTO_15M.values())))
 
+    def test_live_runner_and_model_map_bnb_to_its_own_coin(self):
+        from bot.live.runner import COINS, COINS_TO_COIN
+        from bot import crypto_brain, ml
+        self.assertEqual(set(COINS_TO_COIN.values()), {"BTC", "ETH", "SOL", "BNB"})
+        self.assertEqual(COINS_TO_COIN["KXBNB15M"], "BNB")
+        # BNB uses its own Kraken market; never invent a Coinbase BNB-USD product.
+        self.assertEqual(COINS["KXBNB15M"], ("BNB/USD", None, None))
+        self.assertEqual(crypto_brain.coin_from_series("KXBNB15M"), "BNB")
+        self.assertEqual(ml.coin_of("KXBNB15M-window"), "BNB")
+        self.assertEqual(ml.COINS, ("BTC", "ETH", "SOL", "BNB"))
+        self.assertEqual(ml.SUPPORTED_COINS, ml.COINS)
+        self.assertFalse(ml.coin_model_ready("BNB", ["coin_BTC", "coin_ETH", "coin_SOL"], {}))
+        self.assertFalse(ml.coin_model_ready("BNB", ["coin_BTC", "coin_ETH", "coin_SOL", "coin_BNB"],
+                                              {"coin_training_windows": {"BNB": 49}}))
+        self.assertTrue(ml.coin_model_ready("BNB", ["coin_BTC", "coin_ETH", "coin_SOL", "coin_BNB"],
+                                             {"coin_training_windows": {"BNB": 50}}))
+        self.assertTrue(ml.coin_model_ready("BTC", ["coin_BTC"], {}))
+        # Existing three-coin champions are aligned by column name, not by width.
+        import numpy as np
+        aligned = ml._align_matrix(
+            np.array([[10.0, 20.0, 1.0, 0.0, 0.0, 0.0, 1.0]]),
+            ["feature", "kalshi_logit", "coin_BTC", "coin_ETH", "coin_SOL", "coin_BNB", "model_prob"],
+            ["feature", "kalshi_logit", "coin_BTC", "coin_ETH", "coin_SOL", "model_prob"],
+        )
+        self.assertEqual(aligned.shape, (1, 6))
+        self.assertEqual(aligned[0].tolist(), [10.0, 20.0, 1.0, 0.0, 0.0, 1.0])
+        coinbase_products = {cb for _, cb, _ in COINS.values() if cb}
+        self.assertNotIn("BNB-USD", coinbase_products)
+
     def test_requested_stake_limits_are_enforced_by_workflow_configuration(self):
         from pathlib import Path
         workflow = Path(".github/workflows/bot.yml").read_text()

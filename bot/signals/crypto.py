@@ -61,6 +61,68 @@ def fetch_candles(pair, timeout=10):
         # Do not return old cached candles as if they were fresh after failure.
         return []
 
+KRAKEN_OHLC = "https://api.kraken.com/0/public/OHLC"
+KRAKEN_TICKER = "https://api.kraken.com/0/public/Ticker"
+_KRAKEN_CANDLE_CACHE = {}
+
+
+def _kraken_result_pair(result):
+    """Return the first pair key, excluding Kraken's pagination cursor."""
+    return next((key for key in result if key != "last"), None)
+
+
+def fetch_kraken_candles(pair, timeout=10):
+    """Fetch up to Kraken's public 720 one-minute OHLC bars for a pair like BNB/USD."""
+    now = time.time()
+    cached = _KRAKEN_CANDLE_CACHE.get(pair)
+    if cached and now - cached[0] < CANDLE_CACHE_SECONDS:
+        return list(cached[1])
+    try:
+        response = requests.get(KRAKEN_OHLC, params={
+            "pair": str(pair).replace("/", ""), "interval": 1
+        }, timeout=timeout, headers={"User-Agent": "kalshi-bot"})
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get("error"):
+            return []
+        result = payload.get("result") or {}
+        key = _kraken_result_pair(result)
+        if not key:
+            return []
+        rows = []
+        for row in result[key]:
+            ts, opn, high, low, close, _vwap, volume, *_ = row
+            values = [float(opn), float(high), float(low), float(close), float(volume)]
+            if not all(math.isfinite(v) for v in values) or min(values[:4]) <= 0 or values[4] < 0:
+                continue
+            rows.append({"ts": int(ts), "open": values[0], "high": values[1],
+                         "low": values[2], "close": values[3], "volume": values[4]})
+        rows.sort(key=lambda row: row["ts"])
+        _KRAKEN_CANDLE_CACHE[pair] = (now, rows)
+        return list(rows)
+    except (requests.RequestException, ValueError, TypeError, KeyError, IndexError, OverflowError):
+        return []
+
+
+def fetch_kraken_spot(pair, timeout=6):
+    """Latest Kraken last-trade price for a pair like BNB/USD; no stale fallback."""
+    try:
+        response = requests.get(KRAKEN_TICKER, params={"pair": str(pair).replace("/", "")},
+                                timeout=timeout, headers={"User-Agent": "kalshi-bot"})
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get("error"):
+            return None, None
+        result = payload.get("result") or {}
+        key = _kraken_result_pair(result)
+        price = float(result[key]["c"][0]) if key else None
+        if price is None or not math.isfinite(price) or price <= 0:
+            return None, None
+        return price, time.time()
+    except (requests.RequestException, ValueError, TypeError, KeyError, IndexError, OverflowError):
+        return None, None
+
+
 TICKER = "https://api.exchange.coinbase.com/products/{pair}/ticker"
 
 

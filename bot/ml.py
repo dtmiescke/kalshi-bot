@@ -33,7 +33,20 @@ from .metrics import binary_contract_roi
 
 log = logging.getLogger("bot")
 MODEL_DIR = os.environ.get("MODEL_DIR", "data/models")
-COINS = ("BTC", "ETH", "SOL")
+# The current training schema includes all configured 15-minute crypto assets.
+# Prediction and champion comparison align by column name, so older promoted
+# three-coin artifacts remain loadable while the four-coin candidate is evaluated.
+COINS = ("BTC", "ETH", "SOL", "BNB")
+SUPPORTED_COINS = COINS
+
+
+def _align_matrix(X, source_cols, target_cols):
+    """Project a feature matrix onto an artifact's schema by column name."""
+    index = {name: i for i, name in enumerate(source_cols)}
+    return np.column_stack([
+        X[:, index[name]] if name in index else np.zeros(len(X), dtype=float)
+        for name in target_cols
+    ])
 
 
 def ensure_table(store):
@@ -60,7 +73,7 @@ def label(store, ticker, y):
 
 def coin_of(ticker):
     t = ticker.upper()
-    return next((c for c in COINS if t.startswith(f"KX{c}")), "BTC")
+    return next((c for c in SUPPORTED_COINS if t.startswith(f"KX{c}")), "BTC")
 
 
 # --- dataset --------------------------------------------------------------------------
@@ -316,6 +329,13 @@ def train(store, min_windows=300, fee_rate=0.07, deadline_ts=None):
         fresh_mask = np.ones(len(test_groups), dtype=bool)
 
     X_test, y_test, w_test = X[te], y[te], w[te]
+    # Record per-asset training evidence. A new feature column alone does not
+    # mean the model has learned that asset; BNB inference stays disabled until
+    # the promoted model has seen a meaningful number of distinct BNB markets.
+    coin_training_windows = {
+        coin: len({str(g) for g in groups[tr] if coin_of(str(g)) == coin})
+        for coin in COINS
+    }
     p_fresh = p_test[fresh_mask]
     X_fresh, y_fresh, w_fresh = X_test[fresh_mask], y_test[fresh_mask], w_test[fresh_mask]
     groups_fresh = test_groups[fresh_mask]
@@ -330,7 +350,11 @@ def train(store, min_windows=300, fee_rate=0.07, deadline_ts=None):
     if champion_present and champ and os.path.exists(champ_path) and len(y_fresh):
         try:
             cm = joblib.load(champ_path)
-            champ_ll = logloss(cm["iso"].predict_with(cm["model"], X_fresh), y_fresh, w_fresh)
+            champion_cols = cm.get("cols") or (cm.get("meta") or {}).get("cols")
+            if not champion_cols:
+                raise ValueError("champion model is missing its feature column schema")
+            champion_X = _align_matrix(X_fresh, cols, champion_cols)
+            champ_ll = logloss(cm["iso"].predict_with(cm["model"], champion_X), y_fresh, w_fresh)
             champion_eval_ok = math.isfinite(champ_ll)
         except Exception as e:
             # Fail closed: never replace an existing champion that could not be evaluated.
@@ -369,7 +393,8 @@ def train(store, min_windows=300, fee_rate=0.07, deadline_ts=None):
                     "profitable_thresholds": profitable, "promoted": promoted})
     if promoted:
         meta = {"trained": time.time(), "feature_version": features.FEATURE_VERSION,
-                "cols": cols, "min_edge": min(profitable), **metrics}
+                "cols": cols, "coin_training_windows": coin_training_windows,
+                "min_edge": min(profitable), **metrics}
         _promote_champion({"model": best, "iso": iso, "cols": cols, "meta": meta},
                           meta, joblib)
         _CACHE.clear()
@@ -436,6 +461,17 @@ def load_meta():
         return json.load(f)
 
 
+def coin_model_ready(coin, model_cols, meta):
+    """Whether a promoted artifact has the feature schema and evidence for a coin."""
+    if coin != "BNB":
+        return True
+    try:
+        windows = int((meta.get("coin_training_windows") or {}).get("BNB", 0))
+    except (AttributeError, TypeError, ValueError):
+        windows = 0
+    return "coin_BNB" in model_cols and windows >= 50
+
+
 def predict(feats, coin):
     """Calibrated P(YES) from the champion model, or None if there isn't one."""
     if "m" not in _CACHE:
@@ -461,8 +497,16 @@ def predict(feats, coin):
     if not _CACHE["m"] or "kalshi_logit" not in feats:
         return None, None
     bundle, meta = _CACHE["m"]
-    row = [feats.get(c, 0.0) for c in bundle["cols"] if not c.startswith("coin_")] + \
-          [1.0 if coin == c else 0.0 for c in COINS]
+    model_cols = bundle["cols"]
+    # Never pretend a legacy BTC/ETH/SOL-only champion has learned BNB-specific
+    # behavior. BNB predictions are enabled only after a four-coin model is promoted.
+    if not coin_model_ready(coin, model_cols, meta):
+        return None, meta
+    row = [
+        (1.0 if coin == name.removeprefix("coin_") else 0.0)
+        if name.startswith("coin_") else float(feats.get(name, 0.0) or 0.0)
+        for name in model_cols
+    ]
     p = float(bundle["iso"].predict_with(bundle["model"], np.array([row]))[0])
     return p, meta
 
