@@ -79,7 +79,7 @@ def build_trade_review(bet, nearby_signals=None, market_context=None):
         "market_context": market_context or {},
     }
     facts = [f"{observed['outcome'].upper()} on {observed['coin']} {side.upper()}",
-             f"settled result={result}; net P&L=\${pnl:.2f}"]
+             f"settled result={result}; net P&L=${pnl:.2f}"]
     if bet.get("clv") is not None:
         facts.append(f"closing-line value={float(bet['clv']):+.4f} (positive is favorable)")
     if used:
@@ -144,7 +144,7 @@ def format_coin_report(result):
         wr = "n/a" if row["win_rate"] is None else f"{row['win_rate']:.1%}"
         pf = "n/a" if row["profit_factor"] is None else (
             "infinite (no losses)" if math.isinf(row["profit_factor"]) else f"{row['profit_factor']:.2f}")
-        lines.append(f"{i}. {row['coin']}: net profit \${row['net_profit']:.2f} | "
+        lines.append(f"{i}. {row['coin']}: net profit ${row['net_profit']:.2f} | "
                      f"{row['bets']} bets | win rate {wr} | ROI {roi} | profit factor {pf}")
     return "\n".join(lines)
 
