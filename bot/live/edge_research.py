@@ -131,8 +131,9 @@ def graded_feature_drift(store, limit=5000, min_reference=50, min_recent=20):
     rows = store.q(
         "SELECT signals_json, settled_ts FROM decision_audit "
         "WHERE outcome IS NOT NULL AND brier IS NOT NULL "
-        "ORDER BY settled_ts ASC LIMIT ?", (int(limit),)
+        "ORDER BY settled_ts DESC LIMIT ?", (int(limit),)
     )
+    rows = list(reversed(rows))  # oldest-to-newest within the latest bounded window
     histories = {}
     for row in rows:
         try:
