@@ -10,6 +10,7 @@ from bot.crypto_brain import COIN_OF_SERIES
 from bot.live.runner import COINS, COINS_TO_COIN
 from bot.signals import crypto as crypto_sig
 from bot.kalshi_client import KalshiClient
+from bot import marketdata
 from bot.risk import asks_from_book, fill_plan
 
 
@@ -64,9 +65,24 @@ def main():
             spot, spot_ts = crypto_sig.fetch_kraken_spot(kraken_pair)
             source = "kraken"
         assert isinstance(spot, (int, float)) and spot > 0 and spot_ts, f"{coin}: no valid fresh {source} spot quote"
+
+        # Exercise the newly integrated completed 15-minute candle feeds against
+        # the actual public APIs, not only mocked parser tests. Coinbase has no
+        # configured BNB-USD product, so Kraken is the required BNB candle source.
+        cb15 = marketdata._fetch_coinbase_15m(coin)
+        kr15 = marketdata._fetch_kraken_15m(coin)
+        assert kr15 and kr15.get("source") == "kraken", f"{coin}: no completed Kraken 15-minute candle"
+        assert 0 <= kr15.get("age_seconds", -1) <= 1800, f"{coin}: Kraken 15-minute candle is stale"
+        if coin != "BNB":
+            assert cb15 and cb15.get("source") == "coinbase", f"{coin}: no completed Coinbase 15-minute candle"
+            assert 0 <= cb15.get("age_seconds", -1) <= 1800, f"{coin}: Coinbase 15-minute candle is stale"
         coin_checks[coin] = {"series": series, "open_markets": len(active),
                              "book_ticker": ticker, "spot": round(float(spot), 8),
-                             "spot_source": source}
+                             "spot_source": source,
+                             "coinbase_15m_return_pct": cb15.get("return_pct") if cb15 else None,
+                             "kraken_15m_return_pct": kr15.get("return_pct"),
+                             "kraken_15m_age_seconds": round(kr15["age_seconds"], 1),
+                             "coinbase_15m_age_seconds": round(cb15["age_seconds"], 1) if cb15 else None}
 
     response = client._req("GET", "/markets", params={"status": "open", "limit": 100})
     markets = response.get("markets") or []
