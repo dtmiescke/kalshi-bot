@@ -33,11 +33,20 @@ from .metrics import binary_contract_roi
 
 log = logging.getLogger("bot")
 MODEL_DIR = os.environ.get("MODEL_DIR", "data/models")
-# COINS is the frozen legacy one-hot feature schema; changing it would make
-# already-promoted model files dimension-incompatible. BNB is supported as a
-# runtime coin, but remains an all-zero one-hot row until a versioned retrain.
-COINS = ("BTC", "ETH", "SOL")
-SUPPORTED_COINS = ("BTC", "ETH", "SOL", "BNB")
+# The current training schema includes all configured 15-minute crypto assets.
+# Prediction and champion comparison align by column name, so older promoted
+# three-coin artifacts remain loadable while the four-coin candidate is evaluated.
+COINS = ("BTC", "ETH", "SOL", "BNB")
+SUPPORTED_COINS = COINS
+
+
+def _align_matrix(X, source_cols, target_cols):
+    """Project a feature matrix onto an artifact's schema by column name."""
+    index = {name: i for i, name in enumerate(source_cols)}
+    return np.column_stack([
+        X[:, index[name]] if name in index else np.zeros(len(X), dtype=float)
+        for name in target_cols
+    ])
 
 
 def ensure_table(store):
@@ -334,7 +343,11 @@ def train(store, min_windows=300, fee_rate=0.07, deadline_ts=None):
     if champion_present and champ and os.path.exists(champ_path) and len(y_fresh):
         try:
             cm = joblib.load(champ_path)
-            champ_ll = logloss(cm["iso"].predict_with(cm["model"], X_fresh), y_fresh, w_fresh)
+            champion_cols = cm.get("cols") or (cm.get("meta") or {}).get("cols")
+            if not champion_cols:
+                raise ValueError("champion model is missing its feature column schema")
+            champion_X = _align_matrix(X_fresh, cols, champion_cols)
+            champ_ll = logloss(cm["iso"].predict_with(cm["model"], champion_X), y_fresh, w_fresh)
             champion_eval_ok = math.isfinite(champ_ll)
         except Exception as e:
             # Fail closed: never replace an existing champion that could not be evaluated.
@@ -465,8 +478,16 @@ def predict(feats, coin):
     if not _CACHE["m"] or "kalshi_logit" not in feats:
         return None, None
     bundle, meta = _CACHE["m"]
-    row = [feats.get(c, 0.0) for c in bundle["cols"] if not c.startswith("coin_")] + \
-          [1.0 if coin == c else 0.0 for c in COINS]
+    model_cols = bundle["cols"]
+    # Never pretend a legacy BTC/ETH/SOL-only champion has learned BNB-specific
+    # behavior. BNB predictions are enabled only after a four-coin model is promoted.
+    if coin == "BNB" and "coin_BNB" not in model_cols:
+        return None, meta
+    row = [
+        (1.0 if coin == name.removeprefix("coin_") else 0.0)
+        if name.startswith("coin_") else float(feats.get(name, 0.0) or 0.0)
+        for name in model_cols
+    ]
     p = float(bundle["iso"].predict_with(bundle["model"], np.array([row]))[0])
     return p, meta
 
