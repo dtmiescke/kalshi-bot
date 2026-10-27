@@ -229,7 +229,7 @@ def learning_summary(store, min_samples=20, limit=5000):
     return sorted(result, key=lambda x: (x["net_profit"], x["samples"]), reverse=True)
 
 
-def format_learning_summary(rows, min_samples=20, setups=None):
+def format_learning_summary(rows, min_samples=20, setups=None, forecasts=None):
     lines = [f"TRADE-LEARNING ASSOCIATIONS | minimum sample for review={min_samples}",
              "Associations are descriptive, not proof that a tool or signal caused the outcome."]
     if not rows:
@@ -239,6 +239,14 @@ def format_learning_summary(rows, min_samples=20, setups=None):
         note = row["evidence_level"].upper()
         lines.append(f"{i}. {row['signal']}: {row['samples']} trades | profitable {rate} | "
                      f"net P&L ${row['net_profit']:.2f} | {note}")
+    if forecasts is not None:
+        lines.append("\nINDIVIDUAL SIGNAL FORECAST SKILL (latest pre-entry reading per trade)")
+        if not forecasts:
+            lines.append("No saved per-signal probability readings available yet.")
+        for row in forecasts[:30]:
+            acc = "n/a" if row["directional_accuracy"] is None else f"{row['directional_accuracy']:.1%}"
+            lines.append(f"{row['signal']}: n={row['samples']} | directional accuracy {acc} | "
+                         f"Brier {row['mean_brier']} | {row['evidence_level']}")
     if setups is not None:
         lines.append("\nCHART SETUPS BY COIN")
         if not setups:
@@ -295,3 +303,47 @@ def setup_performance(store, min_samples=20):
         b["note"] = "Observed association only; use matched chronological holdouts before strategy changes."
         out.append(b)
     return sorted(out, key=lambda x: (x["net_profit"], x["samples"]), reverse=True)
+
+
+def signal_forecast_summary(store, min_samples=20, limit=5000):
+    """Score the last pre-entry probability from each tool against settlement."""
+    rows = store.q("SELECT review_json FROM trade_reviews ORDER BY ts DESC LIMIT ?", (int(limit),))
+    buckets = {}
+    for row in rows:
+        try:
+            review = json.loads(row.get("review_json") or "{}")
+            obs = review.get("observed") or {}
+            result = str(obs.get("result") or "").lower()
+            if result not in ("yes", "no"):
+                continue
+            outcome = 1.0 if result == "yes" else 0.0
+            readings = obs.get("nearby_signal_readings") or []
+            latest = {}
+            # persist_trade_review saves readings newest-first; retain one per signal.
+            for reading in readings:
+                name = str(reading.get("signal") or "")
+                try:
+                    prob = float(reading.get("prob"))
+                except (TypeError, ValueError):
+                    continue
+                if name and name not in latest and math.isfinite(prob) and 0 <= prob <= 1:
+                    latest[name] = prob
+            for name, prob in latest.items():
+                b = buckets.setdefault(name, {"signal": name, "samples": 0, "correct": 0, "brier_sum": 0.0})
+                b["samples"] += 1
+                b["correct"] += int((prob >= 0.5) == bool(outcome))
+                b["brier_sum"] += (prob - outcome) ** 2
+        except (TypeError, ValueError, AttributeError):
+            continue
+    out = []
+    for b in buckets.values():
+        n = b["samples"]
+        b["directional_accuracy"] = b["correct"] / n if n else None
+        b["mean_brier"] = b["brier_sum"] / n if n else None
+        b["mean_brier"] = round(b["mean_brier"], 5) if b["mean_brier"] is not None else None
+        b["evidence_level"] = "reviewable" if n >= int(min_samples) else "low_sample"
+        del b["brier_sum"]
+        out.append(b)
+    return sorted(out, key=lambda x: (x["mean_brier"] if x["mean_brier"] is not None else 1.0, -x["samples"]))
+
+
