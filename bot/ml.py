@@ -33,7 +33,7 @@ from .metrics import binary_contract_roi
 
 log = logging.getLogger("bot")
 MODEL_DIR = os.environ.get("MODEL_DIR", "data/models")
-COINS = ("BTC", "ETH", "SOL")
+COINS = ("BTC", "ETH", "SOL", "BNB")
 
 
 def ensure_table(store):
