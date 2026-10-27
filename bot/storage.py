@@ -67,6 +67,17 @@ CREATE TABLE IF NOT EXISTS trade_reviews (
 );
 CREATE INDEX IF NOT EXISTS ix_trade_reviews_coin_ts ON trade_reviews(coin, ts);
 
+-- Append-only per-trade crypto postmortems. One row per settled paper bet.
+CREATE TABLE IF NOT EXISTS trade_learning_reviews (
+    bet_id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, ticker TEXT NOT NULL,
+    coin TEXT NOT NULL, series TEXT, side TEXT, result TEXT, pnl REAL,
+    model_prob REAL, side_confidence REAL, edge REAL, clv REAL,
+    setup_tags_json TEXT, regime TEXT, tools_json TEXT, indicators_json TEXT,
+    explanation TEXT, learning_notes TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_trade_learning_coin ON trade_learning_reviews(coin, ts);
+CREATE INDEX IF NOT EXISTS ix_trade_learning_result ON trade_learning_reviews(result, coin);
+
 CREATE TABLE IF NOT EXISTS maker_attempts (
     ts INTEGER, ticker TEXT, filled INTEGER, outcome TEXT, wait_s REAL
 );
