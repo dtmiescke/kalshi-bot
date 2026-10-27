@@ -44,11 +44,11 @@ class HighConfidenceEvaluationTests(unittest.TestCase):
         self.assertFalse(result["all"]["target_met"])
 
     def test_target_requires_minimum_sample_and_confidence_bound(self):
-        rows = [{"model_prob": 0.99, "outcome": 1} for _ in range(99)]
+        rows = ([{"model_prob": 0.99, "outcome": 1} for _ in range(89)] +\n                [{"model_prob": 0.99, "outcome": 0} for _ in range(10)])
         result = evaluate_predictions(rows, min_sample=100)
         self.assertEqual(result["high_confidence"]["n"], 99)
         self.assertFalse(result["high_confidence"]["target_met"])
-        rows.append({"model_prob": 0.99, "outcome": 1})
+        rows.append({"model_prob": 0.99, "outcome": 0})
         result = evaluate_predictions(rows, min_sample=100)
         self.assertFalse(result["high_confidence"]["target_met"])
 
