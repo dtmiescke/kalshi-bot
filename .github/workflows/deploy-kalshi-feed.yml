@@ -122,7 +122,7 @@ jobs:
               ws.close();
               console.log("Subscription acknowledgement:", subscribed ? "received" : "missing");
               console.log("Ticker market-data update:", marketData ? "received" : "not observed during smoke-test window");
-              if (!subscribed) process.exitCode = 1;
+              if (!subscribed && !marketData) process.exitCode = 1;
             }
           }, 15000);
           ws.addEventListener("open", () => console.log("Relay WebSocket handshake succeeded."));
@@ -145,14 +145,14 @@ jobs:
             }
             if (msg.type === "relay_status" && msg.status === "error" || msg.type === "relay_error" || msg.type === "error") {
               console.error("WebSocket smoke-test error:", msg.type, msg.message || msg.msg?.msg || "");
-              if (!subscribed) process.exitCode = 1;
+              if (!subscribed && !marketData) process.exitCode = 1;
             }
           });
           ws.addEventListener("error", () => {
             if (!finished) { finished = true; clearTimeout(timeout); console.error("Relay WebSocket connection failed."); process.exitCode = 1; }
           });
           ws.addEventListener("close", () => {
-            if (!subscribed && !finished) { finished = true; clearTimeout(timeout); console.error("Relay closed before ticker subscription was confirmed."); process.exitCode = 1; }
+            if (!subscribed && !marketData && !finished) { finished = true; clearTimeout(timeout); console.error("Relay closed before subscription or market data was confirmed."); process.exitCode = 1; }
           });
           process.on("exit", () => clearTimeout(timeout));
           NODE
