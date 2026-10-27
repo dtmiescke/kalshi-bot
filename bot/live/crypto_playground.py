@@ -91,7 +91,7 @@ def _metrics(trades):
         "trades": len(returns), "win_rate": len(wins) / len(returns) if returns else 0.0,
         "mean_net_return": mean(returns) if returns else 0.0,
         "median_net_return": median(returns) if returns else 0.0,
-        "profit_factor": gross_wins / gross_losses if gross_losses else (None if not gross_wins else float("inf")),
+        "profit_factor": gross_wins / gross_losses if gross_losses else (None if not gross_wins else "infinite_no_losses"),
         "max_drawdown": max_dd, "compounded_return": equity - 1.0,
         "positive_trades": len(wins), "negative_trades": len(losses),
     }
