@@ -137,7 +137,9 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
     sigma, parts = volmod.forecast(store, coin, closes[-120:], dv, now, ctx.get("_events"))
     info = {"coin": coin, "secs_left": secs, "sigma": sigma, "vol_parts": parts,
             "context": {k: v for k, v in ctx.items() if not k.startswith("_")},
-            "chart_url": "https://www.tradingview.com/chart/?symbol=COINBASE%3A" + coin + "USD"}
+            "chart_url": ("https://www.tradingview.com/chart/?symbol=KRAKEN%3ABNBUSD"
+                          if coin == "BNB" else
+                          "https://www.tradingview.com/chart/?symbol=COINBASE%3A" + coin + "USD")}
     if not sigma:
         return readings, info
 
