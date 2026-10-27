@@ -122,7 +122,7 @@ jobs:
           CRYPTO_MAX_TRADES_PER_HOUR: ${{ steps.daily-limits.outputs.crypto_cap }}
           CRYPTO_MIN_BET: '25'
           CRYPTO_MAX_PER_BET: '100'
-          CRYPTO_MAX_PER_WINDOW: '750'
+          CRYPTO_MAX_PER_WINDOW: '100'
           LADDERS_ENABLED: ${{ vars.LADDERS_ENABLED || 'yes' }}
           COUNCIL_MODE: ${{ vars.COUNCIL_MODE || 'advisory' }}
         run: python -m bot.main scheduled
