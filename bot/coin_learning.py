@@ -159,6 +159,7 @@ def backfill_trade_reviews(store, limit=5000):
 def coin_report(store):
     rows = store.q("""SELECT series, ticker, side, result, pnl, stake FROM bets
         WHERE mode='paper' AND status='graded' ORDER BY graded_ts, id""")
+    rows = [row for row in rows if coin_from_market(row.get("series"), row.get("ticker")) != "OTHER"]
     ranked = coin_performance(rows)
     by_coin = {row["coin"]: row for row in ranked}
     # Always show BTC, BNB, SOL and ETH, even before each has settled paper bets.
@@ -183,7 +184,8 @@ def format_coin_report(result):
         pf = "n/a" if row["profit_factor"] is None else (
             "infinite (no losses)" if math.isinf(row["profit_factor"]) else f"{row['profit_factor']:.2f}")
         lines.append(f"{i}. {row['coin']}: net profit ${row['net_profit']:.2f} | "
-                     f"{row['bets']} bets | win rate {wr} | ROI {roi} | profit factor {pf}")
+                     f"{row['bets']} bets | W-L {row.get('wins', 0)}-{row.get('losses', 0)} | "
+                     f"win rate {wr} | ROI {roi} | profit factor {pf}")
     return "\n".join(lines)
 
 
