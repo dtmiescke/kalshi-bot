@@ -187,7 +187,7 @@ class Settings:
     crypto_max_trades_per_hour: int = field(
         default_factory=lambda: _env_int("CRYPTO_MAX_TRADES_PER_HOUR", 12))
     crypto_max_per_bet: float = field(default_factory=lambda: _env_float("CRYPTO_MAX_PER_BET", 100.0))
-    # one window = BTC+ETH+SOL bets that settle together (they move together)
+    # one window = BTC+BNB+ETH+SOL bets that settle together (correlated exposure)
     crypto_max_per_window: float = field(
         default_factory=lambda: _env_float("CRYPTO_MAX_PER_WINDOW", 750.0))
     # Crypto sides priced below this (dollars) are long shots: bought only when the
