@@ -31,6 +31,7 @@ from ..signals import implied_vol as iv
 from ..signals.base import Reading, clamp
 from . import feeds, settlement
 from .analytics import SymbolAnalytics, minute_candles
+from .edge_quality import edge_quality, enrich_plan
 from .book import OrderBook
 from .kalshi_book import KalshiBook
 
@@ -443,10 +444,21 @@ class LiveRunner:
         if meta and any(r.name == "ml_model" for r in readings):
             # the promoted model says which edge level actually paid on unseen data
             min_edge = max(min_edge, float(meta.get("min_edge", min_edge)))
+        # Tighten the required edge when independent model views disagree or
+        # reference prices are sparse/divergent. The underlying probability is
+        # unchanged; this is a transparent uncertainty margin, not fake alpha.
+        analytics = self.coins[info["series"]]
+        source_summary = analytics.source_consensus(now=time.time(), max_age=5)
+        quality = edge_quality(readings, source_summary)
+        required_edge = min_edge + quality["min_edge_surcharge"]
+        quality["base_min_edge"] = round(min_edge, 5)
+        quality["required_min_edge"] = round(required_edge, 5)
         plan, why = risk.decide(self.s, self.store, snap, prob, conf,
                                 self.books[ticker].as_rest_book(),
-                                min_edge=min_edge, max_per_bet=self.s.crypto_max_per_bet,
+                                min_edge=required_edge, max_per_bet=self.s.crypto_max_per_bet,
                                 maker=maker, raw_model_prob=risk.crypto_model_prob(readings))
+        if plan:
+            enrich_plan(plan, quality, prob)
         return (snap, plan, prob, conf) if plan else None
 
     def finish(self, ticker, readings, ctx, plan, verdict):
