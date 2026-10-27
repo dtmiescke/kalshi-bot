@@ -329,6 +329,13 @@ def train(store, min_windows=300, fee_rate=0.07, deadline_ts=None):
         fresh_mask = np.ones(len(test_groups), dtype=bool)
 
     X_test, y_test, w_test = X[te], y[te], w[te]
+    # Record per-asset training evidence. A new feature column alone does not
+    # mean the model has learned that asset; BNB inference stays disabled until
+    # the promoted model has seen a meaningful number of distinct BNB markets.
+    coin_training_windows = {
+        coin: len({str(g) for g in groups[tr] if coin_of(str(g)) == coin})
+        for coin in COINS
+    }
     p_fresh = p_test[fresh_mask]
     X_fresh, y_fresh, w_fresh = X_test[fresh_mask], y_test[fresh_mask], w_test[fresh_mask]
     groups_fresh = test_groups[fresh_mask]
@@ -386,7 +393,8 @@ def train(store, min_windows=300, fee_rate=0.07, deadline_ts=None):
                     "profitable_thresholds": profitable, "promoted": promoted})
     if promoted:
         meta = {"trained": time.time(), "feature_version": features.FEATURE_VERSION,
-                "cols": cols, "min_edge": min(profitable), **metrics}
+                "cols": cols, "coin_training_windows": coin_training_windows,
+                "min_edge": min(profitable), **metrics}
         _promote_champion({"model": best, "iso": iso, "cols": cols, "meta": meta},
                           meta, joblib)
         _CACHE.clear()
@@ -481,7 +489,10 @@ def predict(feats, coin):
     model_cols = bundle["cols"]
     # Never pretend a legacy BTC/ETH/SOL-only champion has learned BNB-specific
     # behavior. BNB predictions are enabled only after a four-coin model is promoted.
-    if coin == "BNB" and "coin_BNB" not in model_cols:
+    if coin == "BNB" and (
+            "coin_BNB" not in model_cols
+            or int((meta.get("coin_training_windows") or {}).get("BNB", 0)) < 50
+    ):
         return None, meta
     row = [
         (1.0 if coin == name.removeprefix("coin_") else 0.0)
