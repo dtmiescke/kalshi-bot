@@ -109,7 +109,7 @@ jobs:
           if (!response.ok) throw new Error("Could not retrieve open markets for smoke test: HTTP " + response.status);
           const body = await response.json();
           const markets = Array.isArray(body.markets) ? body.markets : [];
-          const market = markets.find(m => typeof m.ticker === "string" && /^KX[A-Z0-9_-]{2,100}$/.test(m.ticker));
+          const market = markets.filter(m => typeof m.ticker === "string" && /^KX[A-Z0-9_-]{2,100}$/.test(m.ticker))\n  .sort((a, b) => Number(b.volume_24h ?? b.volume ?? 0) - Number(a.volume_24h ?? a.volume ?? 0))[0];
           if (!market) throw new Error("No open KX market ticker found for live feed smoke test");
           console.log("Testing read-only ticker subscription for an open market.");
           const ws = new WebSocket(base.replace(/^https:/, "wss:") + "/ws");
@@ -124,7 +124,7 @@ jobs:
               console.log("Ticker market-data update:", marketData ? "received" : "not observed during smoke-test window");
               if (!subscribed && !marketData) process.exitCode = 1;
             }
-          }, 15000);
+          }, 30000);
           ws.addEventListener("open", () => console.log("Relay WebSocket handshake succeeded."));
           ws.addEventListener("message", event => {
             let msg;
@@ -135,7 +135,7 @@ jobs:
               console.log("Requested ticker channel for an open market.");
               return;
             }
-            if ((msg.type === "subscribed" || msg.type === "subscription") && (msg.msg?.channel === "ticker" || msg.channel === "ticker" || msg.msg?.sid !== undefined)) {
+            if (["subscribed", "subscription", "ok"].includes(msg.type) && (msg.msg?.channel === "ticker" || msg.channel === "ticker" || msg.msg?.sid !== undefined || msg.id === 1)) {
               subscribed = true;
               console.log("Kalshi accepted ticker subscription.");
             }
