@@ -35,7 +35,7 @@ from .chart_setups import analyze_chart_setups, analyze_multi_timeframe
 from .price_discovery import estimate_price_discovery
 from .edge_quality import edge_quality, enrich_plan
 from .adaptive_learning import AdaptiveLearning, graded_setup_performance, graded_price_discovery, historical_setup_penalty
-from .edge_research import classify_regime, evidence_score
+from .edge_research import classify_regime, evidence_score, graded_feature_drift
 from .book import OrderBook
 from .kalshi_book import KalshiBook
 
@@ -382,6 +382,7 @@ class LiveRunner:
             try:
                 setup_report = graded_setup_performance(self.store)
                 discovery_report = graded_price_discovery(self.store)
+                drift_report = graded_feature_drift(self.store)
                 # Evidence scores rank research maturity, not probability of winning.
                 for item in setup_report.values():
                     item["evidence_quality_score"] = evidence_score(
@@ -393,10 +394,12 @@ class LiveRunner:
                 self.adaptive_report_cache = {
                     "ts": now, "report": setup_report,
                     "price_discovery": discovery_report,
+                    "feature_drift": drift_report,
                 }
                 self.store.set_kv("crypto_adaptive_research", {
                     "ts": int(now), "setup_performance": setup_report,
                     "price_discovery": discovery_report,
+                    "feature_drift": drift_report,
                     "research_policy": {
                         "live_auto_promotion": False,
                         "requires_walk_forward": True,
