@@ -46,6 +46,7 @@ jobs:
           echo "Crypto hourly ceiling set; entries are not forced."
       - name: Run
         id: run
+        timeout-minutes: 12
         env:
           BOT_MODE: ${{ steps.daily-limits.outputs.bot_mode == 'paper' && 'paper' || vars.BOT_MODE == 'live' && vars.LIVE_TRADING_OPERATIONAL_APPROVED != 'yes' && 'paper' || vars.BOT_MODE || 'paper' }}
           LIVE_TRADING_CONFIRMED: ${{ vars.LIVE_TRADING_OPERATIONAL_APPROVED == 'yes' && vars.LIVE_TRADING_CONFIRMED == 'yes' && 'yes' || 'no' }}
