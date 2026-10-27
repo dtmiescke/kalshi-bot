@@ -1,7 +1,7 @@
 import unittest
 
 from bot.live.edge_research import (
-    classify_regime, detect_feature_drift, evidence_score, walk_forward_summary,
+    classify_regime, detect_feature_drift, evidence_score, graded_feature_drift, walk_forward_summary,
 )
 
 
@@ -34,6 +34,21 @@ class EdgeResearchTests(unittest.TestCase):
                                   profit_factor=1.4, max_drawdown=0.05, brier=0.1,
                                   baseline_brier=0.2, cost_coverage=True)
         self.assertGreater(stronger, weak)
+
+
+    def test_persisted_drift_report_uses_chronological_settled_rows(self):
+        import json
+        rows = []
+        for i in range(100):
+            value = float(i % 3) if i < 70 else 20.0 + float(i % 3)
+            rows.append({"signals_json": json.dumps({"indicators": {"rsi_1m": value}}),
+                         "settled_ts": i})
+        class Store:
+            def q(self, sql, args=()):
+                return rows
+        report = graded_feature_drift(Store(), min_reference=50, min_recent=20)
+        self.assertIn("rsi_1m", report["features"])
+        self.assertIn("rsi_1m", report["drift_alerts"])
 
     def test_drift_detected_after_distribution_shift(self):
         ref = [float(i % 3) for i in range(100)]
