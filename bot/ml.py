@@ -461,6 +461,17 @@ def load_meta():
         return json.load(f)
 
 
+def coin_model_ready(coin, model_cols, meta):
+    """Whether a promoted artifact has the feature schema and evidence for a coin."""
+    if coin != "BNB":
+        return True
+    try:
+        windows = int((meta.get("coin_training_windows") or {}).get("BNB", 0))
+    except (AttributeError, TypeError, ValueError):
+        windows = 0
+    return "coin_BNB" in model_cols and windows >= 50
+
+
 def predict(feats, coin):
     """Calibrated P(YES) from the champion model, or None if there isn't one."""
     if "m" not in _CACHE:
@@ -489,10 +500,7 @@ def predict(feats, coin):
     model_cols = bundle["cols"]
     # Never pretend a legacy BTC/ETH/SOL-only champion has learned BNB-specific
     # behavior. BNB predictions are enabled only after a four-coin model is promoted.
-    if coin == "BNB" and (
-            "coin_BNB" not in model_cols
-            or int((meta.get("coin_training_windows") or {}).get("BNB", 0)) < 50
-    ):
+    if not coin_model_ready(coin, model_cols, meta):
         return None, meta
     row = [
         (1.0 if coin == name.removeprefix("coin_") else 0.0)
