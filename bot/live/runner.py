@@ -938,7 +938,7 @@ class LiveRunner:
                 if self.with_context:
                     a = self.coins[series]
                     cbp = a.other_prices.get("coinbase", (0, None))[1]
-                    self.ctx_cache[series] = marketdata.context(self.store, coin, coinbase_price=cbp)
+                    self.ctx_cache[series] = marketdata.context(self.store, coin, coinbase_price=cbp, include_spot_15m=True)
                 if cur:
                     iv.cached_dvol(self.store, cur, fetch=self.dvol_fetch)
             except Exception as e:
