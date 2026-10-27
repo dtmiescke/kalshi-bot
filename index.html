@@ -257,7 +257,7 @@ details.floor summary{padding:10px 12px;cursor:pointer;font-family:var(--display
 
   <section class="kTicker" aria-live="polite" aria-label="Kalshi ticker snapshot">
     <div class="kTickerHead"><strong>Kalshi market ticker</strong><span class="pill" id="kTickerStatus">Waiting for snapshot</span></div>
-    <div class="kTickerGrid" id="kTickerGrid"><div class="kTickerCell"><b>—</b><span>BTC 15-minute</span></div><div class="kTickerCell"><b>—</b><span>ETH 15-minute</span></div><div class="kTickerCell"><b>—</b><span>SOL 15-minute</span></div></div>
+    <div class="kTickerGrid" id="kTickerGrid"><div class="kTickerCell"><b>—</b><span>BTC 15-minute</span></div><div class="kTickerCell"><b>—</b><span>ETH 15-minute</span></div><div class="kTickerCell"><b>—</b><span>SOL 15-minute</span></div><div class="kTickerCell"><b>—</b><span>BNB 15-minute</span></div></div>
     <div class="kTickerMeta" id="kTickerMeta">Reads the bot's latest saved snapshot. This is not a direct streaming connection.</div>
   </section>
   <p class="sub" id="theoHQ" hidden></p>
@@ -981,7 +981,7 @@ function renderKalshiTicker(){
     return;
   }
   const d=snap.data, age=Math.max(0,Math.floor(Date.now()/1000-Number(d.ts||0)));
-  const fresh=age<=180, labels=[["KXBTC15M","BTC"],["KXETH15M","ETH"],["KXSOL15M","SOL"]];
+  const fresh=age<=180, labels=[["KXBTC15M","BTC"],["KXETH15M","ETH"],["KXSOL15M","SOL"],["KXBNB15M","BNB"]];
   grid.innerHTML=labels.map(([series,label])=>{
     const rows=Object.entries(d.markets||{}).filter(([t,m])=>String(t).includes(series)||String(t).startsWith(series));
     const found=rows.map(([t,m])=>({t,m:m||{}})).sort((a,b)=>(tickerNum(a.m.secs_left)??999999)-(tickerNum(b.m.secs_left)??999999))[0];

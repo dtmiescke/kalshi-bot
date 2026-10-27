@@ -11,6 +11,11 @@ from bot.engine import Engine
 from bot.signals.base import Reading
 from bot.storage import Store
 
+# These fixtures use small synthetic stakes; production minimum bets ($25) are
+# asserted with a clean environment in test_total_loss_limit.py (CI sets the same).
+os.environ.setdefault("MIN_PER_BET", "0")
+os.environ.setdefault("CRYPTO_MIN_BET", "0")
+
 SPORTS = {"ticker": "KXNBAGAME-26OCT24BOSNYK-BOS", "event_ticker": "KXNBAGAME-26OCT24BOSNYK",
           "series": "KXNBAGAME"}
 CRYPTO = {"ticker": "KXBTC15M-W-00", "event_ticker": "KXBTC15M-W", "series": "KXBTC15M"}
