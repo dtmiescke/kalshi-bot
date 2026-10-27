@@ -47,7 +47,8 @@ class TestFallbacks(unittest.TestCase):
             return Resp(ok="models.github.ai" in url)          # OpenRouter fails, GitHub answers
         with mock.patch.dict(os.environ, env):
             c = llm.LLM("or-key", self.st, post=post, max_per_run=5, daily_limit=10)
-            self.assertEqual(c.models, ["m1:free", "github|openai/gpt-4.1-mini", "gemini|gemini-2.0-flash"])
+            self.assertEqual(c.models, ["m1:free", "github|openai/gpt-4.1-mini",
+                                        "gemini|gemini-flash-latest", "gemini|gemini-2.5-flash"])
             text, used = c.ask("hello")
         self.assertEqual((text, used), ("hi", "github|openai/gpt-4.1-mini"))
         self.assertEqual(calls[0][0], llm.URL)
