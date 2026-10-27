@@ -124,7 +124,7 @@ class TestWorkflowWiring(unittest.TestCase):
     def test_paper_mode_is_hard_locked(self):
         run_step = _step(self.load("bot.yml"), "Run")
         self.assertIn("BOT_MODE: paper", run_step)
-        self.assertIn('LIVE_TRADING_CONFIRMED: "no"', run_step))
+        self.assertIn('LIVE_TRADING_CONFIRMED: "no"', run_step)
 
 
 if __name__ == "__main__":
