@@ -61,6 +61,7 @@ CRYPTO_15M = {
     "KXBTC15M": "BTC-USD",
     "KXETH15M": "ETH-USD",
     "KXSOL15M": "SOL-USD",
+    "KXBNB15M": "BNB-USD",
 }
 
 # Sports selection is environment/config driven; it does not require UI changes.

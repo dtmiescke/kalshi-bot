@@ -109,8 +109,8 @@ jobs:
           ORDER_STYLE: ${{ vars.ORDER_STYLE || 'maker' }}
           # Risk and strategy settings, editable from the phone app (Control > Settings)
           BANKROLL: '200000'
-          MIN_PER_BET: '500'
-          MAX_PER_BET: '750'
+          MIN_PER_BET: '25'
+          MAX_PER_BET: '100'
           MAX_PER_GAME: '750'
           MAX_PER_DAY: '20000'
           MAX_TOTAL_LOSS: '20000'
@@ -120,9 +120,9 @@ jobs:
           MIN_EDGE: ${{ vars.MIN_EDGE || '3' }}
           CRYPTO_MIN_EDGE: ${{ vars.CRYPTO_MIN_EDGE || '5' }}
           CRYPTO_MAX_TRADES_PER_HOUR: ${{ steps.daily-limits.outputs.crypto_cap }}
-          CRYPTO_MIN_BET: '500'
-          CRYPTO_MAX_PER_BET: '750'
-          CRYPTO_MAX_PER_WINDOW: '750'
+          CRYPTO_MIN_BET: '25'
+          CRYPTO_MAX_PER_BET: '100'
+          CRYPTO_MAX_PER_WINDOW: '100'
           LADDERS_ENABLED: ${{ vars.LADDERS_ENABLED || 'yes' }}
           COUNCIL_MODE: ${{ vars.COUNCIL_MODE || 'advisory' }}
         run: python -m bot.main scheduled
