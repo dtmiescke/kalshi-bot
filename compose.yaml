@@ -1,0 +1,15 @@
+services:
+  kalshi-crypto:
+    build: .
+    container_name: kalshi-crypto-continuous
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      BOT_MODE: paper
+      LIVE_TRADING_CONFIRMED: "no"
+      CONTINUOUS_SESSION_MINUTES: "525600"
+      BOT_DB: /app/data/bot.sqlite
+    volumes:
+      - ./data:/app/data
+    init: true
