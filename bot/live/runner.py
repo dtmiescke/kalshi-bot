@@ -452,8 +452,7 @@ class LiveRunner:
                         "signals": {"chart_setups": [x.get("name") for x in ctx.get("chart_setups", {}).get("setups", [])],
                                     "regime": regime,
                                     "regime_tags": classify_regime({
-                                        "volatility_ratio": (spot_summary.get("vol_per_min") or 0) /
-                                            max(float(spot_summary.get("vol_per_min") or 1e-9), 1e-9),
+                                        "volatility_ratio": None,  # no comparable baseline window; do not fabricate a shock score
                                         "trend_strength": float(ctx.get("indicators", {}).get("adx_1m", 0) or 0) / 100.0,
                                         "source_divergence_bps": spot_summary.get("source_divergence_bps"),
                                         "spread_bps": (((float(yes_ask) - float(yes_bid)) * 10000.0 / market_mid)
