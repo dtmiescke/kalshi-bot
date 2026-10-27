@@ -70,16 +70,41 @@ class SymbolAnalytics:
                 "aggressor_imbalance": round((buy - sell) / tot, 3) if tot else 0.0,
                 "trades": len(recent)}
 
+    def fresh_source_prices(self, now=None, max_age=5):
+        """Return timestamp-fresh source prices, labelled by venue.
+
+        The Kraken local book mid is a source; other_prices contains independent
+        reference venues such as Coinbase. Stale prices are excluded rather than
+        silently reused in the consensus.
+        """
+        now = time.time() if now is None else float(now)
+        out = {
+            name: float(price)
+            for name, (ts, price) in self.other_prices.items()
+            if price is not None and 0 <= now - float(ts) <= max_age
+            and math.isfinite(float(price)) and float(price) > 0
+        }
+        mid = self.book.mid()
+        book_ts = getattr(self.book, "last_update", 0) or 0
+        if mid and 0 <= now - book_ts <= max_age and math.isfinite(float(mid)) and float(mid) > 0:
+            out["kraken"] = float(mid)
+        return out
+
+    def source_divergence_bps(self, now=None, max_age=5):
+        """Full cross-venue price spread in basis points; None with <2 sources."""
+        prices = list(self.fresh_source_prices(now, max_age).values())
+        if len(prices) < 2:
+            return None
+        center = sorted(prices)[len(prices) // 2]
+        if center <= 0:
+            return None
+        return (max(prices) - min(prices)) / center * 10000
+
     def composite_price(self, now, max_age=5):
-        """Median of fresh exchange prices: a rough stand-in for the multi-
-        exchange index Kalshi settles on (CF Benchmarks)."""
-        prices = [p for ts, p in self.other_prices.values() if now - ts <= max_age]
-        m = self.book.mid()
-        if m and now - self.book.last_update <= max_age:
-            prices.append(m)
+        """Median of fresh independent exchange prices, excluding stale feeds."""
+        prices = sorted(self.fresh_source_prices(now, max_age).values())
         if not prices:
             return None
-        prices.sort()
         n = len(prices)
         return prices[n // 2] if n % 2 else (prices[n // 2 - 1] + prices[n // 2]) / 2
 
@@ -107,13 +132,17 @@ class SymbolAnalytics:
         div = None
         cb = self.other_prices.get("coinbase")
         m = self.book.mid()
-        if cb and m and now - cb[0] <= 5:
+        if cb and m and 0 <= now - cb[0] <= 5:
             div = abs(cb[1] / m - 1) * 1e4
+        fresh_sources = self.fresh_source_prices(now, max_age=5)
+        source_div = self.source_divergence_bps(now, max_age=5)
         import os as _os
         max_div = float(_os.environ.get("MAX_FEED_DIVERGENCE_BPS", 25))
         return {
             "symbol": self.symbol, "mid": self.book.mid(),
             "composite": self.composite_price(now),
+            "source_prices": {k: round(v, 8) for k, v in fresh_sources.items()},
+            "source_divergence_bps": round(source_div, 2) if source_div is not None else None,
             "spread_bps": round(self.book.spread_bps() or 0, 2),
             "returns": {k: (round(v, 5) if v is not None else None) for k, v in r.items()},
             "vol_per_min": round(vol, 6) if vol else None, "regime": regime,
@@ -124,7 +153,7 @@ class SymbolAnalytics:
             "walls": self.book.wall_events[-5:],
             "data_quality": {
                 "book_age_s": round(age, 2) if age is not None else None,
-                "stale": age is None or age > 5 or (div is not None and div > max_div),
+                "stale": age is None or age > 5 or (source_div is not None and source_div > max_div),
                 "feed_divergence_bps": round(div, 2) if div is not None else None,
                 "feed_gaps": self.gaps,
                 "checksum_ok": self.book.checksum_ok, "checksum_fail": self.book.checksum_fail,
