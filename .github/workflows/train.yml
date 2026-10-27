@@ -34,6 +34,11 @@ jobs:
   train:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    # Optional Val Town bridge (bot/valtown_bridge.py) for public Kalshi catalog
+    # reads; unset = direct Kalshi. Never used for order books or orders.
+    env:
+      VAL_TOWN_KALSHI_URL: ${{ vars.VAL_TOWN_KALSHI_URL }}
+      ATI_INGEST_SHARED_TOKEN: ${{ secrets.ATI_INGEST_SHARED_TOKEN }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
