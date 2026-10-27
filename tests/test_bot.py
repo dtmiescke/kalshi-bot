@@ -634,3 +634,26 @@ class TestSigning(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCryptoFourCoinConfiguration(unittest.TestCase):
+    def test_requested_15m_coin_map_is_explicit_and_unique(self):
+        from bot.config import CRYPTO_15M
+        self.assertEqual(CRYPTO_15M, {
+            "KXBTC15M": "BTC-USD",
+            "KXETH15M": "ETH-USD",
+            "KXSOL15M": "SOL-USD",
+            "KXBNB15M": "BNB-USD",
+        })
+        self.assertEqual(len(CRYPTO_15M), len(set(CRYPTO_15M)))
+        self.assertEqual(len(CRYPTO_15M.values()), len(set(CRYPTO_15M.values())))
+
+    def test_requested_stake_limits_are_enforced_by_workflow_configuration(self):
+        from pathlib import Path
+        workflow = Path(".github/workflows/bot.yml").read_text()
+        self.assertIn("MIN_PER_BET: '25'", workflow)
+        self.assertIn("MAX_PER_BET: '100'", workflow)
+        self.assertIn("CRYPTO_MIN_BET: '25'", workflow)
+        self.assertIn("CRYPTO_MAX_PER_BET: '100'", workflow)
+        self.assertIn("CRYPTO_MAX_PER_WINDOW: '100'", workflow)
+        self.assertIn("LIVE_TRADING_CONFIRMED: ${{ vars.LIVE_TRADING_OPERATIONAL_APPROVED == 'yes' && vars.LIVE_TRADING_CONFIRMED == 'yes' && 'yes' || 'no' }}", workflow)
