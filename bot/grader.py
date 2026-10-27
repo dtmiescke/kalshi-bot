@@ -389,9 +389,14 @@ def grade(store, client):
     n_decisions = grade_decision_audits(store, client)
     n_combos = grade_combo_predictions(store, client)
     n_votes = grade_council_votes(store, client)
+    # live in-game snapshots: label finished games, then refit the in-game model
+    from . import live_games
+    n_live = live_games.grade(store, client)
+    if n_live:
+        live_games.learn(store)
     monitor_model(store)
     store.set_kv("grading_lookup_health", dict(client.health(), ts=int(time.time())))
     log.info("graded %d bets, %d markets, %d decision snapshots, %d combo forecasts, weight changes: %s", n_bets, n_mkts, n_decisions, n_combos,
              json.dumps({k: [round(a, 3), round(b, 3)] for k, (a, b) in changes.items()}))
     return {"bets": n_bets, "markets": n_mkts, "combo_forecasts": n_combos,
-            "council_votes": n_votes, "weight_changes": changes}
+            "council_votes": n_votes, "live_games": n_live, "weight_changes": changes}

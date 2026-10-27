@@ -158,9 +158,28 @@ def run_scheduled(s, store, data):
             print("ladders:", eng.run_ladders({"bets": 0, "skipped": {}}))
         except Exception as e:
             print("ladders failed:", e)
+    # In-game sports bets (paper only) run beside the crypto burst, so games in
+    # progress get re-priced every LIVE_POLL_SECONDS for the length of the run.
+    # With no game in progress the loop returns after one scoreboard check.
+    live_games_thread = None
+    if s.live_games_enabled and s.mode == "paper":
+        import threading
+        from . import live_games
+        minutes = burst if burst > 0 else float(os.environ.get("LIVE_GAME_MINUTES", 8))
+
+        def _live_games():
+            try:
+                print("live games:", json.dumps(live_games.run(s, store, minutes, data=data),
+                                                default=str))
+            except Exception as exc:
+                logging.warning("live games loop failed: %s", exc)
+        live_games_thread = threading.Thread(target=_live_games, name="live-games", daemon=True)
+        live_games_thread.start()
     if keep and burst > 0:
         from .live.runner import run as run_live
         print("live burst:", json.dumps(run_live(s, store, burst, sports=False), default=str))
+    if live_games_thread:
+        live_games_thread.join(timeout=burst * 60 + 120 if burst > 0 else 600)
     # Combo discovery is read-only and cheap enough to run on every scheduled
     # cycle, independent of the less-frequent full sports scan. The Kalshi client
     # briefly caches paginated event responses, so a full-scan cycle reuses them.
