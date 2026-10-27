@@ -95,7 +95,9 @@ class SymbolAnalytics:
         prices = list(self.fresh_source_prices(now, max_age).values())
         if len(prices) < 2:
             return None
-        center = sorted(prices)[len(prices) // 2]
+        prices.sort()
+        mid = len(prices) // 2
+        center = prices[mid] if len(prices) % 2 else (prices[mid - 1] + prices[mid]) / 2
         if center <= 0:
             return None
         return (max(prices) - min(prices)) / center * 10000
@@ -116,9 +118,11 @@ class SymbolAnalytics:
                 "median_abs_deviation_bps": None,
                 "agreement_score": None,
             }
-        median = prices[len(prices) // 2]
+        mid = len(prices) // 2
+        median = prices[mid] if len(prices) % 2 else (prices[mid - 1] + prices[mid]) / 2
         deviations = sorted(abs(price - median) for price in prices)
-        mad = deviations[len(deviations) // 2]
+        dev_mid = len(deviations) // 2
+        mad = deviations[dev_mid] if len(deviations) % 2 else (deviations[dev_mid - 1] + deviations[dev_mid]) / 2
         spread = (prices[-1] - prices[0]) / median * 10000 if median else None
         mad_bps = mad / median * 10000 if median else None
         # 100 means tight agreement; 0 means spread is at/above the configured
@@ -192,8 +196,7 @@ class SymbolAnalytics:
                 "feed_divergence_bps": round(div, 2) if div is not None else None,
                 "feed_gaps": self.gaps,
                 "checksum_ok": self.book.checksum_ok, "checksum_fail": self.book.checksum_fail,
-                "exchanges_fresh": len([1 for ts, _ in self.other_prices.values()
-                                        if now - ts <= 5]) + (1 if age is not None and age <= 5 else 0),
+                "exchanges_fresh": len(fresh_sources),
             },
         }
 
