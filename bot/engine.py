@@ -901,11 +901,18 @@ class Engine:
                 continue
             if not events:
                 continue
-            candles = self.price_feed(pair)
+            # BNB has no Coinbase USD product. Route it to Kraken's actual
+            # OHLC/ticker endpoints; the other three assets retain their established
+            # Coinbase feed so the trained feature pipeline stays consistent.
+            if series == "KXBNB15M":
+                candles = crypto_sig.fetch_kraken_candles("BNB/USD")
+                spot, spot_ts = crypto_sig.fetch_kraken_spot("BNB/USD")
+            else:
+                candles = self.price_feed(pair)
+                spot, spot_ts = self.spot_feed(pair)
             if not candles:
                 self._skip(summary, "no crypto price feed")
                 continue
-            spot, spot_ts = self.spot_feed(pair)
             spot_fresh = spot is not None and now - spot_ts <= 15
             for ev in events:
                 ev.setdefault("series_ticker", series)
