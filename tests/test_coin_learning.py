@@ -1,7 +1,7 @@
 import json
 import unittest
 from bot.live.adaptive_learning import historical_setup_penalty
-from bot.coin_learning import (build_trade_review, coin_from_market, coin_performance, coin_report, format_coin_report, learning_summary, setup_performance, signal_forecast_summary)
+from bot.coin_learning import (build_trade_review, coin_from_market, coin_performance, coin_report, format_coin_report, format_learning_summary, learning_summary, setup_performance, signal_forecast_summary)
 
 class CoinLearningTests(unittest.TestCase):
     def test_coin_mapping_handles_all_four_crypto_series(self):
@@ -101,6 +101,19 @@ class CoinLearningTests(unittest.TestCase):
                                           coin="BTC", min_samples=20)
         self.assertEqual(result["surcharge"], 0.0025)
         self.assertEqual(result["evidence"][0]["source"], "graded_paper_trade_reviews")
+
+
+    def test_empty_learning_report_still_shows_setup_and_forecast_sections(self):
+        report = format_learning_summary([], setups=[{
+            "coin":"BTC","setup":"range_breakout","samples":2,"win_rate":0.5,
+            "net_profit":1.0,"evidence_level":"low_sample"}], forecasts=[{
+            "signal":"order_book","samples":2,"directional_accuracy":0.5,
+            "mean_brier":0.25,"evidence_level":"low_sample"}])
+        self.assertIn("No persisted signal/tool association rows yet.", report)
+        self.assertIn("CHART SETUPS BY COIN", report)
+        self.assertIn("INDIVIDUAL SIGNAL FORECAST SKILL", report)
+        self.assertIn("BTC / range_breakout", report)
+        self.assertNotIn("\\\\n", report)
 
     def test_missing_signal_context_is_explicit(self):
         review = build_trade_review({"ticker": "KXETH15M-X", "side": "no", "result": "yes", "pnl": -1})
