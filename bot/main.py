@@ -456,11 +456,13 @@ def main(argv=None):
         return
     if cmd == "trade-reviews":
         from . import coin_learning
+        coin_learning.backfill_trade_reviews(store)
         limit = int(argv[1]) if len(argv) > 1 else 20
         print(json.dumps(coin_learning.trade_review_report(store, limit=limit), indent=2, default=str))
         return
     if cmd == "trade-learning":
         from . import coin_learning
+        coin_learning.backfill_trade_reviews(store)
         print(coin_learning.format_learning_summary(
             coin_learning.learning_summary(store),
             setups=coin_learning.setup_performance(store)))
