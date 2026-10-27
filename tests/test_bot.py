@@ -648,6 +648,18 @@ class TestCryptoFourCoinConfiguration(unittest.TestCase):
         self.assertEqual(len(CRYPTO_15M), len(set(CRYPTO_15M)))
         self.assertEqual(len(CRYPTO_15M.values()), len(set(CRYPTO_15M.values())))
 
+    def test_live_runner_and_model_map_bnb_to_its_own_coin(self):
+        from bot.live.runner import COINS, COINS_TO_COIN
+        from bot import crypto_brain, ml
+        self.assertEqual(set(COINS_TO_COIN.values()), {"BTC", "ETH", "SOL", "BNB"})
+        self.assertEqual(COINS_TO_COIN["KXBNB15M"], "BNB")
+        # BNB uses its own Kraken market; never invent a Coinbase BNB-USD product.
+        self.assertEqual(COINS["KXBNB15M"], ("BNB/USD", None, None))
+        self.assertEqual(crypto_brain.coin_from_series("KXBNB15M"), "BNB")
+        self.assertEqual(ml.coin_of("KXBNB15M-window"), "BNB")
+        coinbase_products = {cb for _, cb, _ in COINS.values() if cb}
+        self.assertNotIn("BNB-USD", coinbase_products)
+
     def test_requested_stake_limits_are_enforced_by_workflow_configuration(self):
         from pathlib import Path
         workflow = Path(".github/workflows/bot.yml").read_text()
