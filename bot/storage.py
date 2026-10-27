@@ -60,6 +60,13 @@ CREATE TABLE IF NOT EXISTS lessons (
     ts INTEGER, model TEXT, text TEXT
 );
 
+-- Durable one-per-bet postmortems; unique bet_id makes grading/retries idempotent.
+CREATE TABLE IF NOT EXISTS trade_reviews (
+    bet_id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, ticker TEXT NOT NULL,
+    coin TEXT NOT NULL, outcome TEXT NOT NULL, pnl REAL NOT NULL, review_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_trade_reviews_coin_ts ON trade_reviews(coin, ts);
+
 CREATE TABLE IF NOT EXISTS maker_attempts (
     ts INTEGER, ticker TEXT, filled INTEGER, outcome TEXT, wait_s REAL
 );
