@@ -9,6 +9,14 @@ name: kalshi-bot
 # Unlimited free minutes on a PUBLIC repo.
 
 on:
+  # Run one paper-only cycle after reliability workflow/memory-save changes
+  # so the live public-data path and persistent snapshot are exercised post-merge.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/bot.yml"
+      - ".github/load.sh"
+      - ".github/save.sh"
   schedule:
     - cron: "*/12 * * * *"
   workflow_dispatch: {}
