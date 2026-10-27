@@ -232,7 +232,7 @@ def spot_15m_monitor(store, coin, get=requests.get):
     out["timeframe_minutes"] = 15
     return out
 
-def context(store, coin, coinbase_price=None, get=requests.get):
+def context(store, coin, coinbase_price=None, get=requests.get, include_spot_15m=False):
     """One compact dict for signals, the council and the report."""
     fut = futures(store, coin, get) or {}
     ks = kraken_spot(coin, get)
@@ -240,7 +240,7 @@ def context(store, coin, coinbase_price=None, get=requests.get):
     upcoming = [e for e in calendar(store, get) if -3600 <= e["ts"] - now <= 6 * 3600]
     from .signals.crypto_microstructure import orderbook as crypto_orderbook
     l2 = crypto_orderbook(store, coin)
-    spot15 = spot_15m_monitor(store, coin, get)
+    spot15 = spot_15m_monitor(store, coin, get) if include_spot_15m else {}
     cb15 = spot15.get("coinbase") or {}
     kr15 = spot15.get("kraken") or {}
     return {
