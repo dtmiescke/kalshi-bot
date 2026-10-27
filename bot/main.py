@@ -17,6 +17,7 @@
     python -m bot.main accuracy90 # validate 90% high-confidence predictions and paper bets
     python -m bot.main coin-report # rank BTC/BNB/SOL/ETH by net paper profit
     python -m bot.main trade-reviews 20 # inspect recent persisted trade postmortems
+    python -m bot.main trade-learning # rank historical signal associations from reviews
     python -m bot.main brief    # AI briefing on the bot's results now
     python -m bot.main auto     # what the 12-min scheduler calls: spot check
                                 # every run, full scan + grading once an hour
@@ -457,6 +458,10 @@ def main(argv=None):
         from . import coin_learning
         limit = int(argv[1]) if len(argv) > 1 else 20
         print(json.dumps(coin_learning.trade_review_report(store, limit=limit), indent=2, default=str))
+        return
+    if cmd == "trade-learning":
+        from . import coin_learning
+        print(coin_learning.format_learning_summary(coin_learning.learning_summary(store)))
         return
     if cmd == "auto":
         last = store.get_kv("last_full_scan", 0)
