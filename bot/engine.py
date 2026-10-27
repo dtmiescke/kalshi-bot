@@ -216,11 +216,31 @@ class Engine:
         if not due:
             log.debug("odds %s not refreshed: %s", sport, why)
             return
-        events = self.odds.fetch(sport, self.s.odds_regions)
+        try:
+            events = self.odds.fetch(sport, self.s.odds_regions)
+        except Exception as exc:
+            # Keep the last successful odds/event cache on transport, auth, quota,
+            # or payload errors. The existing freshness gate prevents stale odds
+            # from being used for bets; health is explicit for the dashboard/report.
+            health = {
+                "status": "error", "ts": now, "sport": sport,
+                "error": str(exc)[:500], "cached_events": len(cached_events),
+            }
+            self.store.set_kv(f"odds_feed_health_{sport}", health)
+            log.warning("sportsbook odds %s unavailable: %s", sport, exc)
+            try:
+                alerts.send("Sportsbook odds feed unavailable",
+                            f"{sport}: {str(exc)[:300]}. Cached data retained; freshness gate remains active.",
+                            tags=["warning"])
+            except Exception:
+                log.debug("could not send sportsbook feed alert", exc_info=True)
+            return
         record_spend(self.store, self.odds, now, self.s.odds_regions,
                      int(os.environ.get("ODDS_MONTHLY_CREDITS", 500)), alert=alerts.send)
         slim = []
         for ev in events:
+            if not isinstance(ev, dict) or not ev.get("id"):
+                continue
             for team, (p, n, spread) in consensus(ev).items():
                 self.store.add_odds({
                     "ts": now, "sport": sport, "event_id": ev["id"],
@@ -228,11 +248,16 @@ class Engine:
                     "away": ev.get("away_team"), "team": team, "fair_prob": p,
                     "n_books": n, "raw": {"spread": spread}})
             slim.append({k: ev.get(k) for k in ("id", "home_team", "away_team", "commence_time")})
-        # Empty/error-free responses must clear the cached event list too; keeping
-        # yesterday's events after a failed refresh can create stale matches.
+        # Only a valid successful API response updates the last-success timestamp.
+        # An empty list is a legitimate no-events response; transport/API errors
+        # above never erase cached events or make stale data look fresh.
         self.store.set_kv(f"odds_events_{sport}", slim)
         self.store.set_kv(f"odds_last_{sport}", time.time())
-        log.info("odds %s: %d events, credits left %s", sport, len(events), self.odds.last_remaining)
+        self.store.set_kv(f"odds_feed_health_{sport}", {
+            "status": "ok" if events else "empty", "ts": now, "sport": sport,
+            "event_count": len(slim), "credits_remaining": getattr(self.odds, "last_remaining", None),
+        })
+        log.info("odds %s: %d events, credits left %s", sport, len(events), getattr(self.odds, "last_remaining", None))
 
     def snapshot(self, ev, m, now):
         row = {
