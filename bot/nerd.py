@@ -11,7 +11,7 @@ import time
 REQUIRED_TABLES = {
     "market_snapshots", "odds_snapshots", "flow_trades", "signal_readings",
     "bets", "weight_history", "signal_grades", "graded_markets", "lessons", "kv",
-    "decision_audit", "combo_prediction_audit",
+    "decision_audit", "combo_prediction_audit", "council_votes", "maker_attempts",
 }
 
 # Critical columns whose absence would make order reconciliation, settlement, or
@@ -21,6 +21,9 @@ REQUIRED_COLUMNS = {
              "status", "pnl", "graded_ts"},
     "decision_audit": {"ticker", "decision", "outcome", "brier"},
     "combo_prediction_audit": {"ticker", "leg_count", "outcome", "brier"},
+    # The council's one-vote-per-member ledger drives grading and power promotion.
+    "council_votes": {"ticker", "member", "ts", "vote", "outcome", "correct", "brier"},
+    "maker_attempts": {"ts", "ticker", "filled", "outcome", "wait_s"},
     "kv": {"k", "v"},
 }
 
