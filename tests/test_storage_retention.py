@@ -62,10 +62,15 @@ class TestStorageRetention(unittest.TestCase):
                                             "team": "", "yes_bid": .4, "yes_ask": .6,
                                             "last_price": .5, "volume": 0, "open_interest": 0,
                                             "close_time": None, "status": "active"})
+        self.store.add_signal(self.now - 2 * DAY, "KXETHD-26OCT2617-T4000", "kalshi_market", .5, .9, {})
+        self.store.add_signal(self.now - 2 * DAY, "KXETH15M-W2-00", "kalshi_market", .5, .9, {})
         janitor_retention(self.store, now=self.now)
         for table in ("signal_readings", "market_snapshots"):
             left = {r["ticker"] for r in self.store.q(f"SELECT ticker FROM {table}")}
-            self.assertEqual(left, {"KXBTC15M-W1-00", "KXNBAGAME-X-BOS"}, table)
+            want = {"KXBTC15M-W1-00", "KXNBAGAME-X-BOS"}
+            if table == "signal_readings":
+                want.add("KXETH15M-W2-00")      # 15M readings keep 3 days, ladders 1
+            self.assertEqual(left, want, table)
 
     def test_bnb_is_a_crypto_area(self):
         from bot import nerd
@@ -141,3 +146,35 @@ class TestStorageRetention(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLadderReadingThinning(unittest.TestCase):
+    """Ladder strikes (~750 a run) are saved only when informative and at most
+    every 30 minutes; 15-minute windows keep every reading."""
+
+    def setUp(self):
+        from bot.config import Settings
+        from bot.engine import Engine
+        from bot.signals.base import Reading
+        self.R = Reading
+        self.d = tempfile.TemporaryDirectory()
+        self.store = Store(os.path.join(self.d.name, "t.db"))
+        self.eng = Engine(Settings(), self.store, data_client=object(), llm=False)
+
+    def tearDown(self):
+        self.store.db.close()
+        self.d.cleanup()
+
+    def keep(self, series, ticker, mid, now):
+        return self.eng._keep_crypto_readings({"series": series, "ticker": ticker},
+                                              [self.R("kalshi_market", mid, 0.9)], now)
+
+    def test_rules(self):
+        now = 1_800_000_000
+        self.assertTrue(self.keep("KXBTC15M", "KXBTC15M-W-00", 0.02, now))     # 15M: always
+        self.assertFalse(self.keep("KXBTCD", "KXBTCD-X-T1", 0.03, now))        # far strike
+        self.assertFalse(self.keep("KXBTCD", "KXBTCD-X-T1", 0.97, now))
+        self.assertTrue(self.keep("KXBTCD", "KXBTCD-X-T2", 0.40, now))         # informative
+        self.store.add_signal(now, "KXBTCD-X-T2", "kalshi_market", 0.4, 0.9, {})
+        self.assertFalse(self.keep("KXBTCD", "KXBTCD-X-T2", 0.40, now + 600))  # too soon
+        self.assertTrue(self.keep("KXBTCD", "KXBTCD-X-T2", 0.40, now + 1800))
