@@ -131,6 +131,8 @@ CRYPTO_TICKERS = "(" + " OR ".join(f"ticker LIKE '{p}%'" for p in
 RAW_RETENTION_SUBSETS = (
     ("flow_trades", "ts", "ticker LIKE 'KX%15M-%'", 1 / 24),
     ("signal_readings", "ts", CRYPTO_TICKERS, 3),
+    # hourly/daily ladder strikes: graded within hours of their close
+    ("signal_readings", "ts", CRYPTO_TICKERS + " AND ticker NOT LIKE 'KX%15M-%'", 1),
     ("market_snapshots", "ts", CRYPTO_TICKERS, 3),
 )
 

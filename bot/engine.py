@@ -1071,9 +1071,26 @@ class Engine:
                                  readings[0].detail["mid"])
         if tf:
             readings.append(tf)
-        for x in readings:
-            self.store.add_signal(now, snap["ticker"], x.name, x.prob, x.confidence, x.detail)
+        if self._keep_crypto_readings(snap, readings, now):
+            for x in readings:
+                self.store.add_signal(now, snap["ticker"], x.name, x.prob, x.confidence, x.detail)
         return readings
+
+    LADDER_SAVE_EVERY = 1800        # seconds between saved readings per ladder strike
+
+    def _keep_crypto_readings(self, snap, readings, now):
+        """15-minute windows keep every reading. Hourly/daily ladder strikes
+        (~750 a run) were ~600k rows a day and pushed the memory file to GitHub's
+        limit: keep only informative strikes (mid 10-90c) and at most one save
+        per strike every 30 minutes."""
+        if str(snap.get("series", "")).endswith("15M"):
+            return True
+        mid = next((r.prob for r in readings if r.name == "kalshi_market"), None)
+        if mid is None or not 0.10 <= mid <= 0.90:
+            return False
+        last = self.store.q("SELECT MAX(ts) AS ts FROM signal_readings WHERE ticker=?",
+                            (snap["ticker"],))[0]["ts"]
+        return last is None or now - last >= self.LADDER_SAVE_EVERY
 
     def scan_ladders(self, crypto_markets, summary, now):
         """Cross-market arbitrage across every crypto 'above strike' contract."""
