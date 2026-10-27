@@ -113,7 +113,7 @@ class CoinLearningTests(unittest.TestCase):
         self.assertIn("CHART SETUPS BY COIN", report)
         self.assertIn("INDIVIDUAL SIGNAL FORECAST SKILL", report)
         self.assertIn("BTC / range_breakout", report)
-        self.assertNotIn("\\\\n", report)
+        self.assertNotIn("\\n", report)
 
     def test_missing_signal_context_is_explicit(self):
         review = build_trade_review({"ticker": "KXETH15M-X", "side": "no", "result": "yes", "pnl": -1})
