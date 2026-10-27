@@ -138,6 +138,107 @@ def calendar(store, get=requests.get):
     return _cached(store, "calendar", 360, fetch) or []
 
 
+
+# Public spot 15-minute candles. These are monitoring/context feeds, not
+# exchange orders. Coinbase has no supported BNB-USD spot product, so BNB is
+# intentionally Kraken-only rather than being mapped to another asset.
+COINBASE_15M_CANDLES = "https://api.exchange.coinbase.com/products/{pair}/candles"
+COINBASE_SPOT_PAIRS = {"BTC": "BTC-USD", "ETH": "ETH-USD", "SOL": "SOL-USD"}
+KRAKEN_15M_PAIRS = {"BTC": "XBTUSD", "ETH": "ETHUSD", "SOL": "SOLUSD", "BNB": "BNBUSD"}
+
+
+def _completed_15m_candle(rows, source, now=None):
+    """Normalize candles and return the newest completed 15-minute bar."""
+    now = time.time() if now is None else float(now)
+    normalized = []
+    for row in rows or []:
+        try:
+            if source == "coinbase":
+                ts, low, high, opn, close, volume = row[:6]
+                candle = {"ts": int(ts), "open": float(opn), "high": float(high),
+                          "low": float(low), "close": float(close), "volume": float(volume)}
+            else:
+                ts, opn, high, low, close, _vwap, volume, *_ = row
+                candle = {"ts": int(float(ts)), "open": float(opn), "high": float(high),
+                          "low": float(low), "close": float(close), "volume": float(volume)}
+            if (candle["ts"] + 900 <= now and
+                    all(math.isfinite(candle[k]) for k in ("open", "high", "low", "close", "volume")) and
+                    min(candle["open"], candle["high"], candle["low"], candle["close"]) > 0 and
+                    candle["volume"] >= 0):
+                normalized.append(candle)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            continue
+    normalized.sort(key=lambda c: c["ts"])
+    if not normalized:
+        return None
+    candle = normalized[-1]
+    candle["return_pct"] = (candle["close"] / candle["open"] - 1.0) * 100.0
+    candle["age_seconds"] = max(0.0, now - (candle["ts"] + 900))
+    candle["source"] = source
+    return candle
+
+
+def _fetch_coinbase_15m(coin, get=requests.get, now=None):
+    pair = COINBASE_SPOT_PAIRS.get(coin)
+    if not pair:
+        return None
+    now = time.time() if now is None else float(now)
+    end = int(now // 900 * 900)
+    start = end - 3 * 900
+    def iso(ts):
+        return datetime.utcfromtimestamp(ts).isoformat() + "Z"
+    try:
+        response = get(COINBASE_15M_CANDLES.format(pair=pair),
+                       params={"granularity": 900, "start": iso(start), "end": iso(end)},
+                       timeout=6, headers={"User-Agent": "kalshi-bot"})
+        response.raise_for_status()
+        return _completed_15m_candle(response.json(), "coinbase", now)
+    except Exception:
+        return None
+
+
+def _fetch_kraken_15m(coin, get=requests.get, now=None):
+    pair = KRAKEN_15M_PAIRS.get(coin)
+    if not pair:
+        return None
+    now = time.time() if now is None else float(now)
+    try:
+        response = get(KRAKEN_OHLC, params={"pair": pair, "interval": 15},
+                       timeout=6, headers={"User-Agent": "kalshi-bot"})
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get("error"):
+            return None
+        result = payload.get("result") or {}
+        key = next((k for k in result if k != "last"), None)
+        return _completed_15m_candle(result.get(key, []) if key else [], "kraken", now)
+    except Exception:
+        return None
+
+
+def spot_15m_monitor(store, coin, get=requests.get):
+    """Return completed Coinbase/Kraken 15m spot candles, cached for 5 minutes."""
+    coin = str(coin or "").upper()
+    if coin not in KRAKEN_15M_PAIRS:
+        return {}
+    out = {}
+    for venue, fetcher in (("coinbase", _fetch_coinbase_15m),
+                           ("kraken", _fetch_kraken_15m)):
+        if venue == "coinbase" and coin not in COINBASE_SPOT_PAIRS:
+            out[venue] = None
+            continue
+        value = _cached(store, f"spot15_{venue}_{coin}", 5,
+                        lambda fetcher=fetcher: fetcher(coin, get=get))
+        out[venue] = value
+    cb, kr = out.get("coinbase"), out.get("kraken")
+    if cb and kr and cb.get("close") and kr.get("close"):
+        out["cross_venue_basis_bps"] = (cb["close"] / kr["close"] - 1.0) * 10000.0
+    else:
+        out["cross_venue_basis_bps"] = None
+    out["coin"] = coin
+    out["timeframe_minutes"] = 15
+    return out
+
 def context(store, coin, coinbase_price=None, get=requests.get):
     """One compact dict for signals, the council and the report."""
     fut = futures(store, coin, get) or {}
@@ -146,8 +247,17 @@ def context(store, coin, coinbase_price=None, get=requests.get):
     upcoming = [e for e in calendar(store, get) if -3600 <= e["ts"] - now <= 6 * 3600]
     from .signals.crypto_microstructure import orderbook as crypto_orderbook
     l2 = crypto_orderbook(store, coin)
+    spot15 = spot_15m_monitor(store, coin, get)
+    cb15 = spot15.get("coinbase") or {}
+    kr15 = spot15.get("kraken") or {}
     return {
         "orderbook": l2,
+        "spot_15m": spot15,
+        "coinbase_15m_return_pct": cb15.get("return_pct"),
+        "coinbase_15m_volume": cb15.get("volume"),
+        "kraken_15m_return_pct": kr15.get("return_pct"),
+        "kraken_15m_volume": kr15.get("volume"),
+        "spot_15m_basis_bps": spot15.get("cross_venue_basis_bps"),
         "funding": fut.get("funding"), "basis": fut.get("basis"),
         "oi_change_1h": oi_change(store, coin, fut.get("open_interest")),
         "put_call_oi": put_call(store, coin, get),
