@@ -32,6 +32,10 @@ class FakeKalshi:
         self.event_ticker = "KXNBAGAME-" + start.strftime("%y%b%d").upper() + "BOSNYK"
         self.result = None
 
+    def multivariate_events(self, status="open"):
+        """No combo fixtures in this test; mirror the production client interface."""
+        return []
+
     def sports_events(self, series):
         if series != "KXNBAGAME":
             return []
