@@ -124,7 +124,7 @@ jobs:
               ws.close();
               console.log("Subscription acknowledgement:", subscribed ? "received" : "missing");
               console.log("Ticker market-data update:", marketData ? "received" : "not observed during smoke-test window");
-              if (!subscribed && !marketData) process.exitCode = 1;
+              if (!subscribed || !marketData) process.exitCode = 1;
             }
           }, 30000);
           ws.addEventListener("open", () => console.log("Relay WebSocket handshake succeeded."));
@@ -133,7 +133,7 @@ jobs:
             try { msg = JSON.parse(String(event.data)); } catch { return; }
             console.log("Relay message type:", String(msg.type || "unknown").slice(0, 40));
             if (msg.type === "relay_status" && msg.status === "connected" && !subscribed) {
-              ws.send(JSON.stringify({ id: 1, cmd: "subscribe", params: { channels: ["ticker"], market_tickers: [market.ticker] } }));
+              ws.send(JSON.stringify({ id: 1, cmd: "subscribe", params: { channels: ["ticker"], market_tickers: [market.ticker], send_initial_snapshot: true } }));
               console.log("Requested ticker channel for an open market.");
               return;
             }
@@ -154,7 +154,7 @@ jobs:
             if (!finished) { finished = true; clearTimeout(timeout); console.error("Relay WebSocket connection failed."); process.exitCode = 1; }
           });
           ws.addEventListener("close", () => {
-            if (!subscribed && !marketData && !finished) { finished = true; clearTimeout(timeout); console.error("Relay closed before subscription or market data was confirmed."); process.exitCode = 1; }
+            if ((!subscribed || !marketData) && !finished) { finished = true; clearTimeout(timeout); console.error("Relay closed before subscription acknowledgement and ticker data were confirmed."); process.exitCode = 1; }
           });
           process.on("exit", () => clearTimeout(timeout));
           NODE
