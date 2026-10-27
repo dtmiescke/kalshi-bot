@@ -413,7 +413,7 @@ class LiveRunner:
                                        if market_mid and yes_bid is not None and yes_ask is not None else 0),
                         "source_divergence_bps": spot_summary.get("source_divergence_bps", 0),
                         "book_imbalance": spot_summary.get("book_imbalance_0.1%", 0),
-                        "trend_strength": ctx.get("indicators", {}).get("adx_1m", 0),
+                        "trend_strength": min(1.0, max(0.0, float(ctx.get("indicators", {}).get("adx_1m", 0) or 0) / 100.0)),
                     })
                     self.store.add_decision_audit({
                         "ts": int(now), "ticker": ticker, "event_ticker": info.get("event"),
@@ -426,7 +426,9 @@ class LiveRunner:
                         "confidence": max((float(getattr(x, "confidence", 0) or 0) for x in readings), default=0),
                         "signals": {"chart_setups": [x.get("name") for x in ctx.get("chart_setups", {}).get("setups", [])],
                                     "regime": regime, "indicators": ctx.get("indicators", {}),
-                                    "source_divergence_bps": spot_summary.get("source_divergence_bps")},
+                                    "source_divergence_bps": spot_summary.get("source_divergence_bps"),
+                                    "multi_timeframe": ctx.get("multi_timeframe", {}),
+                                    "price_discovery": ctx.get("price_discovery", {})},
                     })
                     self.last_adaptive_audit[ticker] = now
             if now - self.last_saved.get(ticker, 0) >= 30:
@@ -451,7 +453,7 @@ class LiveRunner:
                 "realized_volatility": ctx.get("spot", {}).get("vol_per_min"),
                 "source_divergence_bps": ctx.get("spot", {}).get("source_divergence_bps", 0),
                 "book_imbalance": ctx.get("spot", {}).get("book_imbalance_0.1%", 0),
-                "trend_strength": ctx.get("indicators", {}).get("adx_1m", 0),
+                "trend_strength": min(1.0, max(0.0, float(ctx.get("indicators", {}).get("adx_1m", 0) or 0) / 100.0)),
             })
             adaptive = historical_setup_penalty(self.store, setup_names, regime=regime, report=self.adaptive_report_cache["report"])
             required_after_learning = float(self.s.crypto_min_edge) + adaptive["surcharge"]
