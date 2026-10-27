@@ -657,3 +657,19 @@ class TestCryptoFourCoinConfiguration(unittest.TestCase):
         self.assertIn("CRYPTO_MAX_PER_BET: '100'", workflow)
         self.assertIn("CRYPTO_MAX_PER_WINDOW: '100'", workflow)
         self.assertIn("LIVE_TRADING_CONFIRMED: ${{ vars.LIVE_TRADING_OPERATIONAL_APPROVED == 'yes' && vars.LIVE_TRADING_CONFIRMED == 'yes' && 'yes' || 'no' }}", workflow)
+
+
+class TestCryptoFourCoinRunnerCoverage(unittest.TestCase):
+    def test_all_four_series_have_runner_and_model_mappings(self):
+        from bot.live.runner import COINS, COINS_TO_COIN
+        expected = {"KXBTC15M", "KXETH15M", "KXSOL15M", "KXBNB15M"}
+        self.assertEqual(set(COINS), expected)
+        self.assertEqual(set(COINS_TO_COIN), expected)
+        self.assertEqual(len(set(COINS_TO_COIN.values())), 4)
+
+    def test_bnb_uses_kraken_without_fake_coinbase_product(self):
+        from bot.live.runner import COINS
+        kraken_symbol, coinbase_product, deribit_currency = COINS["KXBNB15M"]
+        self.assertEqual(kraken_symbol, "BNB/USD")
+        self.assertIsNone(coinbase_product)
+        self.assertIsNone(deribit_currency)
