@@ -22,7 +22,7 @@ BASE_FILE="$(pwd)/data/.memory_base"
 export GIT_TERMINAL_PROMPT=0
 export GIT_HTTP_LOW_SPEED_LIMIT=1000
 export GIT_HTTP_LOW_SPEED_TIME=30
-GIT_REMOTE_TIMEOUT_SECONDS="${GIT_REMOTE_TIMEOUT_SECONDS:-90}"
+GIT_REMOTE_TIMEOUT_SECONDS="${GIT_REMOTE_TIMEOUT_SECONDS:-240}"
 
 python -c 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); result=c.execute("PRAGMA quick_check").fetchone()[0]; print("SQLite quick_check:", result); sys.exit(result != "ok")' data/bot.sqlite
 python -m bot.main report > /tmp/REPORT.txt || { echo "WARNING: report failed; saving memory anyway." >&2; echo "report unavailable" > /tmp/REPORT.txt; }
@@ -90,7 +90,7 @@ if [ "$base" = "missing" ] || { [ "$base" = "none" ] && [ -n "$current" ]; } || 
   python -c 'import sys; from bot import alerts; alerts.send("Memory save skipped", sys.argv[1], priority="high", tags=["warning"])' "bot-data changed during this run; this run's memory was not saved so the newer copy is kept." || true
   exit 1
 fi
-if timeout --foreground "${GIT_REMOTE_TIMEOUT_SECONDS}s" git push -qf "$REMOTE" HEAD:bot-data; then
+if timeout --foreground "${GIT_REMOTE_TIMEOUT_SECONDS}s" git push --progress -f "$REMOTE" HEAD:bot-data; then
   # a later save in the same job (e.g. a mid-session save) builds on this one
   git rev-parse HEAD > "$BASE_FILE"
   echo "Persistent memory saved."
