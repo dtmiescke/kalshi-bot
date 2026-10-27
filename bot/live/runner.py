@@ -31,6 +31,7 @@ from ..signals import implied_vol as iv
 from ..signals.base import Reading, clamp
 from . import feeds, settlement
 from .analytics import SymbolAnalytics, minute_candles
+from .chart_setups import analyze_chart_setups
 from .edge_quality import edge_quality, enrich_plan
 from .book import OrderBook
 from .kalshi_book import KalshiBook
@@ -336,10 +337,12 @@ class LiveRunner:
         if rinfo.get("vol_parts") and spot:
             self._vol_sample(info["series"], now, spot, rinfo["vol_parts"])
         feats = rinfo.get("features") or {}
+        spot_summary = a.summary(now)
+        chart_setups = analyze_chart_setups(candles, book_imbalance=spot_summary.get("book_imbalance_0.1%"), aggressor_imbalance=spot_summary.get("flow_60s", {}).get("aggressor_imbalance"))
         context = {"ticker": ticker, "secs_left": round(terms["close_ts"] - now), "contract": terms,
                    "kalshi_yes_bid": best_yes_bid, "kalshi_yes_ask": best_yes_ask,
                    "kalshi_book_age_s": round(book.age() if book.age() is not None else 99, 2),
-                   "spot": a.summary(now), "market_context": rinfo.get("context", {}),
+                   "spot": spot_summary, "chart_setups": chart_setups, "market_context": rinfo.get("context", {}),
                    "vol_forecast_per_min": rinfo.get("sigma"),
                    "indicators": {k: round(v, 3) for k, v in feats.items()
                                   if k in ("rsi_1m", "rsi_5m", "rsi_15m", "macd_hist", "bb_pctb",
