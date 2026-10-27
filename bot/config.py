@@ -189,7 +189,7 @@ class Settings:
     crypto_max_per_bet: float = field(default_factory=lambda: _env_float("CRYPTO_MAX_PER_BET", 100.0))
     # one window = BTC+BNB+ETH+SOL bets that settle together (correlated exposure)
     crypto_max_per_window: float = field(
-        default_factory=lambda: _env_float("CRYPTO_MAX_PER_WINDOW", 750.0))
+        default_factory=lambda: _env_float("CRYPTO_MAX_PER_WINDOW", 100.0))
     # Crypto sides priced below this (dollars) are long shots: bought only when the
     # raw exact-contract model, not just the blend, also shows the edge. 0 disables.
     crypto_longshot_price: float = field(
