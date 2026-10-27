@@ -1,6 +1,8 @@
 name: kalshi-bot
 
-# PAPER-ONLY LOCK: scheduled and manual runs stay in paper mode. To change modes,\n# the owner must deliberately edit this workflow; repository variables cannot unlock live trading.\n# Every 12 minutes (scheduled fallback):
+# PAPER-ONLY LOCK: scheduled and manual runs stay in paper mode.
+# The owner must deliberately edit the workflow and central config to authorize live trading.
+# Every 12 minutes (scheduled fallback):
 #   crypto  - an 8-minute LIVE streaming burst (BURST_MINUTES) on the 15-minute markets
 #   sports  - full scan every 5.5 hours (SPORTS_EVERY_HOURS)
 #   always  - grading, learning, AI briefing, gated model retraining
