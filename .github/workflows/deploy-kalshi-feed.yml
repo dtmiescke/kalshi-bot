@@ -109,8 +109,9 @@ jobs:
           if (!response.ok) throw new Error("Could not retrieve open markets for smoke test: HTTP " + response.status);
           const body = await response.json();
           const markets = Array.isArray(body.markets) ? body.markets : [];
-          const market = markets.filter(m => typeof m.ticker === "string" && /^KX[A-Z0-9_-]{2,100}$/.test(m.ticker))
-  .sort((a, b) => Number(b.volume_24h ?? b.volume ?? 0) - Number(a.volume_24h ?? a.volume ?? 0))[0];
+          const market = markets
+            .filter(m => typeof m.ticker === "string" && /^KX[A-Z0-9_-]{2,100}$/.test(m.ticker))
+            .sort((a, b) => Number(b.volume_24h ?? b.volume ?? 0) - Number(a.volume_24h ?? a.volume ?? 0))[0];
           if (!market) throw new Error("No open KX market ticker found for live feed smoke test");
           console.log("Testing read-only ticker subscription for an open market.");
           const ws = new WebSocket(base.replace(/^https:/, "wss:") + "/ws");
@@ -132,7 +133,7 @@ jobs:
             try { msg = JSON.parse(String(event.data)); } catch { return; }
             console.log("Relay message type:", String(msg.type || "unknown").slice(0, 40));
             if (msg.type === "relay_status" && msg.status === "connected" && !subscribed) {
-              ws.send(JSON.stringify({ id: 1, cmd: "subscribe", params: { channels: ["ticker"], market_tickers: [market.ticker], send_initial_snapshot: true } }));
+              ws.send(JSON.stringify({ id: 1, cmd: "subscribe", params: { channels: ["ticker"], market_tickers: [market.ticker] } }));
               console.log("Requested ticker channel for an open market.");
               return;
             }
