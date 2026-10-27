@@ -34,7 +34,7 @@ from .analytics import SymbolAnalytics, minute_candles
 from .chart_setups import analyze_chart_setups
 from .price_discovery import estimate_price_discovery
 from .edge_quality import edge_quality, enrich_plan
-from .adaptive_learning import AdaptiveLearning, historical_setup_penalty
+from .adaptive_learning import AdaptiveLearning, graded_setup_performance, historical_setup_penalty
 from .book import OrderBook
 from .kalshi_book import KalshiBook
 
@@ -71,6 +71,7 @@ class LiveRunner:
         self.pending = set()      # tickers under council review
         self.last_saved = {}
         self.last_adaptive_audit = {}
+        self.adaptive_report_cache = {"ts": 0.0, "report": {}}
         self.last_flow_poll = {}  # REST trade-flow polling is throttled per market
         self.betting_ok, self.betting_why = True, "ok"
         self.summary = {"mode": self.s.mode, "markets": 0, "bets": 0, "skipped": {}, "alerts": []}
@@ -375,6 +376,11 @@ class LiveRunner:
             self.check_exits(now)
         self.learn_vol(now)
         weights = brain.get_weights(self.store, "crypto")
+        if now - self.adaptive_report_cache["ts"] >= 60:
+            try:
+                self.adaptive_report_cache = {"ts": now, "report": graded_setup_performance(self.store)}
+            except Exception as exc:
+                log.warning("adaptive setup history refresh failed: %s", exc)
         candidates = {}
         for ticker, info in list(self.markets.items()):
             if ticker in self.pending or ticker in self.makers or ticker not in self.books:
@@ -446,7 +452,7 @@ class LiveRunner:
                 "book_imbalance": ctx.get("spot", {}).get("book_imbalance_0.1%", 0),
                 "trend_strength": ctx.get("indicators", {}).get("adx_1m", 0),
             })
-            adaptive = historical_setup_penalty(self.store, setup_names, regime=regime)
+            adaptive = historical_setup_penalty(self.store, setup_names, regime=regime, report=self.adaptive_report_cache["report"])
             required_after_learning = float(self.s.crypto_min_edge) + adaptive["surcharge"]
             p["adaptive_learning"] = adaptive
             p["adaptive_required_edge"] = round(required_after_learning, 5)
