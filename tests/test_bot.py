@@ -659,6 +659,12 @@ class TestCryptoFourCoinConfiguration(unittest.TestCase):
         self.assertEqual(ml.coin_of("KXBNB15M-window"), "BNB")
         self.assertEqual(ml.COINS, ("BTC", "ETH", "SOL", "BNB"))
         self.assertEqual(ml.SUPPORTED_COINS, ml.COINS)
+        self.assertFalse(ml.coin_model_ready("BNB", ["coin_BTC", "coin_ETH", "coin_SOL"], {}))
+        self.assertFalse(ml.coin_model_ready("BNB", ["coin_BTC", "coin_ETH", "coin_SOL", "coin_BNB"],
+                                              {"coin_training_windows": {"BNB": 49}}))
+        self.assertTrue(ml.coin_model_ready("BNB", ["coin_BTC", "coin_ETH", "coin_SOL", "coin_BNB"],
+                                             {"coin_training_windows": {"BNB": 50}}))
+        self.assertTrue(ml.coin_model_ready("BTC", ["coin_BTC"], {}))
         # Existing three-coin champions are aligned by column name, not by width.
         import numpy as np
         aligned = ml._align_matrix(
