@@ -17,6 +17,34 @@ on unseen data** (crypto).
 | weekly | download fresh real Kalshi history |
 | daily | trim raw data so the memory file stays small (learning is never trimmed) |
 
+## Continuous 15-minute crypto runner (persistent host)
+
+The GitHub Actions workflow remains the short-cycle backup; GitHub-hosted jobs are
+not a 24/7 process and cannot guarantee exact start times. For continuous streaming,
+run the existing bot in a persistent container. The service prepares its feeds and
+market discovery first, then aligns feed startup to the next UTC quarter-hour boundary.
+It keeps one-second analytics running across BTC, ETH, SOL, and BNB 15-minute Kalshi
+markets, refreshing market discovery every minute and restarting after transient errors.
+
+1. On a persistent Docker host, clone this repository and create a local `.env` file.
+2. Put any required API keys in `.env` (never commit it). Public crypto spot feeds do
+   not need exchange API keys; Kalshi trading/data credentials and OpenRouter are optional
+   according to which existing features you use.
+3. Start with `docker compose up -d --build`; check logs with
+   `docker compose logs -f kalshi-crypto`.
+4. The container deliberately forces `BOT_MODE=paper` and
+   `LIVE_TRADING_CONFIRMED=no`. Do not remove these safeguards as part of deployment.
+5. The container keeps its SQLite database under the host's `./data` directory. That
+   database is local to this service and is **not automatically synchronized** with the
+   GitHub Actions memory snapshot/dashboard. Do not enable real-money execution or treat
+   this as the authoritative dashboard until shared persistence/ownership is deliberately
+   designed and verified.
+
+The continuous process is intended for an always-on VM/container. It is not run inside
+the GitHub Actions job because GitHub-hosted jobs have a maximum duration and would stop.
+Kalshi's listed 15-minute contracts define the actual windows; the bot continuously
+monitors their live books and signals rather than placing a forced bet at each boundary.
+
 ## Execution safety
 - Scheduled runs default to paper mode. Setting `BOT_MODE=live` alone is not enough to enable real-money orders.
 - The scheduled workflow also requires the repository variable `LIVE_TRADING_OPERATIONAL_APPROVED=yes` and `LIVE_TRADING_CONFIRMED=yes` before it will use live mode.
