@@ -273,7 +273,8 @@ def setup_performance(store, min_samples=20):
             side = str(obs.get("side") or "").lower()
             pnl = float(obs.get("pnl") or 0.0)
             payload = obs.get("signal_snapshot") or {}
-            raw = payload.get("chart_setups") or payload.get("setups") or []
+            context = payload.get("_entry_context") or payload
+            raw = context.get("chart_setups") or context.get("setups") or []
             names = set()
             if isinstance(raw, str):
                 names.add(raw)
