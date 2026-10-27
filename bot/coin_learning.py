@@ -275,6 +275,8 @@ def setup_performance(store, min_samples=20):
             payload = obs.get("signal_snapshot") or {}
             context = payload.get("_entry_context") or payload
             raw = context.get("chart_setups") or context.get("setups") or []
+            if isinstance(raw, dict):
+                raw = raw.get("setups") or []
             names = set()
             if isinstance(raw, str):
                 names.add(raw)
