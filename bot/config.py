@@ -88,9 +88,10 @@ class Settings:
     # paper  = simulated fills against the live Kalshi order book, nothing sent
     # demo   = real orders on Kalshi's demo exchange (play money)
     # live   = real money. Also requires LIVE_TRADING_CONFIRMED=yes
-    mode: str = field(default_factory=lambda: _env("BOT_MODE", "paper"))
-    live_confirmed: bool = field(
-        default_factory=lambda: _env("LIVE_TRADING_CONFIRMED", "no") == "yes")
+    # HARD PAPER-ONLY LOCK: environment variables cannot enable demo/live.
+    # The owner must deliberately edit this code to authorize another mode.
+    mode: str = "paper"
+    live_confirmed: bool = False
 
     # --- credentials (env only) ------------------------------------------
     # TRADING key: demo key in demo mode, real key in live mode
