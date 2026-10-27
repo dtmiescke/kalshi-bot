@@ -330,7 +330,7 @@ class LiveRunner:
         feats = rinfo.get("features") or {}
         context = {"ticker": ticker, "secs_left": round(terms["close_ts"] - now), "contract": terms,
                    "kalshi_yes_bid": best_yes_bid, "kalshi_yes_ask": best_yes_ask,
-                   "kalshi_book_age_s": round(book.age() or 99, 2),
+                   "kalshi_book_age_s": round(book.age() if book.age() is not None else 99, 2),
                    "spot": a.summary(now), "market_context": rinfo.get("context", {}),
                    "vol_forecast_per_min": rinfo.get("sigma"),
                    "indicators": {k: round(v, 3) for k, v in feats.items()
@@ -461,7 +461,8 @@ class LiveRunner:
                 self._skip(f"execution guard: {reason}")
                 return
             fresh, _ = self.readings_for(ticker, time.time())
-            if not fresh or (self.books[ticker].age() or 99) > 5:
+            book_age = self.books[ticker].age()
+            if not fresh or book_age is None or book_age > 5:
                 self._skip("recheck: data stale")
                 return
             again = self.plan_for(ticker, fresh, brain.get_weights(self.store, "crypto"))
@@ -874,7 +875,7 @@ class LiveRunner:
                 # can't log in or silently dies, prices must not freeze.
                 if not use_ws:
                     await asyncio.to_thread(self.poll_books)
-                elif any(b.needs_resync or (b.age() or 99) > 8 for b in self.books.values()):
+                elif any(b.needs_resync or b.age() is None or b.age() > 8 for b in self.books.values()):
                     await asyncio.to_thread(self.poll_books, False, True)
                 last_poll = now
             if now - last_guard >= 60:
