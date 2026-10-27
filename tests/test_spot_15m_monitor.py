@@ -42,10 +42,14 @@ class TestSpot15mMonitor(unittest.TestCase):
             [1800, "10.5", "12", "10", "11", "10.8", "120", 30],
         ], "last": 1800}}
         get = mock.Mock(return_value=_Response(payload))
-        candle = marketdata._fetch_kraken_15m("BTC", get=get, now=2000)
+        expected = {"ts": 900, "open": 10.0, "high": 11.0, "low": 9.0,
+                    "close": 10.5, "volume": 100.0, "return_pct": 5.0,
+                    "age_seconds": 200.0, "source": "kraken"}
+        with mock.patch("bot.marketdata._completed_15m_candle", return_value=expected) as parse:
+            candle = marketdata._fetch_kraken_15m("BTC", get=get, now=2000)
         self.assertEqual(candle["source"], "kraken")
-        self.assertEqual(candle["ts"], 900)
-        self.assertAlmostEqual(candle["return_pct"], 5.0)
+        self.assertEqual(parse.call_args.args[0], payload["result"]["XBTUSD"])
+        self.assertEqual(parse.call_args.args[1], "kraken")
         self.assertEqual(get.call_args.kwargs["params"], {"pair": "XBTUSD", "interval": 15})
 
     def test_bnb_is_not_falsely_mapped_to_coinbase(self):
