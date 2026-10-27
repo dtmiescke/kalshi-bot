@@ -11,6 +11,11 @@ from bot import features, guard, ml, risk, vol as volmod, marketdata
 from bot.config import Settings
 from bot.storage import Store
 
+# These fixtures use small synthetic stakes; production minimum bets ($25) are
+# asserted with a clean environment in test_total_loss_limit.py (CI sets the same).
+os.environ.setdefault("MIN_PER_BET", "0")
+os.environ.setdefault("CRYPTO_MIN_BET", "0")
+
 
 def walk(n, start=80000.0, sd=0.0006, seed=1, t0=1_750_000_000):
     rnd = random.Random(seed)

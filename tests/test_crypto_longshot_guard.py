@@ -18,6 +18,11 @@ from bot.live import settlement
 from bot.signals.base import Reading
 from bot.storage import Store
 
+# These fixtures use small synthetic stakes; production minimum bets ($25) are
+# asserted with a clean environment in test_total_loss_limit.py (CI sets the same).
+os.environ.setdefault("MIN_PER_BET", "0")
+os.environ.setdefault("CRYPTO_MIN_BET", "0")
+
 CRYPTO = {"ticker": "KXBTC15M-W-00", "event_ticker": "KXBTC15M-W", "series": "KXBTC15M"}
 # YES ask $0.12 (NO bid 0.88), NO ask $0.89 (YES bid 0.11)
 LONGSHOT_BOOK = {"yes": [(0.11, 500)], "no": [(0.88, 500)]}

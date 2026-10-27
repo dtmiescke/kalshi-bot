@@ -15,6 +15,11 @@ from bot.live.book import OrderBook
 from bot.live.runner import LiveRunner
 from bot.storage import Store
 
+# These fixtures use small synthetic stakes; production minimum bets ($25) are
+# asserted with a clean environment in test_total_loss_limit.py (CI sets the same).
+os.environ.setdefault("MIN_PER_BET", "0")
+os.environ.setdefault("CRYPTO_MIN_BET", "0")
+
 
 def iso(ts):
     return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
