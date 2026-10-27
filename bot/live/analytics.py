@@ -174,7 +174,6 @@ class SymbolAnalytics:
         fresh_sources = self.fresh_source_prices(now, max_age=5)
         source_div = self.source_divergence_bps(now, max_age=5)
         consensus = self.source_consensus(now, max_age=5, max_divergence_bps=float(_os.environ.get("MAX_FEED_DIVERGENCE_BPS", 25)))
-        import os as _os
         max_div = float(_os.environ.get("MAX_FEED_DIVERGENCE_BPS", 25))
         return {
             "symbol": self.symbol, "mid": self.book.mid(),
