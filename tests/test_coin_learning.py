@@ -1,6 +1,6 @@
 import json
 import unittest
-from bot.coin_learning import (build_trade_review, coin_from_market, coin_performance, coin_report, format_coin_report, learning_summary, setup_performance)
+from bot.coin_learning import (build_trade_review, coin_from_market, coin_performance, coin_report, format_coin_report, learning_summary, setup_performance, signal_forecast_summary)
 
 class CoinLearningTests(unittest.TestCase):
     def test_coin_mapping_handles_all_four_crypto_series(self):
@@ -69,6 +69,22 @@ class CoinLearningTests(unittest.TestCase):
         self.assertEqual(rows[0]["samples"], 2)
         self.assertEqual(rows[0]["net_profit"], 1.0)
         self.assertEqual(rows[0]["evidence_level"], "low_sample")
+
+
+    def test_signal_forecasts_are_scored_against_settled_yes_no_result(self):
+        class Store:
+            def q(self, sql, args=()):
+                return [
+                    {"review_json": json.dumps({"observed": {"result":"yes","nearby_signal_readings":[
+                        {"signal":"crypto_model","prob":0.9},{"signal":"crypto_model","prob":0.2}]}})},
+                    {"review_json": json.dumps({"observed": {"result":"no","nearby_signal_readings":[
+                        {"signal":"crypto_model","prob":0.8}]}})},
+                ]
+        rows = signal_forecast_summary(Store(), min_samples=2)
+        self.assertEqual(rows[0]["signal"], "crypto_model")
+        self.assertEqual(rows[0]["samples"], 2)
+        self.assertEqual(rows[0]["directional_accuracy"], 0.5)
+        self.assertAlmostEqual(rows[0]["mean_brier"], (0.01 + 0.64) / 2, places=5)
 
     def test_missing_signal_context_is_explicit(self):
         review = build_trade_review({"ticker": "KXETH15M-X", "side": "no", "result": "yes", "pnl": -1})
