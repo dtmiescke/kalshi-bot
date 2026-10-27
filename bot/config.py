@@ -178,6 +178,16 @@ class Settings:
     council_doghouse_max_right: int = field(
         default_factory=lambda: _env_int("COUNCIL_DOGHOUSE_MAX_RIGHT", 2))
 
+    # --- in-game (live) sports bets: PAPER ONLY (bot/live_games.py) -------------
+    live_games_enabled: bool = field(
+        default_factory=lambda: _env("LIVE_GAMES_ENABLED", "yes").lower() in ("yes", "true", "1"))
+    live_min_edge: float = field(default_factory=lambda: _env_pct("LIVE_MIN_EDGE", 8))
+    # about a quarter of the pre-game cap; lifted to MIN_PER_BET + 10% fee room
+    # in live_games.LiveGames.max_bet so a minimum bet always fits
+    live_max_per_bet: float = field(default_factory=lambda: _env_float("LIVE_MAX_PER_BET", 25.0))
+    live_poll_seconds: float = field(default_factory=lambda: _env_float("LIVE_POLL_SECONDS", 20))
+    live_max_score_age: float = field(default_factory=lambda: _env_float("LIVE_MAX_SCORE_AGE", 45))
+
     # --- crypto 15-minute markets ----------------------------------------------
     crypto_enabled: bool = field(default_factory=lambda: _env("CRYPTO_ENABLED", "yes") == "yes")
     crypto_min_edge: float = field(default_factory=lambda: _env_pct("CRYPTO_MIN_EDGE", 5))
@@ -347,6 +357,12 @@ class Settings:
                 raise ValueError(f"{name} must be greater than 0 and less than 1")
         if not math.isfinite(self.crypto_longshot_price) or not 0 <= self.crypto_longshot_price < 0.5:
             raise ValueError("CRYPTO_LONGSHOT_PRICE must be a dollar price from 0 up to 0.50")
+        if not math.isfinite(self.live_min_edge) or not 0 < self.live_min_edge < 1:
+            raise ValueError("LIVE_MIN_EDGE must be greater than 0 and less than 1")
+        if not math.isfinite(self.live_poll_seconds) or not 5 <= self.live_poll_seconds <= 300:
+            raise ValueError("LIVE_POLL_SECONDS must be between 5 and 300")
+        if not math.isfinite(self.live_max_per_bet) or self.live_max_per_bet < 0:
+            raise ValueError("LIVE_MAX_PER_BET must be a non-negative dollar amount")
         if not 1 <= self.council_veto_min_votes <= self.council_full_min_votes:
             raise ValueError("COUNCIL_VETO_MIN_VOTES must be at least 1 and at most COUNCIL_FULL_MIN_VOTES")
         if self.council_power_window < self.council_full_min_votes:

@@ -553,6 +553,8 @@ function botRows(){
     out.push(row("🪙","Crypto",paused.crypto?"r":act?"g":"a",paused.crypto?paused.crypto:`${act} live 15-min markets`,ld.ts))}
   const sc=kv.sports_scanner_health;
   if(sc)out.push(row("🏟️","Sports scanner",paused.sports?"r":sc.scan_errors?"a":"g",paused.sports||`${sc.events_unique} games, ${sc.markets_unique} markets`,sc.ts));
+  const lg=kv.live_games_health;
+  if(lg)out.push(row("⚡","Live games",lg.live_games?"g":"",lg.live_games?`${lg.live_games} in progress, ${lg.priced} priced, ${lg.live_bets} paper bets`:"no games in progress",lg.ts));
   const si=kv.sports_intel_health;
   if(si)out.push(row("📰","News",si.sources_failed?"a":"g",si.sources_ok||si.sources_failed?`${si.sources_ok} sources ok, ${si.sources_failed} failed, ${si.new_items} new`:"idle (cached, refreshes every 30 min)",si.ts));
   const oq=kv.odds_quota;

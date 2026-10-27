@@ -238,7 +238,8 @@ SUMMARY_KV = ("janitors_last_result", "janitors_last_run", "nerd_last_health",
               "nerd_last_healthy_ts", "health_paused_areas", "grading_lookup_health",
               "kalshi_health", "live_discovery_health", "sports_intel_health",
               "sports_scanner_health", "settle_gap_report", "last_run_ts", "last_train_status",
-              "members_last_ruling", "don_theo_last", "sunday_sitdown", "odds_quota")
+              "members_last_ruling", "don_theo_last", "sunday_sitdown", "odds_quota",
+              "live_games_health")
 
 
 def summary(store):
