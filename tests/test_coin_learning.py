@@ -35,10 +35,10 @@ class CoinLearningTests(unittest.TestCase):
             def q(self, sql, args=()):
                 return [{"review_json": json.dumps({"observed": {
                     "coin":"BTC","result":"yes","side":"yes","pnl":3,"clv":0.02,
-                    "signal_snapshot":{"_entry_context":{"chart_setups":[{"name":"range_breakout"}]}}}})},
+                    "signal_snapshot":{"_entry_context":{"chart_setups":{"setups":[{"name":"range_breakout"}]}}}}})},
                     {"review_json": json.dumps({"observed": {
                     "coin":"BTC","result":"no","side":"yes","pnl":-2,"clv":-0.01,
-                    "signal_snapshot":{"chart_setups":[{"name":"range_breakout"}]}}})}]
+                    "signal_snapshot":{"chart_setups":{"setups":[{"name":"range_breakout"}]}}}})}]
         rows = setup_performance(Store(), min_samples=2)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["setup"], "range_breakout")
