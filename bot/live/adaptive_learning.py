@@ -101,3 +101,75 @@ class AdaptiveLearning:
                 raw[strategy] = max(0.0, report["mean_entry_edge"]) * report["win_rate"]
         total = sum(raw.values())
         return {name: score / total for name, score in raw.items()} if total else {}
+
+
+def graded_setup_performance(store, min_samples=20, limit=5000):
+    """Aggregate only canonical, settled decision-audit rows by setup and regime.
+
+    The market-price Brier score is a baseline; no setup is promoted from a raw
+    win rate alone. Returns a JSON-friendly report and does not mutate weights.
+    """
+    rows = store.q(
+        "SELECT model_prob, market_price, outcome, signals_json, settled_ts "
+        "FROM decision_audit WHERE outcome IS NOT NULL AND brier IS NOT NULL "
+        "ORDER BY settled_ts DESC LIMIT ?", (int(limit),)
+    )
+    buckets = defaultdict(list)
+    for row in rows:
+        try:
+            payload = row.get("signals_json") or "{}"
+            data = __import__("json").loads(payload) if isinstance(payload, str) else payload
+            setups = data.get("chart_setups") or []
+            names = {str(x) for x in setups if x}
+            regime = str(data.get("regime") or "mixed")
+            p, y = float(row["model_prob"]), float(row["outcome"])
+            market = row.get("market_price")
+            if not isfinite(p) or not 0 <= p <= 1 or y not in (0.0, 1.0):
+                continue
+            model_brier = (p-y)**2
+            market_brier = (float(market)-y)**2 if market is not None and isfinite(float(market)) and 0 <= float(market) <= 1 else None
+            for name in names:
+                buckets[(name, "all")].append((model_brier, market_brier))
+                buckets[(name, regime)].append((model_brier, market_brier))
+        except (TypeError, ValueError, KeyError, AttributeError):
+            continue
+    report = {}
+    for (name, regime), samples in buckets.items():
+        n = len(samples)
+        model_score = mean(x[0] for x in samples)
+        baseline = [x[1] for x in samples if x[1] is not None]
+        market_score = mean(baseline) if baseline else None
+        report[f"{name}@{regime}"] = {
+            "setup": name, "regime": regime, "samples": n,
+            "model_brier": round(model_score, 6),
+            "market_brier": round(market_score, 6) if market_score is not None else None,
+            "beats_market_brier": bool(market_score is not None and model_score < market_score),
+            "eligible_for_adaptation": bool(n >= int(min_samples) and market_score is not None),
+        }
+    return report
+
+
+def historical_setup_penalty(store, setup_names, regime="mixed", min_samples=20):
+    """Return a bounded extra required edge only for adequately sampled weak setups.
+
+    The maximum surcharge is 1.5 percentage points. Positive historical evidence
+    never lowers the existing required edge; it must be promoted through separate
+    out-of-sample evaluation. This prevents a lucky in-sample streak from
+    automatically increasing exposure.
+    """
+    report = graded_setup_performance(store, min_samples=min_samples)
+    penalty = 0.0
+    evidence = []
+    for name in set(str(x) for x in (setup_names or [])):
+        row = report.get(f"{name}@{regime}") or report.get(f"{name}@all")
+        if not row or not row["eligible_for_adaptation"]:
+            continue
+        baseline = row["market_brier"]
+        if baseline is None:
+            continue
+        gap = row["model_brier"] - baseline
+        if gap > 0:
+            penalty += min(0.005, gap * 0.05)
+            evidence.append({"setup": name, "samples": row["samples"], "brier_gap": round(gap, 6)})
+    return {"surcharge": round(min(0.015, penalty), 5), "evidence": evidence,
+            "note": "Only weak, settled, sufficiently sampled setup-conditioned forecasts add a surcharge; positive results do not auto-increase risk."}
