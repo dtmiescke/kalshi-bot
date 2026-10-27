@@ -209,7 +209,7 @@ class SymbolAnalytics:
         }
 
 
-def minute_candles(analytics, now=None, history=None, n=300):
+def minute_candles(analytics, now=None, history=None, n=900):
     """1-minute OHLCV candles for the features.
 
     Built from COINBASE trades (live "matches" stream) on top of Coinbase's own
@@ -217,6 +217,7 @@ def minute_candles(analytics, now=None, history=None, n=300):
     kind of data the model was trained on (no train/serve skew). Falls back to
     Kraken mids only for minutes with no Coinbase data at all."""
     now = now or time.time()
+    # Retain enough 1-minute history for 20+ complete 30-minute bars after warm-up.
     bars = {c["ts"]: dict(c) for c in (history or [])}
     live = {}
     for ts, p, q in analytics.cb_trades:
