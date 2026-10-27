@@ -67,6 +67,21 @@ def analyze_chart_setups(candles, book_imbalance=None, aggressor_imbalance=None)
     atr = mean(true_ranges) if true_ranges else h - l
     prior_high, prior_low = max(highs[-21:-1]), min(lows[-21:-1])
     vol_base = mean(volumes[-21:-1])
+    typical_prices = [(float(b["high"]) + float(b["low"]) + float(b["close"])) / 3.0 for b in bars]
+    total_volume = sum(volumes[-20:])
+    vwap20 = sum(p * v for p, v in zip(typical_prices[-20:], volumes[-20:])) / total_volume if total_volume > 0 else mean(closes[-20:])
+    roc10 = (c / closes[-11] - 1.0) * 100.0 if len(closes) >= 11 and closes[-11] else 0.0
+    stoch_low, stoch_high = min(lows[-14:]), max(highs[-14:])
+    stoch_k = (c - stoch_low) / (stoch_high - stoch_low) * 100.0 if stoch_high > stoch_low else 50.0
+    plus_dm, minus_dm = [], []
+    for i in range(max(1, len(bars) - 14), len(bars)):
+        up_move = highs[i] - highs[i - 1]
+        down_move = lows[i - 1] - lows[i]
+        plus_dm.append(max(0.0, up_move) if up_move > down_move else 0.0)
+        minus_dm.append(max(0.0, down_move) if down_move > up_move else 0.0)
+    plus_di = sum(plus_dm) / max(atr, 1e-12) * 100.0
+    minus_di = sum(minus_dm) / max(atr, 1e-12) * 100.0
+    adx_proxy = abs(plus_di - minus_di) / max(plus_di + minus_di, 1e-12) * 100.0
     volume_ratio = volumes[-1] / vol_base if vol_base > 0 else None
     body = abs(c - o)
     candle_range = max(h - l, 1e-12)
@@ -79,6 +94,10 @@ def analyze_chart_setups(candles, book_imbalance=None, aggressor_imbalance=None)
                        "strength": round(max(0.0, min(1.0, strength)), 2),
                        "evidence": evidence})
 
+    if l < prior_low and c > prior_low:
+        add("downside_liquidity_sweep_reclaim", "up", 0.65, {"swept_prior_low": True, "close_reclaimed_level": True})
+    if h > prior_high and c < prior_high:
+        add("upside_liquidity_sweep_rejection", "down", 0.65, {"swept_prior_high": True, "close_rejected_level": True})
     if c > prior_high:
         add("range_breakout", "up", 0.7 if (volume_ratio or 0) >= 1.5 else 0.5,
             {"close_above_prior_20_high": True, "volume_ratio": round(volume_ratio, 2) if volume_ratio is not None else None})
@@ -101,6 +120,13 @@ def analyze_chart_setups(candles, book_imbalance=None, aggressor_imbalance=None)
             add("bearish_engulfing", "down", 0.6, {"body_engulfs_previous": True})
     if sd20 / mean20 < 0.003 if mean20 else False:
         add("bollinger_squeeze", "neutral", 0.45, {"band_width_pct": round((upper-lower)/mean20*100, 3)})
+    if c > vwap20 and roc10 > 0:
+        add("vwap_momentum_alignment", "up", 0.45, {"vwap20": round(vwap20, 6), "roc10_pct": round(roc10, 3)})
+    elif c < vwap20 and roc10 < 0:
+        add("vwap_momentum_alignment", "down", 0.45, {"vwap20": round(vwap20, 6), "roc10_pct": round(roc10, 3)})
+    if volume_ratio is not None and volume_ratio >= 2.0 and abs(roc10) >= 0.15:
+        add("volume_momentum_burst", "up" if roc10 > 0 else "down", 0.6,
+            {"volume_ratio": round(volume_ratio, 2), "roc10_pct": round(roc10, 3)})
     if rsi is not None and rsi <= 30:
         add("rsi_oversold", "up", 0.4, {"rsi14": round(rsi, 1)})
     elif rsi is not None and rsi >= 70:
@@ -122,7 +148,9 @@ def analyze_chart_setups(candles, book_imbalance=None, aggressor_imbalance=None)
         "ema9": round(ema9, 6), "ema21": round(ema21, 6), "ema50": round(ema50, 6),
         "rsi14": round(rsi, 2) if rsi is not None else None,
         "macd_hist": round(macd_hist, 8), "bb_pctb": round(bb_pctb, 3),
-        "atr14": round(atr, 8), "prior_20_high": round(prior_high, 8),
+        "atr14": round(atr, 8), "adx_proxy14": round(adx_proxy, 2),
+        "stochastic_k14": round(stoch_k, 2), "vwap20": round(vwap20, 8),
+        "roc10_pct": round(roc10, 4), "prior_20_high": round(prior_high, 8),
         "prior_20_low": round(prior_low, 8),
         "volume_ratio_20": round(volume_ratio, 3) if volume_ratio is not None else None,
         "book_imbalance": round(float(book_imbalance), 3) if book_imbalance is not None else None,
