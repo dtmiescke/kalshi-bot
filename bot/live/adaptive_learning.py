@@ -173,3 +173,48 @@ def historical_setup_penalty(store, setup_names, regime="mixed", min_samples=20,
             evidence.append({"setup": name, "samples": row["samples"], "brier_gap": round(gap, 6)})
     return {"surcharge": round(min(0.015, penalty), 5), "evidence": evidence,
             "note": "Only weak, settled, sufficiently sampled setup-conditioned forecasts add a surcharge; positive results do not auto-increase risk."}
+
+
+def graded_price_discovery(store, min_samples=20, limit=5000):
+    """Summarize receive-time price-discovery evidence from settled canonical forecasts.
+
+    Counts distinct graded market snapshots, not the nested rolling event count.
+    This avoids pretending overlapping rolling windows are independent events.
+    The report is descriptive only and must not directly authorize a trade.
+    """
+    import json
+    rows = store.q(
+        "SELECT signals_json, settled_ts FROM decision_audit "
+        "WHERE outcome IS NOT NULL AND brier IS NOT NULL "
+        "ORDER BY settled_ts DESC LIMIT ?", (int(limit),)
+    )
+    buckets = defaultdict(list)
+    for row in rows:
+        try:
+            payload = row.get("signals_json") or "{}"
+            data = json.loads(payload) if isinstance(payload, str) else payload
+            discovery = data.get("price_discovery") or {}
+            sources = discovery.get("sources") or {}
+            for source, item in sources.items():
+                if not isinstance(item, dict):
+                    continue
+                lag = float(item.get("median_follow_lag_s"))
+                rate = float(item.get("same_direction_rate"))
+                if not (isfinite(lag) and lag >= 0 and isfinite(rate) and 0 <= rate <= 1):
+                    continue
+                buckets[str(source)].append((lag, rate))
+        except (TypeError, ValueError, AttributeError):
+            continue
+    report = {}
+    for source, samples in buckets.items():
+        lags = [x[0] for x in samples]
+        rates = [x[1] for x in samples]
+        n = len(samples)
+        report[source] = {
+            "graded_snapshots": n,
+            "median_reported_follow_lag_s": round(sorted(lags)[n // 2], 3),
+            "mean_same_direction_rate": round(mean(rates), 4),
+            "eligible_for_review": n >= int(min_samples),
+            "warning": "Rolling receive-time diagnostics are observational; latency, sampling and market selection can bias them."
+        }
+    return report
