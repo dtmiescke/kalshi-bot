@@ -492,7 +492,7 @@ class LiveRunner:
                 "book_imbalance": ctx.get("spot", {}).get("book_imbalance_0.1%", 0),
                 "trend_strength": min(1.0, max(0.0, float(ctx.get("indicators", {}).get("adx_1m", 0) or 0) / 100.0)),
             })
-            adaptive = historical_setup_penalty(self.store, setup_names, regime=regime, report=self.adaptive_report_cache["report"])
+            adaptive = historical_setup_penalty(self.store, setup_names, regime=regime, report=self.adaptive_report_cache["report"], coin=COINS_TO_COIN.get(info["series"]))
             required_after_learning = float(self.s.crypto_min_edge) + adaptive["surcharge"]
             p["adaptive_learning"] = adaptive
             p["adaptive_required_edge"] = round(required_after_learning, 5)
@@ -565,6 +565,8 @@ class LiveRunner:
 
     def finish(self, ticker, readings, ctx, plan, verdict):
         """After the council: recheck with the freshest book, then trade."""
+        initial_plan = plan[1] if isinstance(plan, (tuple, list)) and len(plan) > 1 else {}
+        prior_adaptive = initial_plan.get("adaptive_learning", {}) if isinstance(initial_plan, dict) else {}
         try:
             if verdict["decision"] != "approve":
                 self._skip(f"council {verdict['decision']}")
@@ -581,7 +583,7 @@ class LiveRunner:
                 self.betting_ok, self.betting_why = False, reason
                 self._skip(f"execution guard: {reason}")
                 return
-            fresh, _ = self.readings_for(ticker, time.time())
+            fresh, fresh_ctx = self.readings_for(ticker, time.time())
             book_age = self.books[ticker].age()
             if not fresh or book_age is None or book_age > 5:
                 self._skip("recheck: data stale")
@@ -591,6 +593,15 @@ class LiveRunner:
                 self._skip("recheck: edge gone")
                 return
             snap, p, prob, conf = again
+            if isinstance(p, dict):
+                # Preserve the actual chart/tool snapshot used at the final recheck.
+                p["entry_context"] = {
+                    key: fresh_ctx[key] for key in (
+                        "chart_setups", "multi_timeframe", "indicators", "spot",
+                        "price_discovery", "orderbook", "flow"
+                    ) if isinstance(fresh_ctx, dict) and key in fresh_ctx
+                }
+                p["adaptive_learning"] = prior_adaptive if isinstance(prior_adaptive, dict) else {}
             members = council.convene(self.store, self.s, snap, p, fresh, prob, conf)
             if members.get("binding") and members.get("decision") == "pass":
                 self._skip("council veto")

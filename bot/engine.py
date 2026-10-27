@@ -1533,7 +1533,9 @@ class Engine:
                                     **{k: v for k, v in r.detail.items()
                                        if k in ("reason", "players", "kalshi_leads_books")}}
                            for r in readings},
-                        **({"_fill_edge": plan["fill_edge"]} if "fill_edge" in plan else {})},
+                        **({"_fill_edge": plan["fill_edge"]} if "fill_edge" in plan else {}),
+                        **({"_entry_context": plan["entry_context"]} if isinstance(plan.get("entry_context"), dict) else {}),
+                        **({"_adaptive_learning": plan["adaptive_learning"]} if isinstance(plan.get("adaptive_learning"), dict) else {})},
             "order_id": order_id, "style": plan.get("style", "taker")})
         summary["bets"] += 1
         alerts.send(f"Bet ({self.s.mode}) {snap['ticker']}",
