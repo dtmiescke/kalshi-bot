@@ -88,26 +88,6 @@ jobs:
           fi
           python -m bot.main history "$DAYS"
           python -m bot.main train
-      - name: Backtest (read-only audit)
-        if: steps.train-cycle.outcome == 'success'
-        continue-on-error: true
-        run: python -m bot.main backtest
-      - name: Contract rules and MCP-adapter regression tests
-        # Exercises the existing read-only normalization and official PDF safety
-        # boundaries; no MCP server or second trading client is launched.
-        if: steps.train-cycle.outcome == 'success'
-        continue-on-error: true
-        run: |
-          python -m unittest tests.test_market_rules tests.test_contract_pdf tests.test_kalshi_series_metadata tests.test_snapshot_contract_rules -q
-      - name: Full regression suite
-        # Runs independently even if backtest or focused integration tests fail.
-        if: steps.train-cycle.outcome == 'success'
-        continue-on-error: true
-        run: python -m unittest discover -s tests -q
-      - name: Report (read-only audit)
-        if: steps.train-cycle.outcome == 'success'
-        continue-on-error: true
-        run: python -m bot.main report
       - name: Save memory
         # Keep the last known-good snapshot if history download or training fails.
         if: steps.train-cycle.outcome == 'success'
@@ -120,6 +100,32 @@ jobs:
           BANKROLL: '200000'
           BOT_TIMEZONE: ${{ vars.BOT_TIMEZONE || 'America/Chicago' }}
         run: bash .github/save.sh
+      # Read-only audits run AFTER memory is saved and each has a time limit:
+      # a backtest with no limit once ran 25+ minutes and held the bot's lock.
+      - name: Backtest (read-only audit)
+        if: steps.train-cycle.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 10
+        run: python -m bot.main backtest
+      - name: Contract rules and MCP-adapter regression tests
+        # Exercises the existing read-only normalization and official PDF safety
+        # boundaries; no MCP server or second trading client is launched.
+        if: steps.train-cycle.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          python -m unittest tests.test_market_rules tests.test_contract_pdf tests.test_kalshi_series_metadata tests.test_snapshot_contract_rules -q
+      - name: Full regression suite
+        # Runs independently even if backtest or focused integration tests fail.
+        if: steps.train-cycle.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 15
+        run: python -m unittest discover -s tests -q
+      - name: Report (read-only audit)
+        if: steps.train-cycle.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 5
+        run: python -m bot.main report
       - name: Restart the bot's run chain
         # bot.yml steps aside while training waits; start it again when done,
         # whether or not training succeeded.

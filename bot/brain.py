@@ -222,7 +222,11 @@ def calibration_table(store, buckets=10, domain=None, as_of_ts=None):
 
 def calibrate(prob, store, domain=None, as_of_ts=None):
     """Shrink or stretch a probability using only prior settled forecasts."""
-    table = calibration_table(store, domain=domain, as_of_ts=as_of_ts)
+    return calibrate_with_table(prob, calibration_table(store, domain=domain, as_of_ts=as_of_ts))
+
+
+def calibrate_with_table(prob, table):
+    """calibrate() with a precomputed calibration_table (backtests reuse tables)."""
     n_total = sum(v["n"] for v in table.values())
     if n_total < CAL_MIN_SAMPLES:
         return prob

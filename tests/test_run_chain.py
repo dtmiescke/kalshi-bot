@@ -112,8 +112,10 @@ class TestWorkflowWiring(unittest.TestCase):
         for name, command in steps:
             step = _step(wf, name)
             self.assertIn("continue-on-error: true", step)
+            self.assertIn("timeout-minutes:", step)       # a slow audit can't hold the lock
             self.assertIn(command, step)
-            self.assertLess(wf.index(name), wf.index("Save memory"))
+            # memory (incl. the trained model) is saved before any read-only audit
+            self.assertGreater(wf.index(name), wf.index("Save memory"))
         # Keep all audits independent: one failure must not skip later checks or persistence.
         positions = [wf.index(name) for name, _ in steps]
         self.assertEqual(positions, sorted(positions))
