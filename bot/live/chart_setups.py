@@ -161,3 +161,49 @@ def analyze_chart_setups(candles, book_imbalance=None, aggressor_imbalance=None)
             "up_score": round(up, 2), "down_score": round(down, 2),
             "setups": setups, "indicators": indicators,
             "warning": "Rule-based setup confluence is not a win probability; validate by walk-forward results."}
+
+
+def resample_candles(candles, interval_seconds):
+    """Aggregate chronological timestamped OHLCV candles without lookahead."""
+    interval_seconds = int(interval_seconds)
+    if interval_seconds <= 0:
+        raise ValueError("interval_seconds must be positive")
+    buckets = {}
+    for bar in candles or []:
+        try:
+            ts = int(float(bar["ts"]))
+            bucket = ts - ts % interval_seconds
+            values = {k: float(bar[k]) for k in ("open", "high", "low", "close", "volume")}
+            if not all(math.isfinite(v) for v in values.values()):
+                continue
+            if values["close"] <= 0 or values["high"] < values["low"]:
+                continue
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if bucket not in buckets:
+            buckets[bucket] = {"ts": bucket, **values}
+        else:
+            item = buckets[bucket]
+            item["high"] = max(item["high"], values["high"])
+            item["low"] = min(item["low"], values["low"])
+            item["close"] = values["close"]
+            item["volume"] += values["volume"]
+    return [buckets[key] for key in sorted(buckets)]
+
+
+def analyze_multi_timeframe(candles, book_imbalance=None, aggressor_imbalance=None):
+    """Analyze 1m/5m/15m/30m candles and report directional alignment."""
+    result = {}
+    mapping = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800}
+    for label, seconds in mapping.items():
+        bars = candles if label == "1m" else resample_candles(candles, seconds)
+        result[label] = analyze_chart_setups(
+            bars, book_imbalance=book_imbalance if label == "1m" else None,
+            aggressor_imbalance=aggressor_imbalance if label == "1m" else None,
+        )
+    ready = [v["bias"] for v in result.values() if v.get("ready") and v.get("bias") in ("up", "down")]
+    aligned = len(ready) >= 2 and len(set(ready)) == 1
+    return {"timeframes": result, "ready_timeframes": len(ready),
+            "directional_alignment": "aligned_up" if aligned and ready[0] == "up" else
+                                     "aligned_down" if aligned else "mixed_or_insufficient",
+            "warning": "Timeframe alignment is descriptive evidence, not a probability or standalone order instruction."}
