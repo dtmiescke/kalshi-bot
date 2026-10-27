@@ -45,7 +45,8 @@ class EdgeResearchTests(unittest.TestCase):
                          "settled_ts": i})
         class Store:
             def q(self, sql, args=()):
-                return rows
+                # Emulate SQL ORDER BY settled_ts DESC LIMIT ?.
+                return sorted(rows, key=lambda row: row["settled_ts"], reverse=True)[:args[0]]
         report = graded_feature_drift(Store(), min_reference=50, min_recent=20)
         self.assertIn("rsi_1m", report["features"])
         self.assertIn("rsi_1m", report["drift_alerts"])
