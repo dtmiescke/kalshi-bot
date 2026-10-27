@@ -581,7 +581,7 @@ class LiveRunner:
                 self.betting_ok, self.betting_why = False, reason
                 self._skip(f"execution guard: {reason}")
                 return
-            fresh, _ = self.readings_for(ticker, time.time())
+            fresh, fresh_ctx = self.readings_for(ticker, time.time())
             book_age = self.books[ticker].age()
             if not fresh or book_age is None or book_age > 5:
                 self._skip("recheck: data stale")
@@ -591,6 +591,15 @@ class LiveRunner:
                 self._skip("recheck: edge gone")
                 return
             snap, p, prob, conf = again
+            if isinstance(p, dict):
+                # Preserve the actual chart/tool snapshot used at the final recheck.
+                p["entry_context"] = {
+                    key: fresh_ctx[key] for key in (
+                        "chart_setups", "multi_timeframe", "indicators", "spot",
+                        "price_discovery", "orderbook", "flow"
+                    ) if isinstance(fresh_ctx, dict) and key in fresh_ctx
+                }
+                p["adaptive_learning"] = p.get("adaptive_learning") or {}
             members = council.convene(self.store, self.s, snap, p, fresh, prob, conf)
             if members.get("binding") and members.get("decision") == "pass":
                 self._skip("council veto")
