@@ -224,6 +224,49 @@ class TestRunner(unittest.TestCase):
             del os.environ["BOT_DB"]
 
 
+class TestRunnerSeedHistory(unittest.TestCase):
+    def test_kraken_history_fallback_when_coinbase_seed_is_insufficient(self):
+        from bot.live.runner import LiveRunner
+        with tempfile.TemporaryDirectory() as d:
+            os.environ["BOT_DB"] = os.path.join(d, "b.db")
+            try:
+                s = Settings()
+                store = Store(s.db_path)
+                runner = LiveRunner(s, store, seed=False, with_context=False)
+                good = [{"ts": 1000 + i * 60, "close": 100 + i,
+                         "open": 100 + i, "high": 101 + i,
+                         "low": 99 + i, "volume": 1} for i in range(60)]
+                with mock.patch("bot.live.runner.crypto_sig.fetch_candles", return_value=[]):
+                    with mock.patch("bot.live.runner.crypto_sig.fetch_kraken_candles", return_value=good) as kraken:
+                        runner.seed_history()
+                self.assertEqual(set(runner.seed_candles), set(runner.coins))
+                for series in runner.coins:
+                    self.assertEqual(len(runner.seed_candles[series]), 60)
+                self.assertEqual(kraken.call_count, 4)
+            finally:
+                os.environ.pop("BOT_DB", None)
+
+    def test_coinbase_history_is_kept_when_sufficient(self):
+        from bot.live.runner import LiveRunner
+        with tempfile.TemporaryDirectory() as d:
+            os.environ["BOT_DB"] = os.path.join(d, "b.db")
+            try:
+                s = Settings()
+                store = Store(s.db_path)
+                runner = LiveRunner(s, store, seed=False, with_context=False)
+                good = [{"ts": 1000 + i * 60, "close": 100 + i,
+                         "open": 100 + i, "high": 101 + i,
+                         "low": 99 + i, "volume": 1} for i in range(60)]
+                with mock.patch("bot.live.runner.crypto_sig.fetch_candles", return_value=good):
+                    with mock.patch("bot.live.runner.crypto_sig.fetch_kraken_candles", return_value=good) as kraken:
+                        runner.seed_history()
+                for series in runner.coins:
+                    self.assertEqual(len(runner.seed_candles[series]), 60)
+                self.assertEqual(kraken.call_count, 1)
+            finally:
+                os.environ.pop("BOT_DB", None)
+
+
 class TestRunnerExecution(unittest.TestCase):
     def setUp(self):
         from bot.live.runner import LiveRunner
