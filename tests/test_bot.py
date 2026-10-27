@@ -657,3 +657,18 @@ class TestCryptoFourCoinConfiguration(unittest.TestCase):
         self.assertIn("CRYPTO_MAX_PER_BET: '100'", workflow)
         self.assertIn("CRYPTO_MAX_PER_WINDOW: '100'", workflow)
         self.assertIn("LIVE_TRADING_CONFIRMED: ${{ vars.LIVE_TRADING_OPERATIONAL_APPROVED == 'yes' && vars.LIVE_TRADING_CONFIRMED == 'yes' && 'yes' || 'no' }}", workflow)
+
+
+class TestCryptoRunnerFourCoinIntegration(unittest.TestCase):
+    def test_runner_has_all_four_coins_and_optional_coinbase_product(self):
+        from bot.live.runner import COINS, COINS_TO_COIN
+        self.assertEqual(set(COINS), {"KXBTC15M", "KXETH15M", "KXSOL15M", "KXBNB15M"})
+        self.assertEqual(set(COINS_TO_COIN), set(COINS))
+        self.assertEqual(COINS["KXBNB15M"][0], "BNB/USD")
+        self.assertIsNone(COINS["KXBNB15M"][1])
+
+    def test_coinbase_subscription_map_omits_unsupported_products(self):
+        from bot.live.runner import COINS
+        coinbase_products = {cb for _, cb, _ in COINS.values() if cb}
+        self.assertNotIn(None, coinbase_products)
+        self.assertEqual(coinbase_products, {"BTC-USD", "ETH-USD", "SOL-USD"})
