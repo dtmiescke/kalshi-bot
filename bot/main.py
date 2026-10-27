@@ -465,7 +465,8 @@ def main(argv=None):
         coin_learning.backfill_trade_reviews(store)
         print(coin_learning.format_learning_summary(
             coin_learning.learning_summary(store),
-            setups=coin_learning.setup_performance(store)))
+            setups=coin_learning.setup_performance(store),
+            forecasts=coin_learning.signal_forecast_summary(store)))
         return
     if cmd == "auto":
         last = store.get_kv("last_full_scan", 0)
