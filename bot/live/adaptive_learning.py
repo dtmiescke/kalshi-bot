@@ -188,7 +188,8 @@ def historical_setup_penalty(store, setup_names, regime="mixed", min_samples=20,
                     if str(obs.get("result") or "").lower() not in ("yes", "no"):
                         continue
                     payload = obs.get("signal_snapshot") or {}
-                    raw = payload.get("chart_setups") or payload.get("setups") or []
+                    context = payload.get("_entry_context") or payload
+                    raw = context.get("chart_setups") or context.get("setups") or []
                     names = set()
                     if isinstance(raw, str):
                         names.add(raw)
