@@ -18,7 +18,7 @@ from .signals import implied_vol as iv
 from .signals.base import Reading, clamp
 from .signals.crypto_microstructure import indicator_snapshot
 
-COIN_OF_SERIES = {"KXBTC15M": "BTC", "KXETH15M": "ETH", "KXSOL15M": "SOL"}
+COIN_OF_SERIES = {"KXBTC15M": "BTC", "KXETH15M": "ETH", "KXSOL15M": "SOL", "KXBNB15M": "BNB"}
 
 
 def strategy_readings(feats, base_prob, chart_indicators=None):
@@ -111,7 +111,7 @@ def strategy_readings(feats, base_prob, chart_indicators=None):
 
 def coin_from_series(series):
     s = (series or "").upper()
-    return next((c for c in ("BTC", "ETH", "SOL") if s.startswith(f"KX{c}")), "BTC")
+    return next((c for c in ("BTC", "ETH", "SOL", "BNB") if s.startswith(f"KX{c}")), "BTC")
 
 
 def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=None,
