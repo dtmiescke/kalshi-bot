@@ -34,7 +34,7 @@ from .analytics import SymbolAnalytics, minute_candles
 from .chart_setups import analyze_chart_setups, analyze_multi_timeframe
 from .price_discovery import estimate_price_discovery
 from .edge_quality import edge_quality, enrich_plan
-from .adaptive_learning import AdaptiveLearning, graded_setup_performance, historical_setup_penalty
+from .adaptive_learning import AdaptiveLearning, graded_setup_performance, graded_price_discovery, historical_setup_penalty
 from .book import OrderBook
 from .kalshi_book import KalshiBook
 
@@ -379,9 +379,19 @@ class LiveRunner:
         weights = brain.get_weights(self.store, "crypto")
         if now - self.adaptive_report_cache["ts"] >= 60:
             try:
-                self.adaptive_report_cache = {"ts": now, "report": graded_setup_performance(self.store)}
+                setup_report = graded_setup_performance(self.store)
+                discovery_report = graded_price_discovery(self.store)
+                self.adaptive_report_cache = {
+                    "ts": now, "report": setup_report,
+                    "price_discovery": discovery_report,
+                }
+                self.store.set_kv("crypto_adaptive_research", {
+                    "ts": int(now), "setup_performance": setup_report,
+                    "price_discovery": discovery_report,
+                    "note": "Settled canonical forecast diagnostics only; observational research, not proof of profit."
+                })
             except Exception as exc:
-                log.warning("adaptive setup history refresh failed: %s", exc)
+                log.warning("adaptive research refresh failed: %s", exc)
         candidates = {}
         for ticker, info in list(self.markets.items()):
             if ticker in self.pending or ticker in self.makers or ticker not in self.books:
