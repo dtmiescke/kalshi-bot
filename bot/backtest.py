@@ -165,8 +165,17 @@ def run(store, fee_rate=0.07, thresholds=THRESHOLDS):
                 "pnl_per_contract": round(pnl / len(bets), 4)}
         out["by_domain"][dom] = res
         if dom == "crypto":
+            # Keep the acceptance scorecard scoped to the user's four approved
+            # 15-minute markets; never silently blend other crypto products in.
+            four_coin_predictions = [
+                {"p": row["p"], "y": row["y"]}
+                for row, case in zip(model_predictions,
+                    [case for case in cs])
+                if case["ticker"].startswith(
+                    ("KXBTC15M", "KXBNB15M", "KXETH15M", "KXSOL15M"))
+            ]
             out["target_audit"]["high_confidence_predictions"]["crypto"] = (
-                score_high_confidence_predictions(model_predictions)
+                score_high_confidence_predictions(four_coin_predictions)
             )
     return out
 
