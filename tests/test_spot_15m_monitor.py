@@ -46,7 +46,10 @@ class TestSpot15mMonitor(unittest.TestCase):
                     "close": 10.5, "volume": 100.0, "return_pct": 5.0,
                     "age_seconds": 200.0, "source": "kraken"}
         candle = marketdata._fetch_kraken_15m("BTC", get=get, now=2000)
-        self.assertEqual(candle, expected)
+        self.assertIsNotNone(candle)
+        self.assertEqual({k: v for k, v in candle.items() if k != "return_pct"},
+                         {k: v for k, v in expected.items() if k != "return_pct"})
+        self.assertAlmostEqual(candle["return_pct"], expected["return_pct"])
         self.assertEqual(get.call_args.kwargs["params"], {"pair": "XBTUSD", "interval": 15})
 
     def test_bnb_is_not_falsely_mapped_to_coinbase(self):
