@@ -657,6 +657,9 @@ class TestCryptoFourCoinConfiguration(unittest.TestCase):
         self.assertEqual(COINS["KXBNB15M"], ("BNB/USD", None, None))
         self.assertEqual(crypto_brain.coin_from_series("KXBNB15M"), "BNB")
         self.assertEqual(ml.coin_of("KXBNB15M-window"), "BNB")
+        # Keep the legacy model feature width stable for already-promoted models.
+        self.assertEqual(ml.COINS, ("BTC", "ETH", "SOL"))
+        self.assertEqual(ml.SUPPORTED_COINS, ("BTC", "ETH", "SOL", "BNB"))
         coinbase_products = {cb for _, cb, _ in COINS.values() if cb}
         self.assertNotIn("BNB-USD", coinbase_products)
 
