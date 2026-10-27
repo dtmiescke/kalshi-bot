@@ -1,6 +1,11 @@
 name: real-data-paper-smoke
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/real_data_paper_smoke.py"
+      - ".github/workflows/real-data-paper-smoke.yml"
   pull_request:
     paths:
       - "scripts/real_data_paper_smoke.py"
