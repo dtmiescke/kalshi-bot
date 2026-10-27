@@ -18,7 +18,7 @@ function b64(bytes) {
 function pemBytes(pem) {
   const isPkcs1 = /-----BEGIN RSA PRIVATE KEY-----/.test(pem);
   const clean = pem.replace(/-----BEGIN [A-Z ]+-----/g, "")
-    .replace(/-----END [A-Z ]+-----/g, "").replace(/\\s+/g, "");
+    .replace(/-----END [A-Z ]+-----/g, "").replace(/\s+/g, "");
   const rawText = atob(clean);
   const raw = Uint8Array.from(rawText, c => c.charCodeAt(0));
   if (!isPkcs1) return raw;
