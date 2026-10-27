@@ -1420,10 +1420,33 @@ class Engine:
         with _EXECUTION_LOCK:
             return self._place_locked(snap, plan, readings, prob, conf, summary, now, executed)
 
+    def _duplicate_entry_reason(self, snap):
+        """Fail closed if the final execution boundary cannot prove entry uniqueness."""
+        event_ticker = str(snap.get("event_ticker") or "").strip()
+        if not event_ticker:
+            return "missing event ticker; duplicate-entry guard cannot verify uniqueness"
+        if self.store.has_open_event_bet(event_ticker, mode=self.s.mode):
+            return "duplicate entry blocked: event already has an open bet"
+        is_crypto = str(snap.get("series", "")).endswith("15M")
+        if is_crypto and self.store.q(
+            "SELECT 1 FROM bets WHERE event_ticker=? AND mode=? LIMIT 1",
+            (event_ticker, self.s.mode),
+        ):
+            return "duplicate crypto entry blocked: this 15-minute window was already traded"
+        return None
+
     def _place_locked(self, snap, plan, readings, prob, conf, summary, now, executed=None):
         """Send (or simulate) the order and record the bet. `executed` = an order
         the live runner already filled as a resting maker order."""
         if not executed:
+            # Recheck uniqueness under the same process-wide execution lock as
+            # the final risk check. A stale candidate must not create a second bet.
+            duplicate_reason = self._duplicate_entry_reason(snap)
+            if duplicate_reason:
+                self._skip(summary, duplicate_reason)
+                log.warning("order blocked by duplicate-entry guard for %s: %s",
+                            snap.get("ticker"), duplicate_reason)
+                return
             # Recheck the hard circuit breakers at the final execution boundary,
             # not only at the start of a long scan. Already-filled orders must
             # still be recorded even if a breaker trips afterward.
