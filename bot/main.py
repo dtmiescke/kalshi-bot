@@ -9,6 +9,7 @@
     python -m bot.main scheduled  # what GitHub runs every 12 min: crypto + AI briefing
                                   # every run, sports every SPORTS_EVERY_HOURS (5.5)
     python -m bot.main live 340 # stream crypto live for N minutes (15-min markets)
+    python -m bot.main continuous # persistent crypto runner for synchronized 15-minute markets
     python -m bot.main dashboard  # rebuild the mobile page + trades CSV (data/site)
     python -m bot.main diagnose   # evidence report if Kalshi refuses requests
     python -m bot.main train    # train + test the model; promoted only if it wins on unseen data
@@ -422,6 +423,33 @@ def main(argv=None):
         confirmed = os.environ.get("CONFIRM_RECONCILED", "").strip().lower() == "yes"
         reason = clear_pause(store, confirmed=confirmed)
         print("cleared hard stop:", reason or "(none was set)")
+        return
+    if cmd == "continuous":
+        # Intended for an always-on service, not a short-lived GitHub-hosted job.
+        # The runner evaluates every second and rediscovers the active Kalshi
+        # 15-minute BTC/ETH/SOL/BNB contracts every minute.
+        from .live.runner import run as run_live
+        s.validate()
+        session_minutes = max(60.0, float(os.environ.get("CONTINUOUS_SESSION_MINUTES", "360")))
+        while True:
+            try:
+                started = time.time()
+                result = run_live(s, store, session_minutes, sports=False)
+                print("continuous session ended:", json.dumps({
+                    "started_ts": started, "ended_ts": time.time(),
+                    "session_minutes": session_minutes, "result": result,
+                }, default=str))
+            except KeyboardInterrupt:
+                logging.info("continuous crypto runner stopped by operator")
+                return
+            except Exception:
+                logging.exception("continuous crypto runner crashed; restarting after 10 seconds")
+                try:
+                    alerts.send("Crypto runner restarting", "Continuous runner failed; restarting in 10 seconds.",
+                                priority="high", tags=["warning"])
+                except Exception:
+                    logging.exception("restart alert failed")
+                time.sleep(10)
         return
     if cmd == "live":
         from .live.runner import run as run_live
