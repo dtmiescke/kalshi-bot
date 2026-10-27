@@ -123,3 +123,43 @@ def detect_feature_drift(reference, recent, threshold=0.5):
             "reference_median": round(center, 8), "recent_median": round(median(b), 8),
             "threshold": float(threshold),
             "note": "Drift is a review trigger, not a directional trading signal."}
+
+
+def graded_feature_drift(store, limit=5000, min_reference=50, min_recent=20):
+    """Check chronological drift in persisted, settled audit indicator snapshots."""
+    import json
+    rows = store.q(
+        "SELECT signals_json, settled_ts FROM decision_audit "
+        "WHERE outcome IS NOT NULL AND brier IS NOT NULL "
+        "ORDER BY settled_ts ASC LIMIT ?", (int(limit),)
+    )
+    histories = {}
+    for row in rows:
+        try:
+            payload = row.get("signals_json") or "{}"
+            data = json.loads(payload) if isinstance(payload, str) else payload
+            indicators = data.get("indicators") or {}
+            for name, value in indicators.items():
+                try:
+                    v = float(value)
+                    if isfinite(v):
+                        histories.setdefault(str(name), []).append(v)
+                except (TypeError, ValueError):
+                    continue
+        except (TypeError, ValueError, AttributeError):
+            continue
+    out = {}
+    for name, values in histories.items():
+        split = int(len(values) * 0.7)
+        if split < int(min_reference) or len(values) - split < int(min_recent):
+            continue
+        result = detect_feature_drift(values[:split], values[split:])
+        if result.get("drift_detected") or result.get("drift_score") is not None:
+            out[name] = result
+    return {
+        "features": out,
+        "features_checked": len(out),
+        "drift_alerts": [name for name, item in out.items() if item.get("drift_detected")],
+        "samples": len(rows),
+        "note": "Drift alerts request review/recalibration; they do not predict direction or auto-change risk."
+    }
