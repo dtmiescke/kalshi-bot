@@ -121,9 +121,10 @@ class TestWorkflowWiring(unittest.TestCase):
         self.assertIn("tests.test_kalshi_series_metadata", _step(wf, "Contract rules and MCP-adapter regression tests"))
         self.assertIn("tests.test_snapshot_contract_rules", _step(wf, "Contract rules and MCP-adapter regression tests"))
 
-    def test_paper_mode_gate_unchanged(self):
-        self.assertIn("LIVE_TRADING_OPERATIONAL_APPROVED != 'yes' && 'paper'",
-                      _step(self.load("bot.yml"), "Run"))
+    def test_paper_mode_is_hard_locked(self):
+        run_step = _step(self.load("bot.yml"), "Run")
+        self.assertIn("BOT_MODE: paper", run_step)
+        self.assertIn('LIVE_TRADING_CONFIRMED: "no"', run_step))
 
 
 if __name__ == "__main__":
