@@ -162,3 +162,47 @@ def trade_review_report(store, limit=20):
         except (ValueError, TypeError):
             row["review"] = {}
     return rows
+
+
+def learning_summary(store, min_samples=20, limit=5000):
+    """Summarize historical signal-key associations without claiming causality."""
+    rows = store.q("SELECT review_json FROM trade_reviews ORDER BY ts DESC LIMIT ?", (int(limit),))
+    buckets = {}
+    for row in rows:
+        try:
+            review = json.loads(row.get("review_json") or "{}")
+            obs = review.get("observed") or {}
+            pnl = float(obs.get("pnl") or 0.0)
+            for name in set(obs.get("signals_used") or []):
+                b = buckets.setdefault(name, {"signal": name, "samples": 0, "wins": 0,
+                                              "losses": 0, "flat": 0, "net_profit": 0.0})
+                b["samples"] += 1
+                if pnl > 0:
+                    b["wins"] += 1
+                elif pnl < 0:
+                    b["losses"] += 1
+                else:
+                    b["flat"] += 1
+                b["net_profit"] += pnl
+        except (TypeError, ValueError, AttributeError):
+            continue
+    result = []
+    for b in buckets.values():
+        b["profitable_trade_rate"] = b["wins"] / b["samples"] if b["samples"] else None
+        b["net_profit"] = round(b["net_profit"], 2)
+        b["evidence_level"] = "reviewable" if b["samples"] >= int(min_samples) else "low_sample"
+        result.append(b)
+    return sorted(result, key=lambda x: (x["net_profit"], x["samples"]), reverse=True)
+
+
+def format_learning_summary(rows, min_samples=20):
+    lines = [f"TRADE-LEARNING ASSOCIATIONS | minimum sample for review={min_samples}",
+             "Associations are descriptive, not proof that a tool or signal caused the outcome."]
+    if not rows:
+        return "\n".join(lines + ["No persisted trade reviews yet."])
+    for i, row in enumerate(rows, 1):
+        rate = "n/a" if row["profitable_trade_rate"] is None else f"{row['profitable_trade_rate']:.1%}"
+        note = row["evidence_level"].upper()
+        lines.append(f"{i}. {row['signal']}: {row['samples']} trades | profitable {rate} | "
+                     f"net P&L \${row['net_profit']:.2f} | {note}")
+    return "\n".join(lines)
