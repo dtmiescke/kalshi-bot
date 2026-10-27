@@ -29,7 +29,8 @@ from .metrics import binary_contract_roi
 
 log = logging.getLogger("bot")
 COINBASE_CANDLES = "https://api.exchange.coinbase.com/products/{pair}/candles"
-SERIES_PAIR = {"KXBTC15M": "BTC-USD", "KXETH15M": "ETH-USD", "KXSOL15M": "SOL-USD"}
+SERIES_PAIR = {"KXBTC15M": "BTC-USD", "KXETH15M": "ETH-USD", "KXSOL15M": "SOL-USD", "KXBNB15M": "BNB-USD"}
+BINANCE_SYMBOL = {"KXBNB15M": "BNBUSDT"}
 THRESHOLDS = (0.02, 0.03, 0.05, 0.08)
 
 
@@ -104,6 +105,52 @@ def spot_candles(pair, start_ts, end_ts, get=requests.get):
         t = chunk_end
         time.sleep(0.2)
     return out
+
+
+def spot_candles_binance(symbol, start_ts, end_ts, get=requests.get):
+    """Fetch public 1-minute Binance candles for BNB history (up to 1000 per call).
+
+    BNB has no Coinbase USD product in this bot's feed map. USDT-quoted Binance
+    candles provide historical BNB price/volume evidence; live execution pricing
+    continues to use Kraken's BNB/USD feed.
+    """
+    out = {}
+    cursor = int(start_ts * 1000)
+    end_ms = int(end_ts * 1000)
+    while cursor < end_ms:
+        try:
+            response = get("https://api.binance.com/api/v3/klines", timeout=15, params={
+                "symbol": symbol, "interval": "1m", "startTime": cursor,
+                "endTime": end_ms, "limit": 1000,
+            })
+            response.raise_for_status()
+            rows = response.json()
+            if not rows:
+                break
+            for row in rows:
+                ts = int(row[0] // 1000)
+                if start_ts <= ts < end_ts:
+                    out[ts] = {"ts": ts, "open": float(row[1]), "high": float(row[2]),
+                               "low": float(row[3]), "close": float(row[4]),
+                               "volume": float(row[5])}
+            next_cursor = int(rows[-1][0]) + 60_000
+            if next_cursor <= cursor:
+                break
+            cursor = next_cursor
+        except Exception as exc:
+            log.info("binance %s historical candles: %s", symbol, exc)
+            break
+        time.sleep(0.15)
+    return out
+
+
+def spot_candles_for_series(series, start_ts, end_ts, get=requests.get):
+    """Use each asset's real source; never substitute another coin's candles."""
+    symbol = BINANCE_SYMBOL.get(series)
+    if symbol:
+        return spot_candles_binance(symbol, start_ts, end_ts, get=get)
+    pair = SERIES_PAIR.get(series)
+    return spot_candles(pair, start_ts, end_ts, get=get) if pair else {}
 
 
 def vol_before(spot, ts, window=60):
@@ -221,7 +268,7 @@ def run(store, client, days=3, series=None, fee_rate=0.07, max_markets=300, spot
         if not markets:
             out["by_series"][ser] = {"markets": 0}
             continue
-        full = spot_candles(SERIES_PAIR[ser], start - 7 * 3600, end, get=spot_get)
+        full = spot_candles_for_series(ser, start - 7 * 3600, end, get=spot_get)
         spot = {k: c["close"] for k, c in full.items()}
         spot_list = [full[k] for k in sorted(full)]
         spot_keys = [x["ts"] for x in spot_list]
@@ -265,7 +312,7 @@ def vol_check(store, days=7, series=None, leads_min=(8, 5, 3), avg_seconds=60, n
     out = {"ts": int(time.time()), "days": days, "leads_min": list(leads_min), "coins": {}}
     for ser in series or SERIES_PAIR:
         coin = ml.coin_of(ser)
-        full = spot_candles(SERIES_PAIR[ser], start - 3 * 3600, end + 60, get=spot_get)
+        full = spot_candles_for_series(ser, start - 3 * 3600, end + 60, get=spot_get)
         closes = {k: c["close"] for k, c in full.items()}
         blend = dict(store.get_kv(f"vol_blend_{coin}") or volmod.DEFAULT_BLEND)
         w_sum = (blend.get("ewma", 0) + blend.get("long", 0)) or 1.0
