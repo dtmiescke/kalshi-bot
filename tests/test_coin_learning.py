@@ -1,6 +1,6 @@
 import json
 import unittest
-from bot.coin_learning import build_trade_review, coin_from_market, coin_performance, format_coin_report
+from bot.coin_learning import (build_trade_review, coin_from_market, coin_performance, format_coin_report, learning_summary)
 
 class CoinLearningTests(unittest.TestCase):
     def test_coin_mapping_handles_all_four_crypto_series(self):
@@ -31,6 +31,18 @@ class CoinLearningTests(unittest.TestCase):
         self.assertIn("chart_setups", review["observed"]["signals_used"])
         self.assertTrue(review["hypotheses_not_proven"])
         self.assertIn("caused", review["lesson"].lower())
+
+    def test_learning_summary_reports_associations_as_low_sample_without_overclaiming(self):
+        class Store:
+            def q(self, sql, args=()):
+                return [
+                    {"review_json": json.dumps({"observed": {"signals_used": ["order_book"], "pnl": 2.0}})},
+                    {"review_json": json.dumps({"observed": {"signals_used": ["order_book"], "pnl": -1.0}})},
+                ]
+        rows = learning_summary(Store(), min_samples=20)
+        self.assertEqual(rows[0]["samples"], 2)
+        self.assertEqual(rows[0]["net_profit"], 1.0)
+        self.assertEqual(rows[0]["evidence_level"], "low_sample")
 
     def test_missing_signal_context_is_explicit(self):
         review = build_trade_review({"ticker": "KXETH15M-X", "side": "no", "result": "yes", "pnl": -1})
