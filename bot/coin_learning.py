@@ -235,7 +235,7 @@ def format_learning_summary(rows, min_samples=20, setups=None, forecasts=None):
     lines = [f"TRADE-LEARNING ASSOCIATIONS | minimum sample for review={min_samples}",
              "Associations are descriptive, not proof that a tool or signal caused the outcome."]
     if not rows:
-        return "\n".join(lines + ["No persisted trade reviews yet."])
+        lines.append("No persisted signal/tool association rows yet.")
     for i, row in enumerate(rows, 1):
         rate = "n/a" if row["profitable_trade_rate"] is None else f"{row['profitable_trade_rate']:.1%}"
         note = row["evidence_level"].upper()
@@ -257,7 +257,7 @@ def format_learning_summary(rows, min_samples=20, setups=None, forecasts=None):
             rate = "n/a" if row["win_rate"] is None else f"{row['win_rate']:.1%}"
             lines.append(f"{row['coin']} / {row['setup']}: n={row['samples']} | win rate {rate} | "
                          f"net P&L ${row['net_profit']:.2f} | {row['evidence_level']}")
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def setup_performance(store, min_samples=20):
