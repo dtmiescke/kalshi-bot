@@ -17,6 +17,34 @@ on unseen data** (crypto).
 | weekly | download fresh real Kalshi history |
 | daily | trim raw data so the memory file stays small (learning is never trimmed) |
 
+## Run continuously from your Android phone (Termux)
+
+You can run the **existing bot** on Android without Docker using Termux. This is a
+user-managed process on the phone, not a server-side deployment; Android can still
+stop it because of battery policies, reboot, overheating, or network loss.
+
+1. Install Termux from its official F-Droid or GitHub distribution, open it, and run:
+   `pkg update && pkg upgrade`
+2. Install the Android-native scientific packages first:
+   `pkg install git python python-numpy python-scipy python-scikit-learn python-cryptography`
+   (Package availability can vary by Termux release.)
+3. Clone this repository and enter it:
+   `git clone https://github.com/dtmiescke/kalshi-bot.git && cd kalshi-bot`
+4. If pip cannot install a scientific dependency on Android, use Termux's matching
+   `python-*` package rather than trying to compile large packages repeatedly.
+5. Start the runner:
+   `bash phone-start.sh`
+6. For background reliability, disable battery optimization for Termux in Android
+   Settings, keep the phone charging/cool, and use a stable network. If Android or
+   Termux is stopped, reopen Termux and run the command again. A reboot requires a
+   manual restart unless you separately configure Termux:Boot.
+
+The launcher forces paper mode, refuses live-money execution, and keeps the local
+SQLite database under `data/bot.sqlite`. It does not automatically share this
+phone database with GitHub Actions or the web dashboard. Never paste API private keys
+into chat or commit them to Git. Start with no trading credentials and confirm feed
+health in logs before adding any optional data/AI keys.
+
 ## Continuous 15-minute crypto runner (persistent host)
 
 The GitHub Actions workflow remains the short-cycle backup; GitHub-hosted jobs are
