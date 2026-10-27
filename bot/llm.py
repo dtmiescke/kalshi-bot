@@ -85,12 +85,38 @@ def fallback_models(endpoints):
     if "github" in endpoints:
         out += [f"github|{m}" for m in _csv("GITHUB_MODELS_MODELS", "openai/gpt-4.1-mini")]
     if "gemini" in endpoints:
-        out += [f"gemini|{m}" for m in _csv("GEMINI_MODELS", "gemini-2.0-flash")]
+        # the -latest alias follows Google's current free Flash model
+        out += [f"gemini|{m}" for m in _csv("GEMINI_MODELS", "gemini-flash-latest,gemini-2.5-flash")]
     return out
 
 
 def _csv(name, default):
     return [m.strip() for m in (os.environ.get(name) or default).split(",") if m.strip()]
+
+
+# Which free provider each AI job tries first (the others stay as fallbacks), so
+# no single free quota carries everything: the council's careful JSON reviews go
+# to Gemini, the short chatty jobs (Don Theo, briefings) to GitHub Models.
+# Override with LLM_ROUTE_<TASK>=gemini|github|openrouter|omniroute|litellm.
+TASK_ROUTES = {"council": "gemini", "briefing": "github", "don_theo": "github"}
+
+
+def route_of(task):
+    return (os.environ.get(f"LLM_ROUTE_{str(task).upper()}") or TASK_ROUTES.get(task, "")).strip().lower()
+
+
+def _endpoint_of(label):
+    return label.split("|", 1)[0] if "|" in label else "openrouter"
+
+
+def preferred_model(llm, task):
+    """First live model for this task, or None (works with any client double)."""
+    try:
+        models = llm.models_for(task)
+    except Exception:
+        return None
+    dead = getattr(llm, "dead", set())
+    return next((m for m in models if m not in dead), None)
 
 
 def models_from_env():
@@ -124,6 +150,12 @@ class LLM:
         self.dead = set()       # models that failed this run
         self.web_searches_this_run = 0
         self._lock = threading.Lock()
+
+    def models_for(self, task):
+        """self.models with the task's preferred provider moved to the front."""
+        ep = route_of(task)
+        first = [m for m in self.models if _endpoint_of(m) == ep]
+        return first + [m for m in self.models if _endpoint_of(m) != ep]
 
     def _day_key(self):
         return "llm_calls_" + time.strftime("%Y%m%d", time.gmtime())
