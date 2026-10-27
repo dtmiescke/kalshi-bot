@@ -108,14 +108,22 @@ class LiveRunner:
         """Fill the first hour of 1-second mids from Coinbase 1-minute candles so
         volatility and momentum work from the first second, not after an hour."""
         for series, (kr, cb, _) in COINS.items():
-            # Coinbase history is used only when that product actually exists.
-            # BNB has no Coinbase USD product; its analytics safely warm from the
-            # Kraken book/trade stream instead of silently mapping BNB to another coin.
-            candles = (crypto_sig.fetch_candles(cb) if cb else
-                       crypto_sig.fetch_kraken_candles(kr) if series == "KXBNB15M" else [])
+            # Prefer Coinbase history where available, but do not let a transient
+            # Coinbase API/rate-limit failure leave the live model without the
+            # 30 completed 1-minute candles required to produce crypto_model.
+            # Every configured coin has a Kraken USD pair, so use it as a real
+            # historical fallback (including BTC/ETH/SOL), never synthetic bars.
+            candles = crypto_sig.fetch_candles(cb) if cb else []
+            source = "coinbase" if len(candles) >= 30 else "none"
+            if len(candles) < 30:
+                fallback = crypto_sig.fetch_kraken_candles(kr)
+                if len(fallback) > len(candles):
+                    candles, source = fallback, "kraken_fallback"
             self.seed_candles[series] = candles
             for c in candles:
                 self.coins[series].mids.append((c["ts"], c["close"]))
+            log.info("crypto history seed %s: source=%s candles=%d",
+                     COINS_TO_COIN[series], source, len(candles))
 
     def discover(self):
         """Find open 15-minute windows and retain per-series coverage diagnostics."""
