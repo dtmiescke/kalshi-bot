@@ -204,5 +204,5 @@ def format_learning_summary(rows, min_samples=20):
         rate = "n/a" if row["profitable_trade_rate"] is None else f"{row['profitable_trade_rate']:.1%}"
         note = row["evidence_level"].upper()
         lines.append(f"{i}. {row['signal']}: {row['samples']} trades | profitable {rate} | "
-                     f"net P&L \${row['net_profit']:.2f} | {note}")
+                     f"net P&L ${row['net_profit']:.2f} | {note}")
     return "\n".join(lines)
