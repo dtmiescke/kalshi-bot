@@ -56,6 +56,34 @@ class ValTownBridgeTests(unittest.TestCase):
         self.assertEqual(first, second)
         request.assert_called_once()
 
+    def test_cached_payload_isolated_from_caller_mutation(self):
+        response = Mock(status_code=200)
+        response.json.return_value = {"markets": [{"ticker": "KXTEST"}]}
+        env = {
+            "VAL_TOWN_KALSHI_URL": "https://example.val.town",
+            "ATI_INGEST_SHARED_TOKEN": "test-secret",
+        }
+        with patch.dict("os.environ", env, clear=True), patch(
+            "bot.valtown_bridge.requests.get", return_value=response
+        ) as request:
+            first = bridge_get("/markets")
+            first[1]["markets"][0]["ticker"] = "CORRUPTED"
+            second = bridge_get("/markets")
+        self.assertEqual(second[1]["markets"][0]["ticker"], "KXTEST")
+        request.assert_called_once()
+
+    def test_error_payload_uses_direct_fallback(self):
+        response = Mock(status_code=200)
+        response.json.return_value = {"error": "upstream unavailable"}
+        env = {
+            "VAL_TOWN_KALSHI_URL": "https://example.val.town",
+            "ATI_INGEST_SHARED_TOKEN": "test-secret",
+        }
+        with patch.dict("os.environ", env, clear=True), patch(
+            "bot.valtown_bridge.requests.get", return_value=response
+        ):
+            self.assertEqual(bridge_get("/markets"), (False, None))
+
     def test_cache_keys_include_query_parameters(self):
         response = Mock(status_code=200)
         response.json.return_value = {"events": []}
