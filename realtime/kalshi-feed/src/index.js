@@ -16,19 +16,31 @@ function b64(bytes) {
 }
 
 function pemBytes(pem) {
-  const isPkcs1 = /-----BEGIN RSA PRIVATE KEY-----/.test(pem);
-  const clean = pem.replace(/-----BEGIN [A-Z ]+-----/g, "")
-    .replace(/-----END [A-Z ]+-----/g, "").replace(/\s+/g, "");
-  const rawText = atob(clean);
+  // Also accept literal escaped newline sequences from secret-entry forms.
+  const normalized = String(pem).replace(/\r/g, "").replace(/\\n/g, "\n").trim().replace(/^\uFEFF/, "");
+  const match = normalized.match(/-----BEGIN ([A-Z ]+)-----([\s\S]*?)-----END \1-----/);
+  if (!match) throw new Error("private key PEM envelope is invalid");
+  const label = match[1];
+  const clean = match[2].replace(/\s+/g, "");
+  let rawText;
+  try { rawText = atob(clean); } catch { throw new Error("private key PEM base64 is invalid"); }
   const raw = Uint8Array.from(rawText, c => c.charCodeAt(0));
-  if (!isPkcs1) return raw;
+  if (label !== "RSA PRIVATE KEY") return { der: raw, label };
 
-  // Web Crypto imports RSA private keys as PKCS#8; Kalshi keys may be PKCS#1 PEM.
+  // Wrap legacy PKCS#1 RSA DER as PKCS#8 for Web Crypto.
   const derLength = n => n < 128 ? [n] : n < 256 ? [0x81, n] : [0x82, (n >> 8) & 255, n & 255];
   const algorithm = [0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00];
   const octetString = [0x04, ...derLength(raw.length), ...raw];
   const body = [0x02, 0x01, 0x00, ...algorithm, ...octetString];
-  return Uint8Array.from([0x30, ...derLength(body.length), ...body]);
+  return { der: Uint8Array.from([0x30, ...derLength(body.length), ...body]), label };
+}
+
+function containsBytes(haystack, needle) {
+  outer: for (let i = 0; i <= haystack.length - needle.length; i++) {
+    for (let j = 0; j < needle.length; j++) if (haystack[i + j] !== needle[j]) continue outer;
+    return true;
+  }
+  return false;
 }
 
 async function authHeaders(env) {
@@ -36,14 +48,24 @@ async function authHeaders(env) {
     throw new Error("Kalshi feed credentials are not configured");
   }
   const timestamp = String(Date.now());
-  const key = await crypto.subtle.importKey(
-    "pkcs8", pemBytes(env.KALSHI_DATA_PRIVATE_KEY),
-    { name: "RSA-PSS", hash: "SHA-256" }, false, ["sign"]
-  );
-  const signature = await crypto.subtle.sign(
-    { name: "RSA-PSS", saltLength: 32 }, key,
-    new TextEncoder().encode(timestamp + "GET" + SIGN_PATH)
-  );
+  const parsed = pemBytes(env.KALSHI_DATA_PRIVATE_KEY);
+  const der = parsed.der;
+  // Kalshi keys may be Ed25519 (PKCS#8) or legacy RSA-PSS (PKCS#1/PKCS#8).
+  const isEd25519 = parsed.label === "PRIVATE KEY" && containsBytes(der, [0x06, 0x03, 0x2b, 0x65, 0x70]);
+  const message = new TextEncoder().encode(timestamp + "GET" + SIGN_PATH);
+  let signature;
+  try {
+    if (isEd25519) {
+      const key = await crypto.subtle.importKey("pkcs8", der, { name: "Ed25519" }, false, ["sign"]);
+      signature = await crypto.subtle.sign({ name: "Ed25519" }, key, message);
+    } else {
+      const key = await crypto.subtle.importKey("pkcs8", der, { name: "RSA-PSS", hash: "SHA-256" }, false, ["sign"]);
+      signature = await crypto.subtle.sign({ name: "RSA-PSS", saltLength: 32 }, key, message);
+    }
+  } catch (error) {
+    // Never include the key, PEM text, or signature in diagnostics.
+    throw new Error("private key import/sign failed (" + (error?.name || "CryptoError") + "; detected " + (isEd25519 ? "Ed25519" : "RSA") + ")");
+  }
   return {
     "KALSHI-ACCESS-KEY": env.KALSHI_DATA_KEY_ID,
     "KALSHI-ACCESS-TIMESTAMP": timestamp,
