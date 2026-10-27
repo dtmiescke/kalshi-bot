@@ -685,4 +685,6 @@ class TestCryptoFourCoinConfiguration(unittest.TestCase):
         self.assertIn("CRYPTO_MIN_BET: '25'", workflow)
         self.assertIn("CRYPTO_MAX_PER_BET: '100'", workflow)
         self.assertIn("CRYPTO_MAX_PER_WINDOW: '100'", workflow)
-        self.assertIn("LIVE_TRADING_CONFIRMED: ${{ vars.LIVE_TRADING_OPERATIONAL_APPROVED == 'yes' && vars.LIVE_TRADING_CONFIRMED == 'yes' && 'yes' || 'no' }}", workflow)
+        self.assertIn("BOT_MODE: paper", workflow)
+        self.assertIn('LIVE_TRADING_CONFIRMED: "no"', workflow)
+        self.assertIn("PAPER-ONLY LOCK", workflow)
