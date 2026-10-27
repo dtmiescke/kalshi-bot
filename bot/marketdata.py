@@ -10,6 +10,7 @@
 Each source fails quietly: missing context lowers confidence, it never
 breaks a run.
 """
+import math
 import time
 from datetime import datetime
 
