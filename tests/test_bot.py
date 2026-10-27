@@ -657,9 +657,17 @@ class TestCryptoFourCoinConfiguration(unittest.TestCase):
         self.assertEqual(COINS["KXBNB15M"], ("BNB/USD", None, None))
         self.assertEqual(crypto_brain.coin_from_series("KXBNB15M"), "BNB")
         self.assertEqual(ml.coin_of("KXBNB15M-window"), "BNB")
-        # Keep the legacy model feature width stable for already-promoted models.
-        self.assertEqual(ml.COINS, ("BTC", "ETH", "SOL"))
-        self.assertEqual(ml.SUPPORTED_COINS, ("BTC", "ETH", "SOL", "BNB"))
+        self.assertEqual(ml.COINS, ("BTC", "ETH", "SOL", "BNB"))
+        self.assertEqual(ml.SUPPORTED_COINS, ml.COINS)
+        # Existing three-coin champions are aligned by column name, not by width.
+        import numpy as np
+        aligned = ml._align_matrix(
+            np.array([[10.0, 20.0, 1.0, 0.0, 0.0, 0.0, 1.0]]),
+            ["feature", "kalshi_logit", "coin_BTC", "coin_ETH", "coin_SOL", "coin_BNB", "model_prob"],
+            ["feature", "kalshi_logit", "coin_BTC", "coin_ETH", "coin_SOL", "model_prob"],
+        )
+        self.assertEqual(aligned.shape, (1, 6))
+        self.assertEqual(aligned[0].tolist(), [10.0, 20.0, 1.0, 0.0, 0.0, 1.0])
         coinbase_products = {cb for _, cb, _ in COINS.values() if cb}
         self.assertNotIn("BNB-USD", coinbase_products)
 
