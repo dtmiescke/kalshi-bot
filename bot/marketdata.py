@@ -93,11 +93,14 @@ def hyperliquid(store, coin, post=requests.post):
                 if name in ("BTC", "ETH", "SOL", "BNB") and isinstance(c, dict):
                     out[name] = {"funding": _num(c.get("funding")),
                                  "premium": _num(c.get("premium")),
-                                 "open_interest": _num(c.get("openInterest"))}
+                                 "open_interest": _num(c.get("openInterest")),
+                                 # median of several exchanges: the spot cross-check
+                                 "oracle": _num(c.get("oraclePx")), "ts": round(time.time(), 1)}
             return out or None
         except Exception:
             return None
-    return (_cached(store, "hl_ctx", 5, fetch) or {}).get(coin) or {}
+    # one minute: the oracle price must be fresh enough to check spot against
+    return (_cached(store, "hl_ctx", 1, fetch) or {}).get(coin) or {}
 
 
 def oi_change(store, coin, now_oi):
@@ -292,6 +295,7 @@ def context(store, coin, coinbase_price=None, get=requests.get, include_spot_15m
         "put_call_oi": put_call(store, coin, get),
         "hl_funding": hl.get("funding"), "hl_premium": hl.get("premium"),
         "hl_open_interest": hl.get("open_interest"),
+        "ref_spot": hl.get("oracle"), "ref_spot_ts": hl.get("ts"),
         "coinbase_premium": (coinbase_price / ks - 1) if (coinbase_price and ks) else None,
         "fear_greed": fear_greed(store, get),
         "events_soon": [f"{e['title']} ({e['impact']}) in {round((e['ts'] - now) / 60)} min"

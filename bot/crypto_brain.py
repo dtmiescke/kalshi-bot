@@ -142,6 +142,35 @@ def perp_readings(ctx, base_prob):
     return out
 
 
+SPOT_CHECK_MAX_AGE = 120   # seconds; an older reference can't judge a fast market
+
+
+def spot_check(spot, ctx, now, max_bps=None):
+    """Compare our spot price with an independent reference (Hyperliquid's
+    oracle, a median of several exchanges). None when there is no fresh
+    reference; otherwise {gap_bps, ok}. A big gap means our feed is stale or
+    wrong, so the price models built on it should count for less."""
+    import os
+    if max_bps is None:
+        try:
+            max_bps = float(os.environ.get("SPOT_CHECK_MAX_BPS", "40"))
+        except ValueError:
+            max_bps = 40.0
+    if not isinstance(ctx, dict) or not spot:
+        return None
+    ref, ts = ctx.get("ref_spot"), ctx.get("ref_spot_ts")
+    if not (isinstance(ref, (int, float)) and ref > 0 and isinstance(ts, (int, float))):
+        return None
+    if not 0 <= now - ts <= SPOT_CHECK_MAX_AGE:
+        return None
+    gap = (spot / ref - 1) * 1e4
+    return {"gap_bps": round(gap, 2), "ok": abs(gap) <= max_bps, "max_bps": max_bps,
+            "ref": ref, "ref_venue": "hyperliquid_oracle"}
+
+
+SPOT_DEPENDENT = ("crypto_model", "crypto_model_iv")
+
+
 def coin_from_series(series):
     s = (series or "").upper()
     return next((c for c in ("BTC", "ETH", "SOL", "BNB") if s.startswith(f"KX{c}")), "BTC")
@@ -285,6 +314,15 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
     if feats:
         readings.extend(strategy_readings(feats, p, chart_indicators))
     info["indicators"] = indicator_snapshot(feats)
+    check = spot_check(spot, ctx, now)
+    if check:
+        info["spot_check"] = check
+        for r in readings:
+            if r.name in SPOT_DEPENDENT:
+                r.detail["spot_gap_bps"] = check["gap_bps"]
+                if not check["ok"]:
+                    r.confidence = round(r.confidence * 0.5, 4)
+                    r.detail["spot_check_failed"] = True
     if isinstance(book, dict):
         info["orderbook"] = {k: book.get(k) for k in (
             "venue", "spread_bps", "depth_imbalance", "microprice_delta_bps", "levels")}
