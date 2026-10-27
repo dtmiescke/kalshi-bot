@@ -35,6 +35,7 @@ from .chart_setups import analyze_chart_setups, analyze_multi_timeframe
 from .price_discovery import estimate_price_discovery
 from .edge_quality import edge_quality, enrich_plan
 from .adaptive_learning import AdaptiveLearning, graded_setup_performance, graded_price_discovery, historical_setup_penalty
+from .edge_research import classify_regime, evidence_score
 from .book import OrderBook
 from .kalshi_book import KalshiBook
 
@@ -381,6 +382,14 @@ class LiveRunner:
             try:
                 setup_report = graded_setup_performance(self.store)
                 discovery_report = graded_price_discovery(self.store)
+                # Evidence scores rank research maturity, not probability of winning.
+                for item in setup_report.values():
+                    item["evidence_quality_score"] = evidence_score(
+                        samples=item.get("samples", 0),
+                        brier=item.get("model_brier"),
+                        baseline_brier=item.get("market_brier"),
+                    )
+                    item["promotion_allowed"] = False  # OOS/cost/drawdown validation required
                 self.adaptive_report_cache = {
                     "ts": now, "report": setup_report,
                     "price_discovery": discovery_report,
@@ -388,6 +397,12 @@ class LiveRunner:
                 self.store.set_kv("crypto_adaptive_research", {
                     "ts": int(now), "setup_performance": setup_report,
                     "price_discovery": discovery_report,
+                    "research_policy": {
+                        "live_auto_promotion": False,
+                        "requires_walk_forward": True,
+                        "requires_fees_slippage_and_fill_model": True,
+                        "requires_drawdown_and_drift_review": True,
+                    },
                     "note": "Settled canonical forecast diagnostics only; observational research, not proof of profit."
                 })
             except Exception as exc:
@@ -435,7 +450,17 @@ class LiveRunner:
                         "edge": (abs(model_prob-market_mid) if market_mid is not None else None),
                         "confidence": max((float(getattr(x, "confidence", 0) or 0) for x in readings), default=0),
                         "signals": {"chart_setups": [x.get("name") for x in ctx.get("chart_setups", {}).get("setups", [])],
-                                    "regime": regime, "indicators": ctx.get("indicators", {}),
+                                    "regime": regime,
+                                    "regime_tags": classify_regime({
+                                        "volatility_ratio": (spot_summary.get("vol_per_min") or 0) /
+                                            max(float(spot_summary.get("vol_per_min") or 1e-9), 1e-9),
+                                        "trend_strength": float(ctx.get("indicators", {}).get("adx_1m", 0) or 0) / 100.0,
+                                        "source_divergence_bps": spot_summary.get("source_divergence_bps"),
+                                        "spread_bps": (((float(yes_ask) - float(yes_bid)) * 10000.0 / market_mid)
+                                                       if market_mid and yes_bid is not None and yes_ask is not None else 0),
+                                        "book_imbalance": spot_summary.get("book_imbalance_0.1%"),
+                                    }),
+                                    "indicators": ctx.get("indicators", {}),
                                     "source_divergence_bps": spot_summary.get("source_divergence_bps"),
                                     "multi_timeframe": ctx.get("multi_timeframe", {}),
                                     "price_discovery": ctx.get("price_discovery", {})},
