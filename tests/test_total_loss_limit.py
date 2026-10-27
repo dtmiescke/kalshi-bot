@@ -22,16 +22,16 @@ class TestRequestedRiskSettings(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             s = Settings(mode="paper")
             self.assertEqual(s.bankroll, 200000.0)
-            self.assertEqual(s.min_per_bet, 500.0)
-            self.assertEqual(s.max_per_bet, 750.0)
+            self.assertEqual(s.min_per_bet, 25.0)
+            self.assertEqual(s.max_per_bet, 100.0)
             self.assertEqual(s.max_total_loss, 20000.0)
             self.assertEqual(s.max_per_game, 750.0)
             self.assertEqual(s.max_per_day, 20000.0)
             self.assertEqual(s.max_open_cost, 3750.0)
             self.assertEqual(s.daily_loss_limit, 0.0)
-            self.assertEqual(s.crypto_min_bet, 500.0)
-            self.assertEqual(s.crypto_max_per_bet, 750.0)
-            self.assertEqual(s.crypto_max_per_window, 750.0)
+            self.assertEqual(s.crypto_min_bet, 25.0)
+            self.assertEqual(s.crypto_max_per_bet, 100.0)
+            self.assertEqual(s.crypto_max_per_window, 100.0)
             s.validate()
 
     def test_minimum_cannot_exceed_maximum(self):
