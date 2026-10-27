@@ -4,6 +4,7 @@ Refreshed about once per second. Everything here is plain arithmetic, so it's
 fast; the slow LLM council only ever sees these summaries, never raw ticks.
 """
 import math
+import os as _os
 import time
 from collections import deque
 
