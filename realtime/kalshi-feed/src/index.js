@@ -155,7 +155,7 @@ export class KalshiFeed extends DurableObject {
         try { parsed = JSON.parse(event.data); } catch { return; }
         // Only broadcast read-only market data and subscription acknowledgements.
         const type = parsed?.type;
-        if (type && !ALLOWED_CHANNELS.has(type) && !["subscribed", "unsubscribed", "error"].includes(type)) return;
+        if (type && !ALLOWED_CHANNELS.has(type) && !["subscribed", "unsubscribed", "error", "ok"].includes(type)) return;
         const payload = JSON.stringify(parsed);
         for (const client of this.clients) {
           try { client.send(payload); } catch { this.clients.delete(client); }
