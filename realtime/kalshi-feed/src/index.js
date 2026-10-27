@@ -16,10 +16,19 @@ function b64(bytes) {
 }
 
 function pemBytes(pem) {
-  const clean = pem.replace(/-----BEGIN PRIVATE KEY-----/g, "")
-    .replace(/-----END PRIVATE KEY-----/g, "").replace(/\s+/g, "");
-  const raw = atob(clean);
-  return Uint8Array.from(raw, c => c.charCodeAt(0));
+  const isPkcs1 = /-----BEGIN RSA PRIVATE KEY-----/.test(pem);
+  const clean = pem.replace(/-----BEGIN [A-Z ]+-----/g, "")
+    .replace(/-----END [A-Z ]+-----/g, "").replace(/\\s+/g, "");
+  const rawText = atob(clean);
+  const raw = Uint8Array.from(rawText, c => c.charCodeAt(0));
+  if (!isPkcs1) return raw;
+
+  // Web Crypto imports RSA private keys as PKCS#8; Kalshi keys may be PKCS#1 PEM.
+  const derLength = n => n < 128 ? [n] : n < 256 ? [0x81, n] : [0x82, (n >> 8) & 255, n & 255];
+  const algorithm = [0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00];
+  const octetString = [0x04, ...derLength(raw.length), ...raw];
+  const body = [0x02, 0x01, 0x00, ...algorithm, ...octetString];
+  return Uint8Array.from([0x30, ...derLength(body.length), ...body]);
 }
 
 async function authHeaders(env) {
