@@ -96,9 +96,13 @@ export class KalshiFeed extends DurableObject {
     try {
       await this.ensureUpstream();
       server.send(JSON.stringify({ type: "relay_status", status: "connected", at: Date.now() }));
-    } catch {
+    } catch (error) {
+      const detail = error instanceof Error
+        ? (error.message.match(/HTTP \\d{3}/)?.[0] || error.name || "connection error")
+        : "connection error";
+      console.error("Kalshi upstream connection failed:", detail);
       server.send(JSON.stringify({ type: "relay_status", status: "error",
-        message: "Upstream market-data connection failed; retry shortly", at: Date.now() }));
+        message: "Upstream market-data connection failed (" + detail + "); retry shortly", at: Date.now() }));
     }
     return new Response(null, { status: 101, webSocket: client });
   }
