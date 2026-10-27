@@ -115,7 +115,7 @@ def persist_trade_review(store, bet):
         (ticker, max(0, entry_ts - 900), entry_ts + 1))
     snapshots = store.q("""SELECT ts, yes_bid, yes_ask, last_price, volume, open_interest
         FROM market_snapshots WHERE ticker=? AND ts BETWEEN ? AND ? ORDER BY ts DESC LIMIT 5""",
-        (ticker, max(0, ts - 900), ts + 1))
+        (ticker, max(0, entry_ts - 900), entry_ts + 1))
     review = build_trade_review(bet, signals, {"recent_snapshots": snapshots})
     encoded = json.dumps(review, ensure_ascii=False, sort_keys=True, default=str)
     cur = store.x("""INSERT OR IGNORE INTO trade_reviews
