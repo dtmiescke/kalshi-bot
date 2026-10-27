@@ -129,12 +129,13 @@ jobs:
           ws.addEventListener("message", event => {
             let msg;
             try { msg = JSON.parse(String(event.data)); } catch { return; }
+            console.log("Relay message type:", String(msg.type || "unknown").slice(0, 40));
             if (msg.type === "relay_status" && msg.status === "connected" && !subscribed) {
-              ws.send(JSON.stringify({ id: 1, cmd: "subscribe", params: { channels: ["ticker"], market_tickers: [market.ticker] } }));
+              ws.send(JSON.stringify({ id: 1, cmd: "subscribe", params: { channels: ["ticker"], market_ticker: market.ticker } }));
               console.log("Requested ticker channel for an open market.");
               return;
             }
-            if (msg.type === "subscribed" && msg.msg?.channel === "ticker") {
+            if ((msg.type === "subscribed" || msg.type === "subscription") && (msg.msg?.channel === "ticker" || msg.channel === "ticker" || msg.msg?.sid !== undefined)) {
               subscribed = true;
               console.log("Kalshi accepted ticker subscription.");
             }
