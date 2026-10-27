@@ -42,7 +42,7 @@ class TestTrainerTimeLimit(unittest.TestCase):
         m = ml.train(self.st, min_windows=300, deadline_ts=time.time() - 1)
         self.assertEqual(m["status"], "time limit")
         self.assertFalse(m["promoted"])
-        self.assertIn("model search", m["stage"])
+        self.assertIn(m["stage"], ("loading the dataset", "model search (100 trees)"))
         self.assertFalse(os.path.exists(os.path.join(ml.MODEL_DIR, "crypto_model.joblib")))
         self.assertIn("time limit", ml.text(m))
 

@@ -63,6 +63,10 @@ def settled_markets(client, series, start_ts, end_ts, limit=300):
                     and start_ts <= ct["close_ts"] <= end_ts):
                 seen.add(m["ticker"])
                 out.append(m)
+        if out:
+            # Recent settled markets are all on /markets. The archive takes no date
+            # filter, so paging it here only burns rate limit (the trainer timed out).
+            break
     return sorted(out, key=lambda m: m.get("close_time", ""))[-limit:]
 
 
@@ -86,9 +90,11 @@ def spot_minutes(pair, start_ts, end_ts, get=requests.get):
 
 def spot_candles(pair, start_ts, end_ts, get=requests.get):
     """{minute_ts: full 1-minute candle} from Coinbase, 300 candles per request."""
-    out, t = {}, int(start_ts)
-    while t < end_ts:
-        chunk_end = min(t + 300 * 60, int(end_ts))
+    # Whole seconds on both ends: with a fractional end_ts, t stopped at
+    # int(end_ts) < end_ts and this loop never ended (the trainer's 45-minute hang).
+    out, t, end = {}, int(start_ts), int(end_ts)
+    while t < end:
+        chunk_end = min(t + 300 * 60, end)
         try:
             r = get(COINBASE_CANDLES.format(pair=pair), timeout=15, params={
                 "granularity": 60,
@@ -212,12 +218,32 @@ def seed_learning(store, records_by_market):
     return brain.learn(store, graded, "crypto") if graded else {}
 
 
-def run(store, client, days=3, series=None, fee_rate=0.07, max_markets=300, spot_get=requests.get):
+def _have_history(store):
+    """Tickers already replayed into training rows (skipped on later runs)."""
+    try:
+        return {r["ticker"] for r in store.q(
+            "SELECT DISTINCT ticker FROM ml_rows WHERE source='history'")}
+    except Exception:
+        return set()
+
+
+def run(store, client, days=3, series=None, fee_rate=0.07, max_markets=300, spot_get=requests.get,
+        deadline_ts=None):
+    """deadline_ts: stop downloading at this time and keep what was gathered, so
+    the trainer always has time left to train (it used to time out here)."""
     end = time.time() - 600
     start = end - days * 86400
     out = {"days": days, "by_series": {}}
+    have = _have_history(store)
+
+    def late():
+        return deadline_ts is not None and time.time() > float(deadline_ts)
     for ser in series or SERIES_PAIR:
-        markets = settled_markets(client, ser, start, end, limit=max_markets)
+        if late():
+            out["stopped"] = "time limit"
+            break
+        markets = [m for m in settled_markets(client, ser, start, end, limit=max_markets)
+                   if m["ticker"] not in have]
         if not markets:
             out["by_series"][ser] = {"markets": 0}
             continue
@@ -228,6 +254,9 @@ def run(store, client, days=3, series=None, fee_rate=0.07, max_markets=300, spot
         volmod.learn_hour_profile(store, ml.coin_of(ser), spot_list)
         recs = {}
         for m in markets:
+            if late():
+                out["stopped"] = "time limit"
+                break
             ct = contract_terms(m)["close_ts"]
             recs[m["ticker"]] = replay_market(m, market_candles(client, ser, m["ticker"], ct - 1200, ct),
                                               spot, fee_rate, spot_list=spot_list, store=store,
@@ -322,6 +351,8 @@ def vol_check(store, days=7, series=None, leads_min=(8, 5, 3), avg_seconds=60, n
 
 def text(result):
     lines = [f"=== REAL HISTORY REPLAY (last {result['days']} days, Kalshi + Coinbase) ==="]
+    if result.get("stopped"):
+        lines.append("(download stopped at its time limit; the rest is picked up next run)")
     for ser, r in result["by_series"].items():
         if not r.get("markets"):
             lines.append(f"\n[{ser}] no settled windows found")
