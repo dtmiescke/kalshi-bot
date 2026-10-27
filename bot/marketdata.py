@@ -19,6 +19,7 @@ import requests
 FUT_TICKERS = "https://futures.kraken.com/derivatives/api/v3/tickers"
 FUT_SYMBOL = {"BTC": "PF_XBTUSD", "ETH": "PF_ETHUSD", "SOL": "PF_SOLUSD"}
 KRAKEN_SPOT = "https://api.kraken.com/0/public/Ticker"
+KRAKEN_OHLC = "https://api.kraken.com/0/public/OHLC"
 KRAKEN_PAIR = {"BTC": "XBTUSD", "ETH": "ETHUSD", "SOL": "SOLUSD"}
 DERIBIT_SUMMARY = "https://www.deribit.com/api/v2/public/get_book_summary_by_currency"
 FNG = "https://api.alternative.me/fng/"
