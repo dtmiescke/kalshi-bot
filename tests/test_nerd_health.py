@@ -19,6 +19,42 @@ class TestNerdHealthAggregation(unittest.TestCase):
 
 
 
+    def test_watchdog_detects_missing_council_ledger(self):
+        import os
+        import tempfile
+        from bot.nerd import inspect_store
+        from bot.storage import Store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(os.path.join(tmp, "health.db"))
+            try:
+                store.db.execute("DROP TABLE council_votes")
+                store.db.commit()
+                with self.assertRaisesRegex(RuntimeError, "required SQLite tables missing"):
+                    inspect_store(store)
+                incident = store.get_kv("nerd_last_incident", {})
+                self.assertIn("council_votes", incident["checks"]["missing_tables"])
+            finally:
+                store.db.close()
+
+    def test_watchdog_detects_missing_council_grading_column(self):
+        import os
+        import tempfile
+        from bot.nerd import inspect_store
+        from bot.storage import Store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(os.path.join(tmp, "health.db"))
+            try:
+                store.db.execute("ALTER TABLE council_votes DROP COLUMN correct")
+                store.db.commit()
+                with self.assertRaisesRegex(RuntimeError, "required SQLite columns missing"):
+                    inspect_store(store)
+                incident = store.get_kv("nerd_last_incident", {})
+                self.assertIn("correct", incident["checks"]["missing_columns"]["council_votes"])
+            finally:
+                store.db.close()
+
     def test_watchdog_detects_missing_critical_ledger_column(self):
         import os
         import tempfile
