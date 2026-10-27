@@ -23,6 +23,10 @@ jobs:
     if: ${{ inputs.confirm == 'YES' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Optional Hugging Face memory (bot/hf_memory.py): unset = bot-data only.
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_MEMORY_REPO: ${{ vars.HF_MEMORY_REPO }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
