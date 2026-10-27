@@ -45,6 +45,14 @@ class TestCrossExchangePriceComparison(unittest.TestCase):
         self.assertGreater(result["agreement_score"], 0)
         self.assertLessEqual(result["agreement_score"], 100)
 
+    def test_even_source_consensus_uses_midpoint_median(self):
+        now = 1000.0
+        a = SymbolAnalytics("BTC/USD", FakeBook(100.0, now))
+        a.add_reference("coinbase", now, 102.0)
+        result = a.source_consensus(now)
+        self.assertEqual(result["median_price"], 101.0)
+        self.assertAlmostEqual(result["spread_bps"], (2.0 / 101.0) * 10000)
+
     def test_consensus_score_is_unavailable_with_one_source(self):
         now = 1000.0
         a = SymbolAnalytics("BNB/USD", FakeBook(100.0, now))
