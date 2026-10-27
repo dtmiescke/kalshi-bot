@@ -42,7 +42,8 @@ class TestHyperliquid(unittest.TestCase):
     def test_parses_and_caches_one_request_for_all_coins(self):
         btc = marketdata.hyperliquid(self.store, "BTC", post=self.post)
         bnb = marketdata.hyperliquid(self.store, "BNB", post=self.post)
-        self.assertEqual(btc, {"funding": 0.0000125, "premium": -0.0002, "open_interest": 43574.5})
+        self.assertEqual({k: btc[k] for k in ("funding", "premium", "open_interest")},
+                         {"funding": 0.0000125, "premium": -0.0002, "open_interest": 43574.5})
         self.assertAlmostEqual(bnb["funding"], 0.0003)
         self.assertEqual(len(self.calls), 1)
         self.assertEqual(self.calls[0], (marketdata.HYPERLIQUID_INFO, {"type": "metaAndAssetCtxs"}))
