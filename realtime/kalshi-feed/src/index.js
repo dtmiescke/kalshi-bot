@@ -129,7 +129,7 @@ export class KalshiFeed extends DurableObject {
       server.send(JSON.stringify({ type: "relay_status", status: "connected", at: Date.now() }));
     } catch (error) {
       const detail = error instanceof Error
-        ? (error.message.match(/HTTP \\d{3}/)?.[0] || error.name || "connection error")
+        ? String(error.message || error.name || "connection error").replace(/[\\r\\n]/g, " ").slice(0, 120)
         : "connection error";
       console.error("Kalshi upstream connection failed:", detail);
       server.send(JSON.stringify({ type: "relay_status", status: "error",
