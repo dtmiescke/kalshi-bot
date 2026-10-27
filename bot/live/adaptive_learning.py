@@ -7,7 +7,7 @@ Persist state externally and version it; only train on resolved observations.
 from __future__ import annotations
 from collections import defaultdict, deque
 from math import isfinite
-from statistics import mean
+from statistics import mean, median
 
 
 class AdaptiveLearning:
@@ -212,7 +212,7 @@ def graded_price_discovery(store, min_samples=20, limit=5000):
         n = len(samples)
         report[source] = {
             "graded_snapshots": n,
-            "median_reported_follow_lag_s": round(sorted(lags)[n // 2], 3),
+            "median_reported_follow_lag_s": round(median(lags), 3),
             "mean_same_direction_rate": round(mean(rates), 4),
             "eligible_for_review": n >= int(min_samples),
             "warning": "Rolling receive-time diagnostics are observational; latency, sampling and market selection can bias them."
