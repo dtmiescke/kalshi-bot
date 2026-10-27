@@ -107,11 +107,12 @@ def persist_trade_review(store, bet):
     bet_id = bet.get("id")
     if bet_id is None or store.q("SELECT bet_id FROM trade_reviews WHERE bet_id=?", (bet_id,)):
         return False
-    ts = int(bet.get("graded_ts") or bet.get("ts") or 0)
+    entry_ts = int(bet.get("ts") or 0)
+    graded_ts = int(bet.get("graded_ts") or entry_ts)
     ticker = bet.get("ticker")
     signals = store.q("""SELECT signal, prob, confidence, detail, ts FROM signal_readings
         WHERE ticker=? AND ts BETWEEN ? AND ? ORDER BY ts DESC LIMIT 80""",
-        (ticker, max(0, ts - 900), ts + 1))
+        (ticker, max(0, entry_ts - 900), entry_ts + 1))
     snapshots = store.q("""SELECT ts, yes_bid, yes_ask, last_price, volume, open_interest
         FROM market_snapshots WHERE ticker=? AND ts BETWEEN ? AND ? ORDER BY ts DESC LIMIT 5""",
         (ticker, max(0, ts - 900), ts + 1))
@@ -119,11 +120,11 @@ def persist_trade_review(store, bet):
     encoded = json.dumps(review, ensure_ascii=False, sort_keys=True, default=str)
     cur = store.x("""INSERT OR IGNORE INTO trade_reviews
         (bet_id, ts, ticker, coin, outcome, pnl, review_json) VALUES(?,?,?,?,?,?,?)""",
-        (int(bet_id), int(bet.get("graded_ts") or 0), ticker,
+        (int(bet_id), graded_ts, ticker,
          review["observed"]["coin"], review["observed"]["outcome"], float(bet.get("pnl") or 0.0), encoded))
     if cur.rowcount == 1:
         store.x("INSERT INTO lessons(ts, model, text) VALUES(?,?,?)",
-                (int(bet.get("graded_ts") or 0), "trade_postmortem_v1", encoded))
+                (graded_ts, "trade_postmortem_v1", encoded))
         return True
     return False
 
