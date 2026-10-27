@@ -430,9 +430,16 @@ def main(argv=None):
         # 15-minute BTC/ETH/SOL/BNB contracts every minute.
         from .live.runner import run as run_live
         s.validate()
-        session_minutes = max(60.0, float(os.environ.get("CONTINUOUS_SESSION_MINUTES", "360")))
+        session_minutes = max(60.0, float(os.environ.get("CONTINUOUS_SESSION_MINUTES", "525600")))
         while True:
             try:
+                # Align each clean start/restart to a UTC quarter-hour boundary.
+                # Kalshi contract windows are themselves quarter-hour based.
+                now = time.time()
+                boundary = (int(now) // 900 + 1) * 900
+                wait_s = max(0.0, boundary - now)
+                logging.info("continuous runner aligning to next 15-minute boundary in %.1fs", wait_s)
+                time.sleep(wait_s)
                 started = time.time()
                 result = run_live(s, store, session_minutes, sports=False)
                 print("continuous session ended:", json.dumps({
