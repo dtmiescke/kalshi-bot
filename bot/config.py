@@ -152,8 +152,8 @@ class Settings:
 
     # --- risk caps (dollars) ------------------------------------------------
     bankroll: float = field(default_factory=lambda: _env_float("BANKROLL", 200000.0))
-    min_per_bet: float = field(default_factory=lambda: _env_float("MIN_PER_BET", 500.0))
-    max_per_bet: float = field(default_factory=lambda: _env_float("MAX_PER_BET", 750.0))
+    min_per_bet: float = field(default_factory=lambda: _env_float("MIN_PER_BET", 25.0))
+    max_per_bet: float = field(default_factory=lambda: _env_float("MAX_PER_BET", 100.0))
     max_per_game: float = field(default_factory=lambda: _env_float("MAX_PER_GAME", 750.0))
     max_per_day: float = field(default_factory=lambda: _env_float("MAX_PER_DAY", 20000.0))
 
@@ -181,12 +181,12 @@ class Settings:
     # --- crypto 15-minute markets ----------------------------------------------
     crypto_enabled: bool = field(default_factory=lambda: _env("CRYPTO_ENABLED", "yes") == "yes")
     crypto_min_edge: float = field(default_factory=lambda: _env_pct("CRYPTO_MIN_EDGE", 5))
-    crypto_min_bet: float = field(default_factory=lambda: _env_float("CRYPTO_MIN_BET", 500.0))
+    crypto_min_bet: float = field(default_factory=lambda: _env_float("CRYPTO_MIN_BET", 25.0))
     # Maximum crypto entries across all 15-minute series in a rolling hour.
     # This is a ceiling, not a quota; weak or unsafe opportunities are skipped.
     crypto_max_trades_per_hour: int = field(
         default_factory=lambda: _env_int("CRYPTO_MAX_TRADES_PER_HOUR", 12))
-    crypto_max_per_bet: float = field(default_factory=lambda: _env_float("CRYPTO_MAX_PER_BET", 750.0))
+    crypto_max_per_bet: float = field(default_factory=lambda: _env_float("CRYPTO_MAX_PER_BET", 100.0))
     # one window = BTC+ETH+SOL bets that settle together (they move together)
     crypto_max_per_window: float = field(
         default_factory=lambda: _env_float("CRYPTO_MAX_PER_WINDOW", 750.0))
