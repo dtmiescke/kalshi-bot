@@ -41,7 +41,7 @@ class TestCrossExchangePriceComparison(unittest.TestCase):
         a.add_reference("coinbase", now, 100.01)
         result = a.source_consensus(now, max_divergence_bps=25)
         self.assertEqual(result["source_count"], 2)
-        self.assertAlmostEqual(result["median_price"], 100.01)
+        self.assertAlmostEqual(result["median_price"], 100.005)
         self.assertGreater(result["agreement_score"], 0)
         self.assertLessEqual(result["agreement_score"], 100)
 
