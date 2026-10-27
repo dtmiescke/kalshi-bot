@@ -430,6 +430,7 @@ def main(argv=None):
         # 15-minute BTC/ETH/SOL/BNB contracts every minute.
         from .live.runner import run as run_live
         s.validate()
+        os.environ["ALIGN_15M_START"] = "yes"
         session_minutes = max(60.0, float(os.environ.get("CONTINUOUS_SESSION_MINUTES", "525600")))
         while True:
             try:
