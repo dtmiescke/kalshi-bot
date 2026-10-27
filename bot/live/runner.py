@@ -32,6 +32,7 @@ from ..signals.base import Reading, clamp
 from . import feeds, settlement
 from .analytics import SymbolAnalytics, minute_candles
 from .chart_setups import analyze_chart_setups
+from .price_discovery import estimate_price_discovery
 from .edge_quality import edge_quality, enrich_plan
 from .book import OrderBook
 from .kalshi_book import KalshiBook
@@ -65,6 +66,7 @@ class LiveRunner:
         self.markets = {}         # ticker -> {"series", "event", "raw", "terms"}
         self.books = {}           # ticker -> KalshiBook
         self.ticker_updates = {}   # ticker -> latest official Kalshi ticker event
+        self.ticker_update_history = {}  # ticker -> bounded receive-time YES-mid history
         self.pending = set()      # tickers under council review
         self.last_saved = {}
         self.last_flow_poll = {}  # REST trade-flow polling is throttled per market
@@ -339,10 +341,11 @@ class LiveRunner:
         feats = rinfo.get("features") or {}
         spot_summary = a.summary(now)
         chart_setups = analyze_chart_setups(candles, book_imbalance=spot_summary.get("book_imbalance_0.1%"), aggressor_imbalance=spot_summary.get("flow_60s", {}).get("aggressor_imbalance"))
+        price_discovery = estimate_price_discovery(a.price_events, self.ticker_update_history.get(ticker, []))
         context = {"ticker": ticker, "secs_left": round(terms["close_ts"] - now), "contract": terms,
                    "kalshi_yes_bid": best_yes_bid, "kalshi_yes_ask": best_yes_ask,
                    "kalshi_book_age_s": round(book.age() if book.age() is not None else 99, 2),
-                   "spot": spot_summary, "chart_setups": chart_setups, "market_context": rinfo.get("context", {}),
+                   "spot": spot_summary, "chart_setups": chart_setups, "price_discovery": price_discovery, "market_context": rinfo.get("context", {}),
                    "vol_forecast_per_min": rinfo.get("sigma"),
                    "indicators": {k: round(v, 3) for k, v in feats.items()
                                   if k in ("rsi_1m", "rsi_5m", "rsi_15m", "macd_hist", "bb_pctb",
@@ -871,7 +874,7 @@ class LiveRunner:
             return asyncio.create_task(feeds.run_feed(
                 "kalshi", feeds.KALSHI_WS["demo" if self.s.mode == "demo" else "production"],
                 lambda: feeds.kalshi_subs(list(self.books)),
-                lambda m: feeds.handle_kalshi(m, self.books, self.ticker_updates),
+                lambda m: feeds.handle_kalshi(m, self.books, self.ticker_updates, self.ticker_update_history),
                 self._mark_kalshi_books_stale, stop,
                 headers_fn=lambda: signer._headers("GET", ""),
                 on_connect=lambda: setattr(self, "ws_connected", True)))
