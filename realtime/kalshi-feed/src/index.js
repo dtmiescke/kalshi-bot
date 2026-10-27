@@ -3,6 +3,11 @@ import { DurableObject } from "cloudflare:workers";
 const UPSTREAM = "https://external-api-ws.kalshi.com/trade-api/ws/v2";
 const SIGN_PATH = "/trade-api/ws/v2";
 const ALLOWED_CHANNELS = new Set(["ticker", "orderbook_delta", "trade"]);
+const MAX_CLIENTS = 20;
+const MAX_MESSAGE_BYTES = 16 * 1024;
+const MAX_MESSAGES_PER_WINDOW = 20;
+const MESSAGE_WINDOW_MS = 10_000;
+const TICKER_RE = /^KX[A-Z0-9_-]{2,100}$/;
 
 function b64(bytes) {
   let s = "";
@@ -72,12 +77,14 @@ export class KalshiFeed extends DurableObject {
     this.subscribedMarkets = new Set();
     this.lastMessageAt = 0;
     this.connecting = null;
+    this.clientRate = new WeakMap();
   }
 
   async fetch(request) {
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
       return new Response("WebSocket upgrade required", { status: 426 });
     }
+    if (this.clients.size >= MAX_CLIENTS) return new Response("Feed capacity reached", { status: 503, headers: { "retry-after": "10" } });
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
@@ -89,9 +96,9 @@ export class KalshiFeed extends DurableObject {
     try {
       await this.ensureUpstream();
       server.send(JSON.stringify({ type: "relay_status", status: "connected", at: Date.now() }));
-    } catch (error) {
+    } catch {
       server.send(JSON.stringify({ type: "relay_status", status: "error",
-        message: String(error?.message || error), at: Date.now() }));
+        message: "Upstream market-data connection failed; retry shortly", at: Date.now() }));
     }
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -127,6 +134,20 @@ export class KalshiFeed extends DurableObject {
   }
 
   async onClientMessage(client, raw) {
+    const rawText = typeof raw === "string" ? raw : "";
+    if (new TextEncoder().encode(rawText).byteLength > MAX_MESSAGE_BYTES) {
+      try { client.send(JSON.stringify({ type: "relay_error", message: "Message too large" })); } catch {}
+      return;
+    }
+    const now = Date.now();
+    const rate = this.clientRate.get(client) || { start: now, count: 0 };
+    if (now - rate.start >= MESSAGE_WINDOW_MS) { rate.start = now; rate.count = 0; }
+    rate.count += 1;
+    this.clientRate.set(client, rate);
+    if (rate.count > MAX_MESSAGES_PER_WINDOW) {
+      try { client.send(JSON.stringify({ type: "relay_error", message: "Rate limit exceeded; slow down" })); } catch {}
+      return;
+    }
     let msg;
     try { msg = JSON.parse(String(raw)); } catch {
       client.send(JSON.stringify({ type: "relay_error", message: "Invalid JSON" })); return;
@@ -136,6 +157,15 @@ export class KalshiFeed extends DurableObject {
     if (!["subscribe", "unsubscribe", "update_subscription"].includes(cmd)) {
       client.send(JSON.stringify({ type: "relay_error", message: "Command not allowed" })); return;
     }
+    if (cmd === "unsubscribe") {
+      const channels = params.channels;
+      const tickers = params.market_tickers ?? (params.market_ticker ? [params.market_ticker] : []);
+      if ((channels !== undefined && (!Array.isArray(channels) || channels.length > 3 || channels.some(ch => !ALLOWED_CHANNELS.has(ch)))) ||
+          !Array.isArray(tickers) || tickers.length > 250 ||
+          tickers.some(t => typeof t !== "string" || !TICKER_RE.test(t))) {
+        client.send(JSON.stringify({ type: "relay_error", message: "Invalid unsubscribe parameters" })); return;
+      }
+    }
     if (cmd === "subscribe") {
       const channels = Array.isArray(params.channels) ? params.channels : [];
       if (!channels.length || channels.some(ch => !ALLOWED_CHANNELS.has(ch))) {
@@ -143,7 +173,7 @@ export class KalshiFeed extends DurableObject {
       }
       const tickers = params.market_tickers ?? (params.market_ticker ? [params.market_ticker] : []);
       if (!Array.isArray(tickers) || tickers.length > 250 ||
-          tickers.some(t => typeof t !== "string" || !/^KX[A-Z0-9_-]{2,100}$/.test(t))) {
+          tickers.some(t => typeof t !== "string" || !TICKER_RE.test(t))) {
         client.send(JSON.stringify({ type: "relay_error", message: "Invalid market ticker list" })); return;
       }
       for (const t of tickers) this.subscribedMarkets.add(t);
@@ -158,8 +188,8 @@ export class KalshiFeed extends DurableObject {
       }
     }
     if (!this.upstreamReady || !this.upstream) {
-      try { await this.ensureUpstream(); } catch (error) {
-        client.send(JSON.stringify({ type: "relay_error", message: String(error?.message || error) })); return;
+      try { await this.ensureUpstream(); } catch {
+        client.send(JSON.stringify({ type: "relay_error", message: "Upstream market-data connection failed; retry shortly" })); return;
       }
     }
     try { this.upstream.send(JSON.stringify(msg)); }
