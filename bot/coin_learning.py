@@ -142,6 +142,20 @@ def persist_trade_review(store, bet):
     return False
 
 
+def backfill_trade_reviews(store, limit=5000):
+    """Create missing reviews for historical graded bets without changing ledger rows."""
+    rows = store.q("""SELECT * FROM bets WHERE status='graded' ORDER BY graded_ts DESC, id DESC LIMIT ?""",
+                   (int(limit),))
+    saved = 0
+    for row in rows:
+        try:
+            saved += int(bool(persist_trade_review(store, row)))
+        except Exception:
+            # One malformed historical row must not block review of the remaining ledger.
+            continue
+    return {"saved": saved, "scanned": len(rows)}
+
+
 def coin_report(store):
     rows = store.q("""SELECT series, ticker, side, result, pnl, stake FROM bets
         WHERE mode='paper' AND status='graded' ORDER BY graded_ts, id""")
