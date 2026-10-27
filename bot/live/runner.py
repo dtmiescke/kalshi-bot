@@ -34,6 +34,7 @@ from .analytics import SymbolAnalytics, minute_candles
 from .chart_setups import analyze_chart_setups
 from .price_discovery import estimate_price_discovery
 from .edge_quality import edge_quality, enrich_plan
+from .adaptive_learning import AdaptiveLearning, historical_setup_penalty
 from .book import OrderBook
 from .kalshi_book import KalshiBook
 
@@ -69,6 +70,7 @@ class LiveRunner:
         self.ticker_update_history = {}  # ticker -> bounded receive-time YES-mid history
         self.pending = set()      # tickers under council review
         self.last_saved = {}
+        self.last_adaptive_audit = {}
         self.last_flow_poll = {}  # REST trade-flow polling is throttled per market
         self.betting_ok, self.betting_why = True, "ok"
         self.summary = {"mode": self.s.mode, "markets": 0, "bets": 0, "skipped": {}, "alerts": []}
@@ -386,6 +388,40 @@ class LiveRunner:
                 continue
             self.store.set_kv(f"start_{ticker}", close_ts)
             self.store.set_kv(f"settle_after_{ticker}", close_ts + 300)
+            # Keep one research snapshot every 30s. The grader scores only the
+            # canonical pre-close decision cutoff, preventing per-second samples
+            # from inflating the learning set. Research rows never place orders.
+            if now - self.last_adaptive_audit.get(ticker, 0) >= 30:
+                model_prob, _ = brain.blend(readings, weights)
+                if model_prob is not None:
+                    model_prob = brain.calibrate(model_prob, self.store, domain="crypto")
+                    yes_bid = ctx.get("kalshi_yes_bid")
+                    yes_ask = ctx.get("kalshi_yes_ask")
+                    market_mid = ((float(yes_bid) + float(yes_ask)) / 2.0
+                                  if yes_bid is not None and yes_ask is not None else None)
+                    spot_summary = ctx.get("spot", {})
+                    regime = AdaptiveLearning.regime({
+                        "realized_volatility": spot_summary.get("realized_vol_per_min"),
+                        "spread_bps": (((float(yes_ask) - float(yes_bid)) * 10000.0 / market_mid)
+                                       if market_mid and yes_bid is not None and yes_ask is not None else 0),
+                        "source_divergence_bps": spot_summary.get("source_divergence_bps", 0),
+                        "book_imbalance": spot_summary.get("book_imbalance_0.1%", 0),
+                        "trend_strength": ctx.get("indicators", {}).get("adx_1m", 0),
+                    })
+                    self.store.add_decision_audit({
+                        "ts": int(now), "ticker": ticker, "event_ticker": info.get("event"),
+                        "series": info.get("series"), "decision": "research",
+                        "reason": "chart/setup learning snapshot; no order implied",
+                        "side": "yes" if model_prob >= (market_mid if market_mid is not None else 0.5) else "no",
+                        "market_price": market_mid, "model_prob": model_prob,
+                        "side_prob": max(model_prob, 1-model_prob),
+                        "edge": (abs(model_prob-market_mid) if market_mid is not None else None),
+                        "confidence": max((float(getattr(x, "confidence", 0) or 0) for x in readings), default=0),
+                        "signals": {"chart_setups": [x.get("name") for x in ctx.get("chart_setups", {}).get("setups", [])],
+                                    "regime": regime, "indicators": ctx.get("indicators", {}),
+                                    "source_divergence_bps": spot_summary.get("source_divergence_bps")},
+                    })
+                    self.last_adaptive_audit[ticker] = now
             if now - self.last_saved.get(ticker, 0) >= 30:
                 for r in readings:
                     self.store.add_signal(int(now), ticker, r.name, r.prob, r.confidence, r.detail)
@@ -403,6 +439,20 @@ class LiveRunner:
             if not plan:
                 continue
             snap, p, prob, conf = plan
+            setup_names = [x.get("name") for x in ctx.get("chart_setups", {}).get("setups", [])]
+            regime = AdaptiveLearning.regime({
+                "realized_volatility": ctx.get("spot", {}).get("realized_vol_per_min"),
+                "source_divergence_bps": ctx.get("spot", {}).get("source_divergence_bps", 0),
+                "book_imbalance": ctx.get("spot", {}).get("book_imbalance_0.1%", 0),
+                "trend_strength": ctx.get("indicators", {}).get("adx_1m", 0),
+            })
+            adaptive = historical_setup_penalty(self.store, setup_names, regime=regime)
+            required_after_learning = float(self.s.crypto_min_edge) + adaptive["surcharge"]
+            p["adaptive_learning"] = adaptive
+            p["adaptive_required_edge"] = round(required_after_learning, 5)
+            if float(p.get("edge", 0) or 0) < required_after_learning:
+                self._skip("adaptive setup history requires stronger edge")
+                continue
             group_key = (info["series"], close_ts)
             candidate = (float(p.get("edge", 0.0)), float(conf or 0.0),
                          ticker, readings, ctx, plan, lock_key, close_ts)
