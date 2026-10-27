@@ -18,6 +18,7 @@ class SymbolAnalytics:
         self.other_prices = {}                # exchange -> (ts, price) for the composite
         self.gaps = 0                         # feed problems seen (sequence gaps, reconnects)
         self.cb_trades = deque(maxlen=50000)  # Coinbase trades: (ts, price, size)
+        self.price_events = deque(maxlen=20000)  # observed receive-time price events for lead/lag study
 
     # --- inputs ------------------------------------------------------------------
     def add_trade(self, ts, price, qty, side):
@@ -27,13 +28,20 @@ class SymbolAnalytics:
         self.cb_trades.append((ts, float(price), float(size)))
 
     def add_reference(self, exchange, ts, price):
-        self.other_prices[exchange] = (ts, float(price))
+        price = float(price)
+        self.other_prices[exchange] = (ts, price)
+        received = time.time()
+        if math.isfinite(price) and price > 0:
+            self.price_events.append({"source": str(exchange), "event_ts": float(ts),
+                                      "received_ts": received, "price": price})
 
     def sample(self, now=None):
         now = now or time.time()
         m = self.book.mid()
         if m:
             self.mids.append((now, m))
+            self.price_events.append({"source": "kraken", "event_ts": now,
+                                      "received_ts": now, "price": float(m)})
 
     # --- helpers -----------------------------------------------------------------
     def _mid_ago(self, seconds, now):
@@ -201,7 +209,7 @@ class SymbolAnalytics:
         }
 
 
-def minute_candles(analytics, now=None, history=None, n=300):
+def minute_candles(analytics, now=None, history=None, n=900):
     """1-minute OHLCV candles for the features.
 
     Built from COINBASE trades (live "matches" stream) on top of Coinbase's own
@@ -209,6 +217,7 @@ def minute_candles(analytics, now=None, history=None, n=300):
     kind of data the model was trained on (no train/serve skew). Falls back to
     Kraken mids only for minutes with no Coinbase data at all."""
     now = now or time.time()
+    # Retain enough 1-minute history for 20+ complete 30-minute bars after warm-up.
     bars = {c["ts"]: dict(c) for c in (history or [])}
     live = {}
     for ts, p, q in analytics.cb_trades:

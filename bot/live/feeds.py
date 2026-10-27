@@ -74,7 +74,7 @@ def handle_coinbase(msg, analytics_by_product):
         a.add_cb_trade(_ts(msg.get("time")), msg["price"], msg.get("size", 0))
 
 
-def handle_kalshi(msg, books, ticker_updates=None):
+def handle_kalshi(msg, books, ticker_updates=None, ticker_update_history=None):
     """Update order books and the latest ticker snapshot from Kalshi messages."""
     typ, body = msg.get("type"), msg.get("msg", {})
     ticker = body.get("market_ticker")
@@ -85,11 +85,25 @@ def handle_kalshi(msg, books, ticker_updates=None):
                       "volume_fp", "open_interest_fp", "dollar_volume",
                       "dollar_open_interest", "yes_bid_size_fp", "yes_ask_size_fp",
                       "last_trade_size_fp", "ts", "ts_ms", "time")
-            ticker_updates[ticker] = {
+            received = time.time()
+            row = {
                 "market_ticker": ticker,
                 **{key: body[key] for key in fields if key in body},
-                "received_ts": time.time(),
+                "received_ts": received,
             }
+            try:
+                bid = float(body.get("yes_bid_dollars"))
+                ask = float(body.get("yes_ask_dollars"))
+                if 0 <= bid <= 1 and 0 <= ask <= 1 and ask >= bid:
+                    row["yes_mid"] = (bid + ask) / 2.0
+            except (TypeError, ValueError):
+                pass
+            ticker_updates[ticker] = row
+            if ticker_update_history is not None and row.get("yes_mid") is not None:
+                history = ticker_update_history.setdefault(ticker, [])
+                history.append({"received_ts": received, "yes_mid": row["yes_mid"]})
+                if len(history) > 2000:
+                    del history[:-2000]
         return
     book = books.get(ticker)
     if not book:

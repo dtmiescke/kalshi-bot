@@ -31,6 +31,11 @@ from ..signals import implied_vol as iv
 from ..signals.base import Reading, clamp
 from . import feeds, settlement
 from .analytics import SymbolAnalytics, minute_candles
+from .chart_setups import analyze_chart_setups, analyze_multi_timeframe
+from .price_discovery import estimate_price_discovery
+from .edge_quality import edge_quality, enrich_plan
+from .adaptive_learning import AdaptiveLearning, graded_setup_performance, graded_price_discovery, historical_setup_penalty
+from .edge_research import classify_regime, evidence_score, graded_feature_drift
 from .book import OrderBook
 from .kalshi_book import KalshiBook
 
@@ -63,8 +68,11 @@ class LiveRunner:
         self.markets = {}         # ticker -> {"series", "event", "raw", "terms"}
         self.books = {}           # ticker -> KalshiBook
         self.ticker_updates = {}   # ticker -> latest official Kalshi ticker event
+        self.ticker_update_history = {}  # ticker -> bounded receive-time YES-mid history
         self.pending = set()      # tickers under council review
         self.last_saved = {}
+        self.last_adaptive_audit = {}
+        self.adaptive_report_cache = {"ts": 0.0, "report": {}}
         self.last_flow_poll = {}  # REST trade-flow polling is throttled per market
         self.betting_ok, self.betting_why = True, "ok"
         self.summary = {"mode": self.s.mode, "markets": 0, "bets": 0, "skipped": {}, "alerts": []}
@@ -335,10 +343,14 @@ class LiveRunner:
         if rinfo.get("vol_parts") and spot:
             self._vol_sample(info["series"], now, spot, rinfo["vol_parts"])
         feats = rinfo.get("features") or {}
+        spot_summary = a.summary(now)
+        chart_setups = analyze_chart_setups(candles, book_imbalance=spot_summary.get("book_imbalance_0.1%"), aggressor_imbalance=spot_summary.get("flow_60s", {}).get("aggressor_imbalance"))
+        multi_timeframe = analyze_multi_timeframe(candles, book_imbalance=spot_summary.get("book_imbalance_0.1%"), aggressor_imbalance=spot_summary.get("flow_60s", {}).get("aggressor_imbalance"))
+        price_discovery = estimate_price_discovery(a.price_events, self.ticker_update_history.get(ticker, []))
         context = {"ticker": ticker, "secs_left": round(terms["close_ts"] - now), "contract": terms,
                    "kalshi_yes_bid": best_yes_bid, "kalshi_yes_ask": best_yes_ask,
                    "kalshi_book_age_s": round(book.age() if book.age() is not None else 99, 2),
-                   "spot": a.summary(now), "market_context": rinfo.get("context", {}),
+                   "spot": spot_summary, "chart_setups": chart_setups, "multi_timeframe": multi_timeframe, "price_discovery": price_discovery, "market_context": rinfo.get("context", {}),
                    "vol_forecast_per_min": rinfo.get("sigma"),
                    "indicators": {k: round(v, 3) for k, v in feats.items()
                                   if k in ("rsi_1m", "rsi_5m", "rsi_15m", "macd_hist", "bb_pctb",
@@ -366,6 +378,38 @@ class LiveRunner:
             self.check_exits(now)
         self.learn_vol(now)
         weights = brain.get_weights(self.store, "crypto")
+        if now - self.adaptive_report_cache["ts"] >= 60:
+            try:
+                setup_report = graded_setup_performance(self.store)
+                discovery_report = graded_price_discovery(self.store)
+                drift_report = graded_feature_drift(self.store)
+                # Evidence scores rank research maturity, not probability of winning.
+                for item in setup_report.values():
+                    item["evidence_quality_score"] = evidence_score(
+                        samples=item.get("samples", 0),
+                        brier=item.get("model_brier"),
+                        baseline_brier=item.get("market_brier"),
+                    )
+                    item["promotion_allowed"] = False  # OOS/cost/drawdown validation required
+                self.adaptive_report_cache = {
+                    "ts": now, "report": setup_report,
+                    "price_discovery": discovery_report,
+                    "feature_drift": drift_report,
+                }
+                self.store.set_kv("crypto_adaptive_research", {
+                    "ts": int(now), "setup_performance": setup_report,
+                    "price_discovery": discovery_report,
+                    "feature_drift": drift_report,
+                    "research_policy": {
+                        "live_auto_promotion": False,
+                        "requires_walk_forward": True,
+                        "requires_fees_slippage_and_fill_model": True,
+                        "requires_drawdown_and_drift_review": True,
+                    },
+                    "note": "Settled canonical forecast diagnostics only; observational research, not proof of profit."
+                })
+            except Exception as exc:
+                log.warning("adaptive research refresh failed: %s", exc)
         candidates = {}
         for ticker, info in list(self.markets.items()):
             if ticker in self.pending or ticker in self.makers or ticker not in self.books:
@@ -379,6 +423,51 @@ class LiveRunner:
                 continue
             self.store.set_kv(f"start_{ticker}", close_ts)
             self.store.set_kv(f"settle_after_{ticker}", close_ts + 300)
+            # Keep one research snapshot every 30s. The grader scores only the
+            # canonical pre-close decision cutoff, preventing per-second samples
+            # from inflating the learning set. Research rows never place orders.
+            if now - self.last_adaptive_audit.get(ticker, 0) >= 30:
+                model_prob, _ = brain.blend(readings, weights)
+                if model_prob is not None:
+                    model_prob = brain.calibrate(model_prob, self.store, domain="crypto")
+                    yes_bid = ctx.get("kalshi_yes_bid")
+                    yes_ask = ctx.get("kalshi_yes_ask")
+                    market_mid = ((float(yes_bid) + float(yes_ask)) / 2.0
+                                  if yes_bid is not None and yes_ask is not None else None)
+                    spot_summary = ctx.get("spot", {})
+                    regime = AdaptiveLearning.regime({
+                        "realized_volatility": spot_summary.get("vol_per_min"),
+                        "spread_bps": (((float(yes_ask) - float(yes_bid)) * 10000.0 / market_mid)
+                                       if market_mid and yes_bid is not None and yes_ask is not None else 0),
+                        "source_divergence_bps": spot_summary.get("source_divergence_bps", 0),
+                        "book_imbalance": spot_summary.get("book_imbalance_0.1%", 0),
+                        "trend_strength": min(1.0, max(0.0, float(ctx.get("indicators", {}).get("adx_1m", 0) or 0) / 100.0)),
+                    })
+                    self.store.add_decision_audit({
+                        "ts": int(now), "ticker": ticker, "event_ticker": info.get("event"),
+                        "series": info.get("series"), "decision": "research",
+                        "reason": "chart/setup learning snapshot; no order implied",
+                        "side": "yes" if model_prob >= (market_mid if market_mid is not None else 0.5) else "no",
+                        "market_price": market_mid, "model_prob": model_prob,
+                        "side_prob": max(model_prob, 1-model_prob),
+                        "edge": (abs(model_prob-market_mid) if market_mid is not None else None),
+                        "confidence": max((float(getattr(x, "confidence", 0) or 0) for x in readings), default=0),
+                        "signals": {"chart_setups": [x.get("name") for x in ctx.get("chart_setups", {}).get("setups", [])],
+                                    "regime": regime,
+                                    "regime_tags": classify_regime({
+                                        "volatility_ratio": None,  # no comparable baseline window; do not fabricate a shock score
+                                        "trend_strength": float(ctx.get("indicators", {}).get("adx_1m", 0) or 0) / 100.0,
+                                        "source_divergence_bps": spot_summary.get("source_divergence_bps"),
+                                        "spread_bps": (((float(yes_ask) - float(yes_bid)) * 10000.0 / market_mid)
+                                                       if market_mid and yes_bid is not None and yes_ask is not None else 0),
+                                        "book_imbalance": spot_summary.get("book_imbalance_0.1%"),
+                                    }),
+                                    "indicators": ctx.get("indicators", {}),
+                                    "source_divergence_bps": spot_summary.get("source_divergence_bps"),
+                                    "multi_timeframe": ctx.get("multi_timeframe", {}),
+                                    "price_discovery": ctx.get("price_discovery", {})},
+                    })
+                    self.last_adaptive_audit[ticker] = now
             if now - self.last_saved.get(ticker, 0) >= 30:
                 for r in readings:
                     self.store.add_signal(int(now), ticker, r.name, r.prob, r.confidence, r.detail)
@@ -396,6 +485,20 @@ class LiveRunner:
             if not plan:
                 continue
             snap, p, prob, conf = plan
+            setup_names = [x.get("name") for x in ctx.get("chart_setups", {}).get("setups", [])]
+            regime = AdaptiveLearning.regime({
+                "realized_volatility": ctx.get("spot", {}).get("vol_per_min"),
+                "source_divergence_bps": ctx.get("spot", {}).get("source_divergence_bps", 0),
+                "book_imbalance": ctx.get("spot", {}).get("book_imbalance_0.1%", 0),
+                "trend_strength": min(1.0, max(0.0, float(ctx.get("indicators", {}).get("adx_1m", 0) or 0) / 100.0)),
+            })
+            adaptive = historical_setup_penalty(self.store, setup_names, regime=regime, report=self.adaptive_report_cache["report"])
+            required_after_learning = float(self.s.crypto_min_edge) + adaptive["surcharge"]
+            p["adaptive_learning"] = adaptive
+            p["adaptive_required_edge"] = round(required_after_learning, 5)
+            if float(p.get("edge", 0) or 0) < required_after_learning:
+                self._skip("adaptive setup history requires stronger edge")
+                continue
             group_key = (info["series"], close_ts)
             candidate = (float(p.get("edge", 0.0)), float(conf or 0.0),
                          ticker, readings, ctx, plan, lock_key, close_ts)
@@ -443,10 +546,21 @@ class LiveRunner:
         if meta and any(r.name == "ml_model" for r in readings):
             # the promoted model says which edge level actually paid on unseen data
             min_edge = max(min_edge, float(meta.get("min_edge", min_edge)))
+        # Tighten the required edge when independent model views disagree or
+        # reference prices are sparse/divergent. The underlying probability is
+        # unchanged; this is a transparent uncertainty margin, not fake alpha.
+        analytics = self.coins[info["series"]]
+        source_summary = analytics.source_consensus(now=time.time(), max_age=5)
+        quality = edge_quality(readings, source_summary)
+        required_edge = min_edge + quality["min_edge_surcharge"]
+        quality["base_min_edge"] = round(min_edge, 5)
+        quality["required_min_edge"] = round(required_edge, 5)
         plan, why = risk.decide(self.s, self.store, snap, prob, conf,
                                 self.books[ticker].as_rest_book(),
-                                min_edge=min_edge, max_per_bet=self.s.crypto_max_per_bet,
+                                min_edge=required_edge, max_per_bet=self.s.crypto_max_per_bet,
                                 maker=maker, raw_model_prob=risk.crypto_model_prob(readings))
+        if plan:
+            enrich_plan(plan, quality, prob)
         return (snap, plan, prob, conf) if plan else None
 
     def finish(self, ticker, readings, ctx, plan, verdict):
@@ -856,7 +970,7 @@ class LiveRunner:
             return asyncio.create_task(feeds.run_feed(
                 "kalshi", feeds.KALSHI_WS["demo" if self.s.mode == "demo" else "production"],
                 lambda: feeds.kalshi_subs(list(self.books)),
-                lambda m: feeds.handle_kalshi(m, self.books, self.ticker_updates),
+                lambda m: feeds.handle_kalshi(m, self.books, self.ticker_updates, self.ticker_update_history),
                 self._mark_kalshi_books_stale, stop,
                 headers_fn=lambda: signer._headers("GET", ""),
                 on_connect=lambda: setattr(self, "ws_connected", True)))
