@@ -50,10 +50,26 @@ finally:
 PY
 gzip -n -c "$WORK/bot.snapshot.sqlite" > "$WORK/bot.sqlite.gz"
 rm -f "$WORK/bot.snapshot.sqlite"
-# GitHub rejects files over 100 MB. Alert at 80% so the janitors' retention can
-# be tightened before memory stops saving; refuse a push that would fail anyway.
+# With Hugging Face memory configured the database goes there (no 100 MB limit,
+# same refuse-if-moved guard); bot-data then carries only the small files the
+# app reads. Without it, the GitHub size guard below applies as before.
 SIZE=$(stat -c %s "$WORK/bot.sqlite.gz")
-if [ "$SIZE" -ge 95000000 ]; then
+if python -m bot.hf_memory enabled; then
+  hf_base=$(cat data/.memory_base_hf 2>/dev/null || echo missing)
+  if [ "$hf_base" = "missing" ]; then
+    echo "ERROR: Hugging Face memory is configured but this run did not restore from it; not saving." >&2
+    exit 1
+  fi
+  if hf_new=$(timeout --foreground "${GIT_REMOTE_TIMEOUT_SECONDS}s" python -m bot.hf_memory save "$WORK/bot.sqlite.gz" "$hf_base"); then
+    echo "$hf_new" | tail -1 > data/.memory_base_hf
+    echo "Memory ($SIZE bytes) saved to Hugging Face."
+    rm -f "$WORK/bot.sqlite.gz"
+  else
+    echo "ERROR: Hugging Face memory save failed or memory moved since restore; not saved." >&2
+    python -c 'import sys; from bot import alerts; alerts.send("Memory save failed", sys.argv[1], priority="high", tags=["warning"])' "Hugging Face upload failed; this run's memory was not saved." || true
+    exit 1
+  fi
+elif [ "$SIZE" -ge 95000000 ]; then
   echo "ERROR: bot.sqlite.gz is $SIZE bytes, too close to GitHub's 100 MB file limit; not saving." >&2
   python -c 'import sys; from bot import alerts; alerts.send("Memory too big to save", sys.argv[1], priority="urgent", tags=["warning"])' "bot.sqlite.gz is $SIZE bytes; memory was NOT saved." || true
   exit 1
