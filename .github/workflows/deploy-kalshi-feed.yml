@@ -68,7 +68,33 @@ jobs:
 
       - name: Deploy Worker and Durable Object
         working-directory: realtime/kalshi-feed
-        run: wrangler deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          wrangler deploy 2>&1 | tee /tmp/wrangler-deploy.log
+          WORKER_URL="$(grep -Eo 'https://[A-Za-z0-9.-]+\.workers\.dev' /tmp/wrangler-deploy.log | tail -n 1 || true)"
+          if [ -z "$WORKER_URL" ]; then
+            echo "::error::Could not discover the deployed workers.dev URL from Wrangler output."
+            exit 1
+          fi
+          echo "Deployed Worker URL: $WORKER_URL"
+          echo "WORKER_URL=$WORKER_URL" >> "$GITHUB_ENV"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Verify deployed health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 10); do
+            if curl --fail --silent --show-error --max-time 10 "$WORKER_URL/health" -o /tmp/feed-health.json; then
+              cat /tmp/feed-health.json
+              node -e 'const fs=require("fs"); const h=JSON.parse(fs.readFileSync("/tmp/feed-health.json","utf8")); if (h.ok !== true || h.service !== "kalshi-readonly-feed" || h.credentialsConfigured !== true) { console.error("Health check failed: service or credential configuration is not ready"); process.exit(1); }'
+              exit 0
+            fi
+            echo "Health check attempt $attempt/10 failed; retrying shortly."
+            sleep 3
+          done
+          echo "::error::Deployed Worker health check did not pass."
+          exit 1
