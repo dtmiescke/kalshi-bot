@@ -461,7 +461,9 @@ def main(argv=None):
         return
     if cmd == "trade-learning":
         from . import coin_learning
-        print(coin_learning.format_learning_summary(coin_learning.learning_summary(store)))
+        print(coin_learning.format_learning_summary(
+            coin_learning.learning_summary(store),
+            setups=coin_learning.setup_performance(store)))
         return
     if cmd == "auto":
         last = store.get_kv("last_full_scan", 0)
