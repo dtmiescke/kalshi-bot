@@ -122,8 +122,16 @@ RAW_RETENTION = {
 # Narrower windows for parts of a table: (table, time column, row filter, days).
 # Crypto 15-minute markets print ~130k trades an hour, but their readers look
 # back 5 minutes (live runner) or 15 minutes (snapshot runs), so an hour is plenty.
+# Crypto snapshots and readings (15-minute windows and the hourly/daily ladders)
+# arrive every 30 s per market for four coins, ~90k signal rows a day. Their
+# readers (grading, the price-gap check, trade reviews) run within hours of each
+# market settling, so 3 days is plenty; sports keep the longer windows.
+CRYPTO_TICKERS = "(" + " OR ".join(f"ticker LIKE '{p}%'" for p in
+                                   ("KXBTC", "KXETH", "KXSOL", "KXBNB")) + ")"
 RAW_RETENTION_SUBSETS = (
     ("flow_trades", "ts", "ticker LIKE 'KX%15M-%'", 1 / 24),
+    ("signal_readings", "ts", CRYPTO_TICKERS, 3),
+    ("market_snapshots", "ts", CRYPTO_TICKERS, 3),
 )
 
 
