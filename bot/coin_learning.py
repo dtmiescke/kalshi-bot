@@ -219,7 +219,7 @@ def format_learning_summary(rows, min_samples=20, setups=None):
         lines.append(f"{i}. {row['signal']}: {row['samples']} trades | profitable {rate} | "
                      f"net P&L ${row['net_profit']:.2f} | {note}")
     if setups is not None:
-        lines.append("\\nCHART SETUPS BY COIN")
+        lines.append("\nCHART SETUPS BY COIN")
         if not setups:
             lines.append("No named chart setups found in persisted trade snapshots yet.")
         for row in setups[:30]:
