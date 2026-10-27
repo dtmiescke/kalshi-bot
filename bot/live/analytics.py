@@ -18,6 +18,7 @@ class SymbolAnalytics:
         self.other_prices = {}                # exchange -> (ts, price) for the composite
         self.gaps = 0                         # feed problems seen (sequence gaps, reconnects)
         self.cb_trades = deque(maxlen=50000)  # Coinbase trades: (ts, price, size)
+        self.price_events = deque(maxlen=20000)  # observed receive-time price events for lead/lag study
 
     # --- inputs ------------------------------------------------------------------
     def add_trade(self, ts, price, qty, side):
@@ -27,13 +28,20 @@ class SymbolAnalytics:
         self.cb_trades.append((ts, float(price), float(size)))
 
     def add_reference(self, exchange, ts, price):
-        self.other_prices[exchange] = (ts, float(price))
+        price = float(price)
+        self.other_prices[exchange] = (ts, price)
+        received = time.time()
+        if math.isfinite(price) and price > 0:
+            self.price_events.append({"source": str(exchange), "event_ts": float(ts),
+                                      "received_ts": received, "price": price})
 
     def sample(self, now=None):
         now = now or time.time()
         m = self.book.mid()
         if m:
             self.mids.append((now, m))
+            self.price_events.append({"source": "kraken", "event_ts": now,
+                                      "received_ts": now, "price": float(m)})
 
     # --- helpers -----------------------------------------------------------------
     def _mid_ago(self, seconds, now):
