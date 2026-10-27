@@ -27,16 +27,21 @@ def coin_performance(rows):
         coin = coin_from_market(row.get("series"), row.get("ticker"))
         if coin == "OTHER":
             continue
-        b = buckets.setdefault(coin, {"coin": coin, "bets": 0, "wins": 0, "losses": 0,
-                                      "net_profit": 0.0, "total_stake": 0.0, "flat": 0,
+        b = buckets.setdefault(coin, {"coin": coin, "bets": 0, "settled": 0, "wins": 0, "losses": 0,
+                                      "profitable_trades": 0, "net_profit": 0.0, "total_stake": 0.0, "flat": 0,
                                       "gross_wins": 0.0, "gross_losses": 0.0})
         b["bets"] += 1
         pnl = float(row.get("pnl") or 0.0)
+        result, side = str(row.get("result") or "").lower(), str(row.get("side") or "").lower()
+        if result in ("yes", "no"):
+            b["settled"] += 1
+            if result == side:
+                b["wins"] += 1
+            else:
+                b["losses"] += 1
         if pnl > 0:
-            b["wins"] += 1
-        elif pnl < 0:
-            b["losses"] += 1
-        else:
+            b["profitable_trades"] += 1
+        elif pnl == 0:
             b["flat"] += 1
         b["net_profit"] += pnl
         b["total_stake"] += float(row.get("stake") or 0.0)
@@ -46,7 +51,8 @@ def coin_performance(rows):
             b["gross_losses"] += -pnl
     output = []
     for b in buckets.values():
-        b["win_rate"] = b["wins"] / b["bets"] if b["bets"] else None
+        b["win_rate"] = b["wins"] / b["settled"] if b["settled"] else None
+        b["profitable_trade_rate"] = b["profitable_trades"] / b["bets"] if b["bets"] else None
         b["roi_on_stake"] = b["net_profit"] / b["total_stake"] if b["total_stake"] else None
         b["profit_factor"] = (b["gross_wins"] / b["gross_losses"]
                               if b["gross_losses"] else (math.inf if b["gross_wins"] else None))
@@ -72,12 +78,13 @@ def build_trade_review(bet, nearby_signals=None, market_context=None):
     used, payload = _signal_names(bet.get("signals_json") or bet.get("signals") or {})
     side, result = str(bet.get("side") or "").lower(), str(bet.get("result") or "").lower()
     pnl = float(bet.get("pnl") or 0.0)
-    won = side == result
+    won = side == result and result in ("yes", "no")
+    trade_outcome = "win" if won else ("loss" if result in ("yes", "no") else "closed_early" if result == "sold" else "unknown")
     observed = {
         "bet_id": bet.get("id"), "ticker": bet.get("ticker"),
         "coin": coin_from_market(bet.get("series"), bet.get("ticker")),
         "series": bet.get("series"), "mode": bet.get("mode"), "side": side,
-        "result": result, "outcome": "win" if won else "loss", "pnl": round(pnl, 2),
+        "result": result, "outcome": trade_outcome, "pnl": round(pnl, 2),
         "price": bet.get("price"), "contracts": bet.get("contracts"), "fee": bet.get("fee"),
         "model_prob": bet.get("model_prob"), "confidence": bet.get("confidence"),
         "edge": bet.get("edge"), "clv": bet.get("clv"), "signals_used": used,
@@ -143,7 +150,7 @@ def coin_report(store):
     # Always show BTC, BNB, SOL and ETH, even before each has settled paper bets.
     for coin in ("BTC", "BNB", "SOL", "ETH"):
         by_coin.setdefault(coin, {
-            "coin": coin, "bets": 0, "wins": 0, "losses": 0, "flat": 0,
+            "coin": coin, "bets": 0, "settled": 0, "wins": 0, "losses": 0, "profitable_trades": 0, "flat": 0,
             "net_profit": 0.0, "total_stake": 0.0, "gross_wins": 0.0,
             "gross_losses": 0.0, "win_rate": None, "roi_on_stake": None,
             "profit_factor": None,
