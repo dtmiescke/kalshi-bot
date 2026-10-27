@@ -258,7 +258,7 @@ class TestRunnerSeedHistory(unittest.TestCase):
                          "open": 100 + i, "high": 101 + i,
                          "low": 99 + i, "volume": 1} for i in range(60)]
                 with mock.patch("bot.live.runner.crypto_sig.fetch_candles", return_value=good):
-                    with mock.patch("bot.live.runner.crypto_sig.fetch_kraken_candles") as kraken:
+                    with mock.patch("bot.live.runner.crypto_sig.fetch_kraken_candles", return_value=good) as kraken:
                         runner.seed_history()
                 for series in runner.coins:
                     self.assertEqual(len(runner.seed_candles[series]), 60)
