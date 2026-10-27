@@ -103,7 +103,8 @@ class LiveRunner:
             # Coinbase history is used only when that product actually exists.
             # BNB has no Coinbase USD product; its analytics safely warm from the
             # Kraken book/trade stream instead of silently mapping BNB to another coin.
-            candles = crypto_sig.fetch_candles(cb) if cb else []
+            candles = (crypto_sig.fetch_candles(cb) if cb else
+                       crypto_sig.fetch_kraken_candles(kr) if series == "KXBNB15M" else [])
             self.seed_candles[series] = candles
             for c in candles:
                 self.coins[series].mids.append((c["ts"], c["close"]))
