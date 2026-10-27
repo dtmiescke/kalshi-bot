@@ -14,7 +14,7 @@ FAKE_GH = """#!/usr/bin/env bash
 echo "$*" >> "$GH_LOG"
 case "$1 $2" in
   "api repos/"*) echo "$FAKE_STATE" ;;
-  "run list") echo "$FAKE_WAITING" ;;
+  "run list") case "$*" in *bot.yml*) echo "$FAKE_RECENT" ;; *) echo "$FAKE_WAITING" ;; esac ;;
   "workflow run") exit 0 ;;
   *) echo "unexpected gh call: $*" >&2; exit 9 ;;
 esac
@@ -22,14 +22,15 @@ esac
 
 
 class TestChainScript(unittest.TestCase):
-    def run_script(self, state="active", waiting="0", *args):
+    def run_script(self, state="active", waiting="0", *args, recent=""):
         with tempfile.TemporaryDirectory() as tmp:
             gh = Path(tmp) / "gh"
             gh.write_text(FAKE_GH, encoding="utf-8")
             gh.chmod(gh.stat().st_mode | stat.S_IEXEC)
             log = Path(tmp) / "gh.log"
             env = dict(os.environ, PATH=f"{tmp}:{os.environ['PATH']}", GH_LOG=str(log),
-                       FAKE_STATE=state, FAKE_WAITING=waiting,
+                       FAKE_STATE=state, FAKE_WAITING=waiting, FAKE_RECENT=recent,
+                       CHAIN_FAILURE_WAIT="0", NTFY_TOPIC="", PYTHONPATH=str(ROOT),
                        GITHUB_REPOSITORY="owner/kalshi-bot")
             out = subprocess.run(["bash", str(SCRIPT), *args], env=env, capture_output=True,
                                  text=True, check=True)
@@ -59,6 +60,22 @@ class TestChainScript(unittest.TestCase):
         self.assertEqual(len(self.dispatched(calls)), 1)
         self.assertFalse(any(c.startswith("run list") for c in calls))
 
+    def test_failed_run_still_queues_the_next(self):
+        out, calls = self.run_script("active", "0", "after-failure", recent="success,failure")
+        self.assertEqual(len(self.dispatched(calls)), 1)
+        self.assertIn("This run failed", out)
+
+    def test_third_failure_in_a_row_stops_chaining(self):
+        out, calls = self.run_script("active", "0", "after-failure", recent="failure,failure")
+        self.assertEqual(self.dispatched(calls), [])
+        self.assertIn("Third failed bot run in a row", out)
+
+    def test_failed_run_respects_pause_and_waiting_trainer(self):
+        _, calls = self.run_script("disabled_manually", "0", "after-failure", recent="success")
+        self.assertEqual(self.dispatched(calls), [])
+        _, calls = self.run_script("active", "1", "after-failure", recent="success")
+        self.assertEqual(self.dispatched(calls), [])
+
     def test_after_training_still_respects_pause(self):
         _, calls = self.run_script("disabled_manually", "0", "after-training")
         self.assertEqual(self.dispatched(calls), [])
@@ -83,10 +100,11 @@ class TestWorkflowWiring(unittest.TestCase):
         self.assertIn("  actions: write", wf)
         self.assertIn("id: save-memory", _step(wf, "Save memory"))
         chain = _step(wf, "Queue the next run")
-        for part in ("steps.save-memory.outcome == 'success'", "refs/heads/main",
-                     "vars.CHAIN_RUNS != 'no'", "run: bash .github/chain_next.sh"):
+        for part in ("!cancelled()", "steps.save-memory.outcome", "refs/heads/main",
+                     "vars.CHAIN_RUNS != 'no'", "bash .github/chain_next.sh",
+                     "bash .github/chain_next.sh after-failure"):
             self.assertIn(part, chain)
-        self.assertTrue(wf.rstrip().endswith("run: bash .github/chain_next.sh"))  # last step
+        self.assertTrue(wf.rstrip().endswith("fi"))  # the chain step is the last step
         # the cron fallback and the shared concurrency group stay in place
         self.assertIn('cron: "*/12 * * * *"', wf)
         self.assertIn("group: kalshi-bot", wf)

@@ -63,7 +63,34 @@ def endpoints_from_env(openrouter_key=None):
         eps.append(("litellm", chat_url, os.environ.get("LITELLM_API_KEY", "")))
     if openrouter_key:
         eps.append(("openrouter", URL, openrouter_key))
+    # Free fallbacks, tried after OpenRouter's free models: GitHub Models (the
+    # workflow's own token with `models: read`, no sign-up) and Google Gemini's
+    # OpenAI-compatible endpoint (free key). Both are optional.
+    gh = os.environ.get("GITHUB_MODELS_TOKEN", "")
+    if gh:
+        eps.append(("github", GITHUB_MODELS_URL, gh))
+    gem = os.environ.get("GEMINI_API_KEY", "")
+    if gem:
+        eps.append(("gemini", GEMINI_URL, gem))
     return eps
+
+
+GITHUB_MODELS_URL = "https://models.github.ai/inference/chat/completions"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+
+
+def fallback_models(endpoints):
+    """Labels for the free fallback endpoints that are configured."""
+    out = []
+    if "github" in endpoints:
+        out += [f"github|{m}" for m in _csv("GITHUB_MODELS_MODELS", "openai/gpt-4.1-mini")]
+    if "gemini" in endpoints:
+        out += [f"gemini|{m}" for m in _csv("GEMINI_MODELS", "gemini-2.0-flash")]
+    return out
+
+
+def _csv(name, default):
+    return [m.strip() for m in (os.environ.get(name) or default).split(",") if m.strip()]
 
 
 def models_from_env():
@@ -85,7 +112,8 @@ class LLM:
             models = (
                 ([f"omniroute|{m}" for m in om] if "omniroute" in self.endpoints else [])
                 + ([f"litellm|{m}" for m in lm] if "litellm" in self.endpoints else [])
-                + models_from_env()
+                + (models_from_env() if "openrouter" in self.endpoints else [])
+                + fallback_models(self.endpoints)
             )
         # labels: "omniroute|<model>", "litellm|<model>", or a plain OpenRouter model name
         self.models = models
