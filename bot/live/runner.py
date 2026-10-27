@@ -835,6 +835,14 @@ class LiveRunner:
             await asyncio.to_thread(self.seed_history)
         await asyncio.to_thread(self.discover)
         await asyncio.to_thread(self.refresh_context)
+        # Finish expensive warm-up before aligning feed startup. Every fresh
+        # runner session begins on a UTC 15-minute boundary, while the active
+        # loop then processes prices/signals continuously at one-second cadence.
+        now = time.time()
+        boundary = (int(now) // 900 + 1) * 900
+        wait_s = max(0.0, boundary - now)
+        log.info("feed startup aligned to next 15-minute boundary in %.1fs", wait_s)
+        await asyncio.sleep(wait_s)
         by_kraken = {kr: self.coins[s] for s, (kr, _, _) in COINS.items()}
         by_cb = {cb: self.coins[s] for s, (_, cb, _) in COINS.items() if cb}
         tasks = [
