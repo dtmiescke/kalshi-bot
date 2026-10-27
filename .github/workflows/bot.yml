@@ -38,8 +38,8 @@ jobs:
     # reads; unset = direct Kalshi. Never used for order books or orders.
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      HF_MEMORY_REPO: ${{ vars.HF_MEMORY_REPO }}
-      VAL_TOWN_KALSHI_URL: ${{ vars.VAL_TOWN_KALSHI_URL }}
+      HF_MEMORY_REPO: ${{ vars.HF_MEMORY_REPO || secrets.HF_MEMORY_REPO }}
+      VAL_TOWN_KALSHI_URL: ${{ vars.VAL_TOWN_KALSHI_URL || secrets.VAL_TOWN_KALSHI_URL }}
       ATI_INGEST_SHARED_TOKEN: ${{ secrets.ATI_INGEST_SHARED_TOKEN }}
     steps:
       - uses: actions/checkout@v5
