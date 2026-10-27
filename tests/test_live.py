@@ -464,3 +464,19 @@ class TestStrictMakerFillSafety(unittest.TestCase):
                         {"status": "resting", "fill_count_fp": raw}, 7),
                     (0, "resting", False)
                 )
+
+
+class TestFourCoinRunnerConfiguration(unittest.TestCase):
+    def test_all_four_series_have_unique_runner_mappings(self):
+        from bot.live.runner import COINS, COINS_TO_COIN
+        expected = {"KXBTC15M", "KXETH15M", "KXSOL15M", "KXBNB15M"}
+        self.assertEqual(set(COINS), expected)
+        self.assertEqual(set(COINS_TO_COIN), expected)
+        self.assertEqual(len(set(COINS_TO_COIN.values())), 4)
+        self.assertEqual(COINS["KXBNB15M"], ("BNB/USD", None, None))
+
+    def test_coinbase_subscription_omits_assets_without_products(self):
+        from bot.live.runner import COINS
+        products = {cb for _, cb, _ in COINS.values() if cb}
+        self.assertEqual(products, {"BTC-USD", "ETH-USD", "SOL-USD"})
+        self.assertNotIn(None, products)
