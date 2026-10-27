@@ -149,7 +149,7 @@ def graded_setup_performance(store, min_samples=20, limit=5000):
     return report
 
 
-def historical_setup_penalty(store, setup_names, regime="mixed", min_samples=20):
+def historical_setup_penalty(store, setup_names, regime="mixed", min_samples=20, report=None):
     """Return a bounded extra required edge only for adequately sampled weak setups.
 
     The maximum surcharge is 1.5 percentage points. Positive historical evidence
@@ -157,7 +157,7 @@ def historical_setup_penalty(store, setup_names, regime="mixed", min_samples=20)
     out-of-sample evaluation. This prevents a lucky in-sample streak from
     automatically increasing exposure.
     """
-    report = graded_setup_performance(store, min_samples=min_samples)
+    report = report if report is not None else graded_setup_performance(store, min_samples=min_samples)
     penalty = 0.0
     evidence = []
     for name in set(str(x) for x in (setup_names or [])):
