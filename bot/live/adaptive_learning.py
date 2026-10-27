@@ -149,7 +149,7 @@ def graded_setup_performance(store, min_samples=20, limit=5000):
     return report
 
 
-def historical_setup_penalty(store, setup_names, regime="mixed", min_samples=20, report=None):
+def historical_setup_penalty(store, setup_names, regime="mixed", min_samples=20, report=None, coin=None):
     """Return a bounded extra required edge only for adequately sampled weak setups.
 
     The maximum surcharge is 1.5 percentage points. Positive historical evidence
@@ -171,8 +171,55 @@ def historical_setup_penalty(store, setup_names, regime="mixed", min_samples=20,
         if gap > 0:
             penalty += min(0.005, gap * 0.05)
             evidence.append({"setup": name, "samples": row["samples"], "brier_gap": round(gap, 6)})
+    # Add a second, coin-specific check from actual graded paper-trade postmortems.
+    # This only tightens the edge hurdle when a setup has enough observations AND
+    # both net P&L and closing-line movement are weak; it never relaxes a gate.
+    if coin and setup_names:
+        try:
+            import json
+            reviews = store.q(
+                "SELECT review_json FROM trade_reviews WHERE coin=? ORDER BY ts DESC LIMIT 5000",
+                (str(coin).upper(),))
+            buckets = defaultdict(list)
+            for saved in reviews:
+                try:
+                    review = json.loads(saved.get("review_json") or "{}")
+                    obs = review.get("observed") or {}
+                    if str(obs.get("result") or "").lower() not in ("yes", "no"):
+                        continue
+                    payload = obs.get("signal_snapshot") or {}
+                    raw = payload.get("chart_setups") or payload.get("setups") or []
+                    names = set()
+                    if isinstance(raw, str):
+                        names.add(raw)
+                    elif isinstance(raw, list):
+                        for item in raw:
+                            if isinstance(item, str):
+                                names.add(item)
+                            elif isinstance(item, dict) and item.get("name"):
+                                names.add(str(item["name"]))
+                    for name in names:
+                        buckets[name].append({
+                            "pnl": float(obs.get("pnl") or 0),
+                            "clv": float(obs["clv"]) if obs.get("clv") is not None else None,
+                        })
+                except (TypeError, ValueError, AttributeError):
+                    continue
+            for name in set(str(x) for x in setup_names):
+                samples = buckets.get(name, [])
+                clv = [x["clv"] for x in samples if x["clv"] is not None]
+                net = sum(x["pnl"] for x in samples)
+                if len(samples) >= int(min_samples) and clv and net < 0 and sum(clv) / len(clv) < 0:
+                    penalty += 0.0025
+                    evidence.append({"setup": name, "coin": str(coin).upper(),
+                        "samples": len(samples), "net_pnl": round(net, 2),
+                        "avg_clv": round(sum(clv) / len(clv), 5),
+                        "source": "graded_paper_trade_reviews"})
+        except Exception:
+            # Review-ledger failures must not break the existing analysis path.
+            pass
     return {"surcharge": round(min(0.015, penalty), 5), "evidence": evidence,
-            "note": "Only weak, settled, sufficiently sampled setup-conditioned forecasts add a surcharge; positive results do not auto-increase risk."}
+            "note": "Only weak, settled, sufficiently sampled setup evidence can increase the required edge (max 1.5pp); positive results never lower risk gates."}
 
 
 def graded_price_discovery(store, min_samples=20, limit=5000):
