@@ -26,12 +26,16 @@ def coin_performance(rows):
     for row in rows:
         coin = coin_from_market(row.get("series"), row.get("ticker"))
         b = buckets.setdefault(coin, {"coin": coin, "bets": 0, "wins": 0, "losses": 0,
-                                      "net_profit": 0.0, "total_stake": 0.0,
+                                      "net_profit": 0.0, "total_stake": 0.0, "flat": 0,
                                       "gross_wins": 0.0, "gross_losses": 0.0})
         b["bets"] += 1
-        won = str(row.get("result") or "").lower() == str(row.get("side") or "").lower()
-        b["wins" if won else "losses"] += 1
         pnl = float(row.get("pnl") or 0.0)
+        if pnl > 0:
+            b["wins"] += 1
+        elif pnl < 0:
+            b["losses"] += 1
+        else:
+            b["flat"] += 1
         b["net_profit"] += pnl
         b["total_stake"] += float(row.get("stake") or 0.0)
         if pnl > 0:
