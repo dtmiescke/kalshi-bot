@@ -216,7 +216,16 @@ def spot_15m_monitor(store, coin, get=requests.get):
         if venue == "coinbase" and coin not in COINBASE_SPOT_PAIRS:
             out[venue] = None
             continue
-        out[venue] = _cached(store, f"spot15_{venue}_{coin}", 5, lambda fetcher=fetcher: fetcher(coin, get=get))
+        key = f"spot15_{venue}_{coin}"
+        cached = store.get_kv(key)
+        now = time.time()
+        if isinstance(cached, dict) and 0 <= now - float(cached.get("ts", 0)) < 300 and "v" in cached:
+            out[venue] = cached["v"]
+        else:
+            value = fetcher(coin, get=get)
+            # Cache misses too, so an upstream outage does not cause a request every second.
+            store.set_kv(key, {"ts": now, "v": value})
+            out[venue] = value
     cb, kr = out.get("coinbase"), out.get("kraken")
     out["cross_venue_basis_bps"] = (cb["close"] / kr["close"] - 1.0) * 10000.0 if cb and kr and cb.get("close") and kr.get("close") else None
     out["coin"] = coin
