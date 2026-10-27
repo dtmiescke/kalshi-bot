@@ -109,6 +109,39 @@ def strategy_readings(feats, base_prob, chart_indicators=None):
     return out
 
 
+HL_BASE_FUNDING = 0.0000125   # Hyperliquid's neutral hourly rate (0.01% per 8 hours)
+
+
+def perp_readings(ctx, base_prob):
+    """Two small views from Hyperliquid perps, each learned separately:
+    - crypto_perp_funding: crowded longs (funding well above neutral) lean the
+      price down, crowded shorts lean it up
+    - crypto_perp_premium: perps trading above the oracle price show buyers
+      leading spot, below it sellers
+    Each moves the contract price by at most 1.5 points."""
+    if not isinstance(ctx, dict) or base_prob is None:
+        return []
+    out = []
+    funding = ctx.get("hl_funding")
+    if isinstance(funding, (int, float)) and math.isfinite(funding):
+        excess_bps = (funding - HL_BASE_FUNDING) * 1e4          # per hour
+        crowd = max(-1.0, min(1.0, excess_bps / 2.0))
+        out.append(Reading("crypto_perp_funding",
+                           clamp(base_prob - 0.015 * crowd, 0.02, 0.98),
+                           0.05 + 0.15 * abs(crowd),
+                           {"funding_h": funding, "excess_bps_h": round(excess_bps, 4),
+                            "venue": "hyperliquid"}))
+    premium = ctx.get("hl_premium")
+    if isinstance(premium, (int, float)) and math.isfinite(premium):
+        prem_bps = premium * 1e4
+        lean = max(-1.0, min(1.0, prem_bps / 10.0))
+        out.append(Reading("crypto_perp_premium",
+                           clamp(base_prob + 0.015 * lean, 0.02, 0.98),
+                           0.05 + 0.15 * abs(lean),
+                           {"premium_bps": round(prem_bps, 3), "venue": "hyperliquid"}))
+    return out
+
+
 def coin_from_series(series):
     s = (series or "").upper()
     return next((c for c in ("BTC", "ETH", "SOL", "BNB") if s.startswith(f"KX{c}")), "BTC")
@@ -210,6 +243,8 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
             "source_count": len(spot_returns),
             "timeframe_minutes": 15,
         }))
+
+    readings.extend(perp_readings(ctx, p))
 
     if dv:
         pi = settlement.prob_above(spot, terms["strike"], iv.dvol_to_per_minute(dv), secs,

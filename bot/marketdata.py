@@ -5,6 +5,8 @@
 - Options put/call open-interest ratio (Deribit): demand for downside insurance
 - Coinbase vs Kraken price gap: US buying pressure often shows on Coinbase first
 - Fear & Greed index (alternative.me): daily crowd mood
+- Hyperliquid perps (all four coins, one request): hourly funding and the
+  perp-vs-oracle premium, a second derivatives venue that also covers BNB
 - Economic calendar (Forex Factory weekly feed): CPI, Fed, jobs, when vol spikes
 
 Each source fails quietly: missing context lowers confidence, it never
@@ -24,6 +26,7 @@ KRAKEN_PAIR = {"BTC": "XBTUSD", "ETH": "ETHUSD", "SOL": "SOLUSD"}
 DERIBIT_SUMMARY = "https://www.deribit.com/api/v2/public/get_book_summary_by_currency"
 FNG = "https://api.alternative.me/fng/"
 CALENDAR = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+HYPERLIQUID_INFO = "https://api.hyperliquid.xyz/info"
 
 
 def _get(url, params=None, timeout=10, get=requests.get):
@@ -65,6 +68,36 @@ def futures(store, coin, get=requests.get):
                 "open_interest": t.get("openInterest"),
                 "basis": (mark / index - 1) if mark and index else None}
     return _cached(store, f"fut_{coin}", 5, fetch)
+
+
+def _num(x):
+    try:
+        v = float(x)
+        return v if math.isfinite(v) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def hyperliquid(store, coin, post=requests.post):
+    """Hourly funding, perp premium over the oracle and open interest from
+    Hyperliquid's public info API. One cached request serves every coin."""
+    def fetch():
+        try:
+            r = post(HYPERLIQUID_INFO, json={"type": "metaAndAssetCtxs"}, timeout=10,
+                     headers={"User-Agent": "kalshi-bot"})
+            r.raise_for_status()
+            meta, ctxs = r.json()
+            out = {}
+            for asset, c in zip(meta.get("universe", []), ctxs):
+                name = asset.get("name")
+                if name in ("BTC", "ETH", "SOL", "BNB") and isinstance(c, dict):
+                    out[name] = {"funding": _num(c.get("funding")),
+                                 "premium": _num(c.get("premium")),
+                                 "open_interest": _num(c.get("openInterest"))}
+            return out or None
+        except Exception:
+            return None
+    return (_cached(store, "hl_ctx", 5, fetch) or {}).get(coin) or {}
 
 
 def oi_change(store, coin, now_oi):
@@ -237,6 +270,7 @@ def spot_15m_monitor(store, coin, get=requests.get):
 def context(store, coin, coinbase_price=None, get=requests.get, include_spot_15m=False):
     """One compact dict for signals, the council and the report."""
     fut = futures(store, coin, get) or {}
+    hl = hyperliquid(store, coin) if get is requests.get else {}
     ks = kraken_spot(coin, get)
     now = time.time()
     upcoming = [e for e in calendar(store, get) if -3600 <= e["ts"] - now <= 6 * 3600]
@@ -256,6 +290,8 @@ def context(store, coin, coinbase_price=None, get=requests.get, include_spot_15m
         "funding": fut.get("funding"), "basis": fut.get("basis"),
         "oi_change_1h": oi_change(store, coin, fut.get("open_interest")),
         "put_call_oi": put_call(store, coin, get),
+        "hl_funding": hl.get("funding"), "hl_premium": hl.get("premium"),
+        "hl_open_interest": hl.get("open_interest"),
         "coinbase_premium": (coinbase_price / ks - 1) if (coinbase_price and ks) else None,
         "fear_greed": fear_greed(store, get),
         "events_soon": [f"{e['title']} ({e['impact']}) in {round((e['ts'] - now) / 60)} min"

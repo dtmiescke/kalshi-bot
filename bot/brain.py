@@ -36,6 +36,8 @@ DEFAULT_WEIGHTS = {
     "crypto_mean_reversion_strategy": 0.12,
     "crypto_breakout_strategy": 0.10,
     "crypto_multi_timeframe_chart": 0.15,
+    "crypto_perp_funding": 0.10,   # Hyperliquid crowding (contrarian)
+    "crypto_perp_premium": 0.10,   # Hyperliquid perp-vs-oracle flow
 }
 MIN_W, MAX_W = 0.05, 5.0
 ETA = 0.05            # learning rate: small = slow, steady learning
@@ -46,7 +48,7 @@ MIN_LEARN_SAMPLES = 20  # per signal and domain; prevents single-result overfitt
 def domain_of(ticker_or_series):
     """Broad calibration domain: sports vs short-window crypto."""
     t = (ticker_or_series or "").upper()
-    return "crypto" if t.startswith(("KXBTC", "KXETH", "KXSOL")) or "15M" in t else "sports"
+    return "crypto" if t.startswith(("KXBTC", "KXETH", "KXSOL", "KXBNB")) or "15M" in t else "sports"
 
 
 def learning_domain_of(ticker_or_series):
