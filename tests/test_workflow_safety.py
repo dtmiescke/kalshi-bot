@@ -133,6 +133,27 @@ class TestWorkflowSafety(unittest.TestCase):
             second = self._save(cwd, env)             # e.g. a mid-session save
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
 
+    def test_memory_round_trips_across_separate_jobs(self):
+        """A later scheduled job must restore data written by the prior job."""
+        import sqlite3
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bare, _ = self._memory_remote(root)
+            first_cwd, first_env = self._job(root, bare, "first-job")
+            db = first_cwd / "data" / "bot.sqlite"
+            with sqlite3.connect(db) as conn:
+                conn.execute("INSERT OR REPLACE INTO kv(k,v) VALUES(?,?)",
+                             ("roundtrip_probe", "survived-save-and-restore"))
+            saved = self._save(first_cwd, first_env)
+            self.assertEqual(saved.returncode, 0, saved.stdout + saved.stderr)
+
+            second_cwd, second_env = self._job(root, bare, "second-job")
+            self.assertTrue((second_cwd / "data" / ".memory_restored").exists())
+            with sqlite3.connect(second_cwd / "data" / "bot.sqlite") as conn:
+                row = conn.execute("SELECT v FROM kv WHERE k=?",
+                                   ("roundtrip_probe",)).fetchone()
+            self.assertEqual(row, ("survived-save-and-restore",))
+
     def test_save_refuses_when_another_job_saved_meanwhile(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
