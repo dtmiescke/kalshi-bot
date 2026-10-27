@@ -407,7 +407,7 @@ class LiveRunner:
                                   if yes_bid is not None and yes_ask is not None else None)
                     spot_summary = ctx.get("spot", {})
                     regime = AdaptiveLearning.regime({
-                        "realized_volatility": spot_summary.get("realized_vol_per_min"),
+                        "realized_volatility": spot_summary.get("vol_per_min"),
                         "spread_bps": (((float(yes_ask) - float(yes_bid)) * 10000.0 / market_mid)
                                        if market_mid and yes_bid is not None and yes_ask is not None else 0),
                         "source_divergence_bps": spot_summary.get("source_divergence_bps", 0),
@@ -447,7 +447,7 @@ class LiveRunner:
             snap, p, prob, conf = plan
             setup_names = [x.get("name") for x in ctx.get("chart_setups", {}).get("setups", [])]
             regime = AdaptiveLearning.regime({
-                "realized_volatility": ctx.get("spot", {}).get("realized_vol_per_min"),
+                "realized_volatility": ctx.get("spot", {}).get("vol_per_min"),
                 "source_divergence_bps": ctx.get("spot", {}).get("source_divergence_bps", 0),
                 "book_imbalance": ctx.get("spot", {}).get("book_imbalance_0.1%", 0),
                 "trend_strength": ctx.get("indicators", {}).get("adx_1m", 0),
