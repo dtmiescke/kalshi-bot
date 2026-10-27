@@ -187,6 +187,30 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
             "cross_venue_proxy": True,
         }))
 
+    # Completed 15-minute Coinbase/Kraken spot candles provide a low-weight trend check.
+    # Kalshi remains the pricing baseline; disagreement between venues lowers confidence.
+    spot_returns = []
+    for key in ("coinbase_15m_return_pct", "kraken_15m_return_pct"):
+        value = ctx.get(key) if isinstance(ctx, dict) else None
+        if isinstance(value, (int, float)) and math.isfinite(value):
+            spot_returns.append(float(value))
+    if spot_returns:
+        avg_spot_return = sum(spot_returns) / len(spot_returns)
+        disagreement = abs(spot_returns[0] - spot_returns[1]) if len(spot_returns) > 1 else 0.0
+        shift = max(-0.025, min(0.025, avg_spot_return * 0.015))
+        spot_prob = clamp(p + shift, 0.02, 0.98)
+        spot_conf = 0.20 if len(spot_returns) == 2 and disagreement <= 0.5 else 0.10
+        if len(spot_returns) == 2 and disagreement > 0.5:
+            spot_conf = 0.05
+        readings.append(Reading("crypto_spot_15m_confirmation", spot_prob, spot_conf, {
+            "coinbase_return_pct": ctx.get("coinbase_15m_return_pct"),
+            "kraken_return_pct": ctx.get("kraken_15m_return_pct"),
+            "venue_disagreement_pct": round(disagreement, 4),
+            "cross_venue_basis_bps": ctx.get("spot_15m_basis_bps"),
+            "source_count": len(spot_returns),
+            "timeframe_minutes": 15,
+        }))
+
     if dv:
         pi = settlement.prob_above(spot, terms["strike"], iv.dvol_to_per_minute(dv), secs,
                                    terms["avg_seconds"], tail_shrink=shrink,
