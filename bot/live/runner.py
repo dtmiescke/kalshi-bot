@@ -565,6 +565,8 @@ class LiveRunner:
 
     def finish(self, ticker, readings, ctx, plan, verdict):
         """After the council: recheck with the freshest book, then trade."""
+        initial_plan = plan[1] if isinstance(plan, (tuple, list)) and len(plan) > 1 else {}
+        prior_adaptive = initial_plan.get("adaptive_learning", {}) if isinstance(initial_plan, dict) else {}
         try:
             if verdict["decision"] != "approve":
                 self._skip(f"council {verdict['decision']}")
@@ -599,7 +601,7 @@ class LiveRunner:
                         "price_discovery", "orderbook", "flow"
                     ) if isinstance(fresh_ctx, dict) and key in fresh_ctx
                 }
-                p["adaptive_learning"] = p.get("adaptive_learning") or {}
+                p["adaptive_learning"] = prior_adaptive if isinstance(prior_adaptive, dict) else {}
             members = council.convene(self.store, self.s, snap, p, fresh, prob, conf)
             if members.get("binding") and members.get("decision") == "pass":
                 self._skip("council veto")
