@@ -33,7 +33,11 @@ from .metrics import binary_contract_roi
 
 log = logging.getLogger("bot")
 MODEL_DIR = os.environ.get("MODEL_DIR", "data/models")
-COINS = ("BTC", "ETH", "SOL", "BNB")
+# COINS is the frozen legacy one-hot feature schema; changing it would make
+# already-promoted model files dimension-incompatible. BNB is supported as a
+# runtime coin, but remains an all-zero one-hot row until a versioned retrain.
+COINS = ("BTC", "ETH", "SOL")
+SUPPORTED_COINS = ("BTC", "ETH", "SOL", "BNB")
 
 
 def ensure_table(store):
@@ -60,7 +64,7 @@ def label(store, ticker, y):
 
 def coin_of(ticker):
     t = ticker.upper()
-    return next((c for c in COINS if t.startswith(f"KX{c}")), "BTC")
+    return next((c for c in SUPPORTED_COINS if t.startswith(f"KX{c}")), "BTC")
 
 
 # --- dataset --------------------------------------------------------------------------
