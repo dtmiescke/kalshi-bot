@@ -69,6 +69,23 @@ class TestReport(Base):
                   (ticker, "KXBTC15M", 1_000_000 + len(ticker) + hash(ticker) % 1000, direction, 2.5, 100_000, bid0, ask0, .5, json.dumps(follow)))
         self.st.x("INSERT OR IGNORE INTO graded_markets VALUES(?,?,?,?)", (ticker, 0, outcome, "KXBTC15M"))
 
+    def test_a_delayed_order_gets_the_later_worse_quote(self):
+        for i in range(30):
+            # YES jump: the ask was 51c when spotted but Kalshi had caught up to 60c two seconds later; YES won
+            self.add(f"KXBTC15M-D{i}", 1, .51, .49, {"2": [.595, .70, .59, .60]}, 1)
+        r = lead_lag.report(self.st, now=1_000_100)
+        self.assertEqual(r["delayed"]["latency_s"], lead_lag.LATENCY_S)
+        self.assertEqual(r["delayed"]["settled"], 30)
+        self.assertGreater(r["mean_pnl"], r["delayed"]["mean_pnl"])          # waiting cost the early price
+        self.assertAlmostEqual(r["mean_pnl"] - r["delayed"]["mean_pnl"], .09, delta=.02)
+
+    def test_older_rows_without_a_later_quote_are_left_out_of_the_delayed_figure(self):
+        for i in range(10):
+            self.add(f"KXBTC15M-O{i}", 1, .51, .49, {"2": [.56, .70]}, 1)     # recorded before bid/ask were kept
+        r = lead_lag.report(self.st, now=1_000_100)
+        self.assertEqual((r["settled"], r["delayed"]["settled"]), (10, 0))
+        self.assertIsNone(r["delayed"]["mean_pnl"])
+
     def test_empty_report_is_safe(self):
         r = lead_lag.report(self.st, now=1_000_100)
         self.assertEqual((r["events"], r["settled"], r["mean_pnl"]), (0, 0, None))
