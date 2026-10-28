@@ -19,7 +19,7 @@ import subprocess
 import shlex
 import time
 
-from .. import alerts, brain, briefing, council, crypto_brain, entry_timing, fees, guard, handoff, hindsight, ml, risk, token_data, window_review
+from .. import alerts, brain, briefing, council, crypto_brain, entry_timing, fees, lead_lag as lead_lag_study, guard, handoff, hindsight, ml, risk, token_data, window_review
 from .. import features, marketdata, vol as volmod
 from ..engine import Engine
 from ..grader import grade
@@ -86,6 +86,7 @@ class LiveRunner:
         self.pre_open = {}        # series -> {window start: [chart reads taken before the market opened]}
         self._pb = (0.0, None)    # (time, playbook table), refreshed every few minutes
         self._et = (0.0, None)    # (time, entry-timing table), refreshed every 10 minutes
+        self.lead_lag = lead_lag_study.LeadLag(store)   # records how fast Kalshi follows spot jumps (no bets)
         # A prior process may have died after Kalshi accepted a resting order.
         # Do not resume trading until that exchange state is reconciled manually.
         prior_maker = self.store.get_kv("maker_recovery")
@@ -542,6 +543,10 @@ class LiveRunner:
             readings, ctx = self.readings_for(ticker, now)
             if not readings:
                 continue
+            cm = next((r for r in readings if r.name == "crypto_model"), None)
+            self.lead_lag.observe(ticker, info["series"], now, (ctx.get("spot") or {}).get("composite"),
+                                  ctx.get("kalshi_yes_bid"), ctx.get("kalshi_yes_ask"),
+                                  cm.prob if cm else None, ctx.get("vol_forecast_per_min"))
             terms = info["terms"]
             close_ts = int(terms["close_ts"] or 0)
             if close_ts <= 0:
