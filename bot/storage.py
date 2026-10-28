@@ -115,7 +115,8 @@ RAW_RETENTION = {
     "flow_trades": ("ts", 2),
     "signal_readings": ("ts", 30),
     "odds_snapshots": ("ts", 30),
-    "sports_intel_items": ("observed_ts", 14),   # readers take the newest few hundred
+    # readers take the newest few hundred items (~6 KB each; 14 days was 300 MB)
+    "sports_intel_items": ("observed_ts", 3),
 }
 
 
