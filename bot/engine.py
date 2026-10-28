@@ -1399,20 +1399,26 @@ class Engine:
             # Calibrate using settled canonical audits across candidates and
             # rejections, not just the subset the bot happened to bet.
             prob = brain.calibrate(prob, self.store, domain=brain.domain_of(snap.get("series", "")))
+        prob_raw = prob      # the audit keeps the unshrunk forecast: it is what the shrink is learned from
+        if prob is not None:
+            bid, ask = snap.get("yes_bid"), snap.get("yes_ask")
+            if bid is not None and ask is not None:
+                prob = brain.shrink_to_market(prob, (float(bid) + float(ask)) / 2,
+                                              self.store, series=snap.get("series", ""))
         if prob is None:
             self._record_decision(snap, readings, "rejected", "no calibrated probability", conf=conf)
             return None
         try:
             book = self.data.orderbook(snap["ticker"])
         except Exception as e:
-            self._record_decision(snap, readings, "rejected", "orderbook unavailable", prob, conf)
+            self._record_decision(snap, readings, "rejected", "orderbook unavailable", prob_raw, conf)
             log.warning("orderbook %s: %s", snap["ticker"], e)
             return None
         plan, why = risk.decide(self.s, self.store, snap, prob, conf, book,
                                 min_edge=min_edge, max_per_bet=max_per_bet,
                                 raw_model_prob=risk.crypto_model_prob(readings))
         if not plan:
-            self._record_decision(snap, readings, "rejected", why, prob, conf)
+            self._record_decision(snap, readings, "rejected", why, prob_raw, conf)
             self._skip(summary, why)
             return None
         # Preserve any strategy-specific limits so the final execution-boundary
@@ -1425,12 +1431,12 @@ class Engine:
         # nothing; only members who EARNED veto power can turn this into a pass.
         verdict = council.convene(self.store, self.s, snap, plan, readings, prob, conf)
         if verdict.get("binding") and verdict.get("decision") == "pass":
-            self._record_decision(snap, readings, "rejected", verdict["reason"], prob, conf,
+            self._record_decision(snap, readings, "rejected", verdict["reason"], prob_raw, conf,
                                   side=plan["side"], market_price=plan["price"], edge=plan["edge"])
             self._skip(summary, "council veto")
             return None
         self._record_decision(snap, readings, "candidate", "passed deterministic risk checks",
-                              prob, conf, side=plan["side"], market_price=plan["price"], edge=plan["edge"])
+                              prob_raw, conf, side=plan["side"], market_price=plan["price"], edge=plan["edge"])
         return snap, plan, readings, prob, conf
     def place(self, snap, plan, readings, prob, conf, summary, now, executed=None):
         """Serialize execution so concurrent reviewers cannot spend the same risk budget."""
