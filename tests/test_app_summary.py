@@ -49,14 +49,36 @@ class TestAppSummary(unittest.TestCase):
         self.assertLess(html.index('x.name==="summary.json"'), html.index('x.name==="bot.sqlite.gz"'))
         self.assertIn('x.name==="bot.sqlite.gz"', html)           # fallback kept
 
-    def test_council_chamber_reads_its_summary_keys(self):
+    def test_app_is_the_clean_redesign_without_bot_characters(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")
-        self.assertIn("members=s.members||{}", html)
-        for key in ("don_theo_last", "sunday_sitdown", "odds_quota", "janitors_last_result",
-                    "nerd_last_health", "kalshi_health"):
-            self.assertRegex(html, r"(kv|summaryKV)\." + key)
-            self.assertIn(key, dashboard.SUMMARY_KV)
-        self.assertIn("The Rott Master’s Table", html)
+        self.assertIn("members=s.members||{}", html)          # summary loader kept
+        self.assertIn("summaryKV.kalshi_health", html)         # bot health card
+        self.assertIn("storage=s.storage||null", html)         # memory size from summary.json
+        for gone in ("Rott Master", "Don Theo", "stage3d"):
+            self.assertNotIn(gone, html)
+        for tab in ("dash", "crypto", "sports", "activity", "settings"):
+            self.assertIn(f'data-tab="{tab}"', html)
+
+    def test_app_reads_live_kalshi_through_the_read_only_relay(self):
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("kalshi-readonly-feed", html)
+        for path in ("/api/markets?series_ticker=", "/api/candles?series_ticker=", "/api/market?ticker=", "/ws"):
+            self.assertIn(path, html)
+        self.assertNotIn("api.elections.kalshi.com", html)     # browsers are blocked there (CORS)
+        for series in ("KXBTC15M", "KXETH15M", "KXSOL15M", "KXBNB15M"):
+            self.assertIn(series, html)
+
+    def test_bets_csv_carries_compact_signals_for_bet_details(self):
+        self.st.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,stake,fee,
+                     status,signals_json) VALUES(1,'paper','KXBTC15M-X','E','KXBTC15M','yes',0.5,1,0.5,0,'open',?)""",
+                  (json.dumps({"crypto_model": {"prob": 0.6234, "confidence": 0.75, "detail": {"big": "x" * 500}},
+                               "ml_model": {"p": 0.61, "c": 0.9}, "bad": "skip"}),))
+        text = dashboard.export_csv(self.st)
+        header, row = text.splitlines()[:2]
+        self.assertTrue(header.endswith(",signals"))
+        self.assertNotIn("signals_json", header)
+        self.assertIn("crypto_model:0.6234:0.75;ml_model:0.61:0.9", row)
+        self.assertNotIn("big", row)
 
 
 if __name__ == "__main__":

@@ -42,28 +42,45 @@ def short(ticker):
     return f"{name} {parts[-1]}" if len(parts) >= 3 else name
 
 
+def _signals_compact(raw):
+    """signals_json -> "name:prob:confidence;..." for the app's bet details
+    (the full JSON with per-signal details is too big for a phone download)."""
+    try:
+        sig = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return ""
+    out = []
+    for name, v in (sig.items() if isinstance(sig, dict) else []):
+        if not isinstance(v, dict):
+            continue
+        p, c = v.get("p", v.get("prob")), v.get("c", v.get("confidence"))
+        if isinstance(p, (int, float)):
+            out.append(f"{name}:{round(p, 4)}:{round(c, 3) if isinstance(c, (int, float)) else ''}")
+    return ";".join(out)
+
+
 def export_csv(store, mode=None):
     """Export the full trade lifecycle, optionally scoped to one account mode."""
     rows = store.q("""SELECT id, ts, exit_ts, mode, ticker, event_ticker, series, team,
                       side, price, contracts, stake, fee, model_prob, edge, confidence,
                       style, order_id, status, result, closing_price, exit_price,
-                      pnl, clv, graded_ts FROM bets
+                      pnl, clv, graded_ts, signals_json FROM bets
                       WHERE (? IS NULL OR mode=?) ORDER BY ts, id""", (mode, mode))
     buf = io.StringIO()
     w = csv.writer(buf)
-    cols = list(rows[0].keys()) if rows else [
+    cols = [c for c in rows[0].keys() if c != "signals_json"] if rows else [
         "id", "ts", "exit_ts", "mode", "ticker", "event_ticker", "series", "team",
         "side", "price", "contracts", "stake", "fee", "model_prob", "edge",
         "confidence", "style", "order_id", "status", "result", "closing_price",
         "exit_price", "pnl", "clv", "graded_ts"
     ]
-    w.writerow(cols + ["entry_time_utc", "closed_time_utc"])
+    w.writerow(cols + ["entry_time_utc", "closed_time_utc", "signals"])
     for r in rows:
         entry_ts = r["ts"]
         exit_ts = r["exit_ts"] or r["graded_ts"]
         entry_time = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(entry_ts)) if entry_ts else ""
         closed_time = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(exit_ts)) if exit_ts else ""
-        w.writerow([r[c] for c in cols] + [entry_time, closed_time])
+        w.writerow([r[c] for c in cols] + [entry_time, closed_time, _signals_compact(r["signals_json"])])
     return buf.getvalue()
 
 
