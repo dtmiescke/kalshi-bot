@@ -104,11 +104,27 @@ def run_combos(s, store, data):
         logging.warning("crypto combo paper scan failed: %s", e)
 
 
+def trim_in_stream(store, now=None, every_s=3600):
+    """A long stream must not pile up raw rows until it ends: run the cheap end-of-run trims (retention and
+    audit slimming, not the dedupe or the vacuum) about hourly. Returns None when not due."""
+    from . import maintenance
+    now = time.time() if now is None else now
+    if now - float(store.get_kv("stream_trim_last", 0) or 0) < every_s:
+        return None
+    store.set_kv("stream_trim_last", now)
+    return {"retention": maintenance.janitor_retention(store, now=now),
+            "slim": maintenance.janitor_slim_audit(store, now=now)}
+
+
 def periodic_cycle(s, store, data):
     """What every short run used to do between streams, now every PERIODIC_EVERY_SECONDS
     inside a long stream: ladders, combo research, paper parlays and their grading."""
     run_ladders(s, store, data)
     run_combos(s, store, data)
+    try:
+        trim_in_stream(store)
+    except Exception as e:
+        logging.warning("in-stream trim failed: %s", e)
     try:
         from . import crypto_combo
         crypto_combo.grade(store)

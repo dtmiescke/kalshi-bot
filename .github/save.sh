@@ -49,6 +49,9 @@ try:
 finally:
     source.close()
 PY
+# Indexes are rebuilt on load (bot/snapshot.py); leaving them out cut the upload by about a quarter.
+python -m bot.snapshot strip "$WORK/bot.snapshot.sqlite"
+python -c 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); r=c.execute("PRAGMA integrity_check").fetchall(); print("stripped snapshot integrity:", r[:1]); sys.exit(r != [("ok",)])' "$WORK/bot.snapshot.sqlite"
 gzip -n -c "$WORK/bot.snapshot.sqlite" > "$WORK/bot.sqlite.gz"
 rm -f "$WORK/bot.snapshot.sqlite"
 # With Hugging Face memory configured the database goes there (no 100 MB limit,
