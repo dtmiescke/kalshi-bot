@@ -486,11 +486,12 @@ function chanceSVG(pts,w,h,o={}){
     <polyline fill="none" stroke="var(--blue)" stroke-width="2.2" stroke-linejoin="round" points="${line}"/>
     ${o.to?"":`<circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="8" fill="var(--blue)" fill-opacity="0.18"/>`}<circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="4" fill="var(--blue)"/>${times}</svg>`;
 }
-function lineSVG(vals,w,h,color="var(--blue)",zero=false){
+function lineSVG(vals,w,h,color="var(--blue)",zero=false){ // zero: true = dashed $0 line, or a number to use as the baseline
+  const base=zero===true?0:(typeof zero==="number"?zero:null);zero=base!=null;
   w=Math.max(60,Math.round(w));if(vals.length<2)return zero?`<p class="empty" style="padding:28px 0">No settled bets in this range.</p>`:`<svg width="${w}" height="${h}" aria-hidden="true"></svg>`;
-  const lo=Math.min(...vals,zero?0:Infinity),hi=Math.max(...vals,zero?0:-Infinity),span=(hi-lo)||1;
+  const lo=Math.min(...vals,zero?base:Infinity),hi=Math.max(...vals,zero?base:-Infinity),span=(hi-lo)||1;
   const y=v=>2+(1-(v-lo)/span)*(h-4),pts=vals.map((v,i)=>((i/(vals.length-1))*w).toFixed(1)+","+y(v).toFixed(1)).join(" ");
-  return`<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">${zero?`<line x1="0" x2="${w}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}" stroke="var(--line)" stroke-dasharray="3 4"/>`:""}
+  return`<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">${zero?`<line x1="0" x2="${w}" y1="${y(base).toFixed(1)}" y2="${y(base).toFixed(1)}" stroke="var(--line)" stroke-dasharray="3 4"/>`:""}
     ${zero?`<path d="M0,${h} L${pts.replace(/ /g," L")} L${w},${h} Z" fill="${color}" fill-opacity="0.07"/>`:""}<polyline fill="none" stroke="${color}" stroke-width="${zero?2:1.6}" stroke-linejoin="round" points="${pts}"/></svg>`;
 }
 function widthOf(id,fallback){const el=$(id);return el&&el.clientWidth?el.clientWidth:fallback}
@@ -527,7 +528,7 @@ function liveCard(sym,opts={}){
       <div class="chance" data-live="ch:${k}">${chanceLine(k)}</div>
       <div data-live="chart:${k}" data-h="${h}" style="min-height:${h}px"></div>
       <div class="legend"><div class="keys"><span><i class="sw"></i>Market</span>${lad?"":`<span><i class="sw dash"></i>Bot</span>`}${hb?`<span><i class="sw entry"></i>Your entry</span>`:""}</div>${opts.open?`<button class="link" data-act="coin" data-v="${sym}">Open market ›</button>`:`<span class="note" data-live="model:${k}">${modelNote(k)}</span>`}</div></div>`}).join("");
-  const dots=ks.length>1?`<div class="dots" role="group" aria-label="Markets">${ks.map((k,i)=>`<button data-act="slide" data-v="${sym}" data-i="${i}" aria-label="${i?"Ladder "+closeLabel(live[k]):"15-minute"}" aria-current="${i===at}"></button>`).join("")}<small>${at?"Ladder":"Swipe for ladders"}</small></div>`:"";
+  const dots=ks.length>1?`<div class="dots" role="group" aria-label="Markets">${ks.map((k,i)=>`<button data-act="slide" data-v="${sym}" data-i="${i}" data-l="${i?"Ladder":"Swipe for ladders"}" aria-label="${i?"Ladder "+closeLabel(live[k]):"15-minute"}" aria-current="${i===at}"></button>`).join("")}<small>${at?"Ladder":"Swipe for ladders"}</small></div>`:"";
   return`<section class="card livecard">
     ${chips?`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="livebadge"><span class="dot live"></span>LIVE</span>${chips}</div>`:""}
     <div class="slides" data-sym="${sym}">${slides}</div>${dots}
@@ -557,12 +558,20 @@ function kpis(){const s=statsOf(bets),br=account&&account.bankroll?+account.bank
     <div class="tile"><small>Win rate</small><b class="num">${pct(s.win)}</b><em>${s.won} of ${s.settled} settled</em></div>
     <div class="tile"><small>Open risk</small><b class="num">${money(open)}</b><em>${s.open.length} position${s.open.length===1?"":"s"}</em></div>
   </section>`}
-function pnlCard(){
+function pnlCard(){ // swipe: profit/loss, then bankroll
   const R={today:["Today",new Date().setHours(0,0,0,0)],"7d":["7D",Date.now()-7*864e5],"30d":["30D",Date.now()-30*864e5],all:["All",0]};
-  const [lab,since]=R[ui.pnlRange],g=graded(bets).filter(b=>(b.exitTs||b.ts)>=since).sort((a,b)=>(a.exitTs||a.ts)-(b.exitTs||b.ts));
+  const all=graded(bets).sort((a,b)=>(a.exitTs||a.ts)-(b.exitTs||b.ts)),[lab,since]=R[ui.pnlRange],g=all.filter(b=>(b.exitTs||b.ts)>=since);
   let run=0;const vals=[0,...g.map(b=>run+=b.pnl)];
-  return`<section class="card"><div style="display:flex;justify-content:space-between;align-items:flex-end"><div><small class="muted" style="font-size:13px">Profit / loss · ${lab==="All"?"all time":lab}</small><div style="font-size:26px;font-weight:700" class="num ${cls(run)}">${smoney(run)}</div></div><small class="muted">${g.length} settled</small></div>
-    <div id="pnlchart" data-vals="${vals.join(",")}" style="min-height:90px"></div>
+  const st=statsOf(bets),br=account&&account.bankroll?+account.bankroll:500,open=st.open.reduce((a,b)=>a+(b.stake||0),0);
+  const before=all.filter(b=>(b.exitTs||b.ts)<since).reduce((a,b)=>a+b.pnl,0),bal=br+st.total;
+  let x=br+before;const bvals=[x,...g.map(b=>x+=b.pnl)],at=Math.min(slideAt.pnl||0,1),span=lab==="All"?"all time":lab;
+  const slide=(title,big,bigCls,right,chart)=>`<div class="slide" role="group" aria-roledescription="slide" aria-label="${title}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:8px"><div><small class="muted" style="font-size:13px">${title} · ${span}</small><div style="font-size:26px;font-weight:700" class="num ${bigCls}">${big}</div></div><small class="muted" style="text-align:right">${right}</small></div>${chart}</div>`;
+  const dots=`<div class="dots" role="group" aria-label="View">${["Profit / loss","Bankroll"].map((l,i)=>`<button data-act="slide" data-v="pnl" data-i="${i}" data-l="${i?"Bankroll":"Swipe for bankroll"}" aria-label="${l}" aria-current="${i===at}"></button>`).join("")}<small>${at?"Bankroll":"Swipe for bankroll"}</small></div>`;
+  return`<section class="card livecard"><div class="slides" data-sym="pnl">
+      ${slide("Profit / loss",smoney(run),cls(run),g.length+" settled",`<div id="pnlchart" data-vals="${vals.join(",")}" style="min-height:90px"></div>`)}
+      ${slide("Bankroll",money(bal),"",`Started ${cash(br)}<br>${money(open)} in open bets`,`<div id="bankchart" data-vals="${bvals.join(",")}" data-base="${br}" style="min-height:90px"></div>`)}
+    </div>${dots}
     <div class="seg" role="group" aria-label="Range">${Object.entries(R).map(([k,v])=>`<button data-act="pnlRange" data-v="${k}" aria-pressed="${k===ui.pnlRange}">${v[0]}</button>`).join("")}</div></section>`}
 function coinRows(sub){return`<section class="card list"><div class="cardhead"><h2>Performance by coin</h2><small class="muted">Tap for details</small></div>
   ${COINS.map(c=>{const list=bets.filter(b=>b.coin===c.sym),s=statsOf(list);
@@ -762,10 +771,10 @@ function render(scrollTop){
 }
 const slidePitch=el=>(el.firstElementChild?el.firstElementChild.offsetWidth:el.clientWidth)+16;
 function showSlide(el,i,smooth){el.scrollTo({left:i*slidePitch(el),behavior:smooth&&!REDUCED?"smooth":"auto"})}
-document.addEventListener("scroll",e=>{const el=e.target;if(!el.classList||!el.classList.contains("slides"))return; // swipe between 15-minute and ladder charts
+document.addEventListener("scroll",e=>{const el=e.target;if(!el.classList||!el.classList.contains("slides"))return; // swipe between slides (15-minute/ladder charts, P/L/bankroll)
   const sym=el.dataset.sym,i=Math.max(0,Math.min(el.children.length-1,Math.round(el.scrollLeft/slidePitch(el))));if((slideAt[sym]||0)===i)return;
   slideAt[sym]=i;const card=el.closest(".livecard");
-  if(card){card.querySelectorAll(".dots button").forEach((b,j)=>b.setAttribute("aria-current",String(j===i)));const sm=card.querySelector(".dots small");if(sm)sm.textContent=i?"Ladder":"Swipe for ladders"}
+  if(card){card.querySelectorAll(".dots button").forEach((b,j)=>b.setAttribute("aria-current",String(j===i)));const sm=card.querySelector(".dots small"),db=card.querySelectorAll(".dots button")[i];if(sm&&db&&db.dataset.l)sm.textContent=db.dataset.l}
   scheduleLive()},true);
 function drawCharts(withStatic=true){
   document.querySelectorAll('[data-live^="chart:"]').forEach(el=>{const k=el.dataset.live.slice(6),L=live[k];if(!L)return;const m=botModel(k),hb=heldBet(k);
@@ -777,6 +786,7 @@ function drawCharts(withStatic=true){
   document.querySelectorAll('[data-live^="spark:"]').forEach(el=>{const L=live[el.dataset.live.slice(6)];el.innerHTML=lineSVG(L.pts.map(p=>p.p),64,26)});
   if(!withStatic)return;
   const pc=$("pnlchart");if(pc){const v=pc.dataset.vals.split(",").map(Number);pc.innerHTML=lineSVG(v,pc.clientWidth||326,90,"var(--blue)",true)}
+  const bk=$("bankchart");if(bk){const v=bk.dataset.vals.split(",").map(Number),b0=+bk.dataset.base;bk.innerHTML=lineSVG(v,bk.clientWidth||326,90,v[v.length-1]>=b0?"var(--blue)":"var(--down)",b0)}
   const bc=$("betchart");if(bc)drawBetChart(bc);
 }
 function updateLive(){
