@@ -99,6 +99,14 @@ class TestAppSummary(unittest.TestCase):
         self.assertIn('data-base="${br}"', html)                        # chart baseline = starting bankroll
         self.assertIn("Swipe for bankroll", html)
 
+    def test_live_updates_only_touch_what_changed(self):
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("live[k].v=(live[k].v||0)+1", html)                 # each new price bumps a version
+        self.assertIn("if(el._sig===sig)return;", html)                  # charts skip redraws without new prices
+        self.assertIn("if(!editing&&sig!==refresh.sig)", html)           # no full rebuild when nothing changed
+        self.assertIn('route.page==="coin")spot(', html)                  # spot prices only where they're shown
+        self.assertIn('addEventListener("visibilitychange"', html)       # catch up when the app is reopened
+
     def test_bets_csv_carries_compact_signals_for_bet_details(self):
         self.st.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,stake,fee,
                      status,signals_json) VALUES(1,'paper','KXBTC15M-X','E','KXBTC15M','yes',0.5,1,0.5,0,'open',?)""",
