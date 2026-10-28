@@ -191,6 +191,59 @@ class TestPlaybook(Base):
                       (f"{rule}-{regime}-{i}", rule, "BTC", self.now, regime, 1, int(i < wins),
                        hindsight.follow_pnl(1, mid, 0.0, 1 if i < wins else 0)))
 
+    def test_the_bar_rises_with_the_number_of_rules_tested(self):
+        self.assertGreater(hindsight.family_z(26), hindsight.family_z(1))
+        self.assertGreater(hindsight.family_z(250), hindsight.family_z(26))
+        hindsight.ensure_table(self.st)
+        self.fill("trend_follow", "trend/volup", 122, 78)     # 61% on 200 windows: z about 2.6
+        loose = hindsight.playbook(self.st, z=2.33)["rules"]["all|trend_follow"]
+        strict = hindsight.playbook(self.st)["rules"]["all|trend_follow"]
+        self.assertTrue(loose["validated"])                   # would pass a fixed 99% bar...
+        self.assertFalse(strict["validated"])                 # ...but not once all the rules are counted as tried
+
+    def test_yes_premium_fades_a_mid_range_yes_price_only(self):
+        lg = lambda p: __import__("math").log(p / (1 - p))
+        self.assertEqual(hindsight.votes({"kalshi_logit": lg(.55)})["yes_premium"], -1)
+        self.assertEqual(hindsight.votes({"kalshi_logit": lg(.30)})["yes_premium"], -1)
+        self.assertEqual(hindsight.votes({"kalshi_logit": lg(.85)})["yes_premium"], 0)
+        self.assertEqual(hindsight.votes({"kalshi_logit": lg(.15)})["yes_premium"], 0)
+        self.assertEqual(hindsight.votes({})["yes_premium"], 0)                # no price, no opinion
+
+    def test_backfill_scores_settled_training_rows_once_at_the_earliest_decision(self):
+        import math
+        from bot import ml
+        lg = lambda p: math.log(p / (1 - p))
+        for left in (13.0, 9.0, 3.0):                         # three reads of one window; the 13-minute one is the 90 s decision
+            ml.add_row(self.st, "KXBTC15M-W1", int(self.now) - int(left * 60), "BTC",
+                       {"kalshi_logit": lg(.55), "min_left": left, "model_prob": .5}, 0, "history")
+        ml.add_row(self.st, "KXBTC15M-NOQ", int(self.now), "BTC", {"min_left": 9.0}, 1, "history")        # no Kalshi price
+        ml.add_row(self.st, "KXBTC15M-LATE", int(self.now), "BTC", {"kalshi_logit": 0.0, "min_left": 14.5}, 1, "history")
+        ml.add_row(self.st, "KXBTC15M-OPEN", int(self.now), "BTC", {"kalshi_logit": lg(.55), "min_left": 9.0}, None, "live")
+        self.assertEqual(hindsight.backfill(self.st), 1)
+        rows = self.st.q("SELECT ticker, ts FROM hindsight_rules WHERE rule='yes_premium'")
+        self.assertEqual([r["ticker"] for r in rows], ["KXBTC15M-W1"])
+        self.assertEqual(rows[0]["ts"], int(self.now) - 13 * 60)
+        self.assertEqual(hindsight.backfill(self.st), 0)      # once per window
+
+    def test_backfill_skips_sources_far_worse_than_kalshis_price(self):
+        import math
+        import random
+        from bot import ml
+        rng = random.Random(5)
+        for i in range(400):
+            y = int(rng.random() < .5)
+            ml.add_row(self.st, f"KXBNB15M-H{i}", int(self.now) + i, "BNB",
+                       {"model_prob": .95 if rng.random() < .5 else .05, "kalshi_logit": 0.0, "min_left": 9.0}, y, "history")
+        self.assertEqual(hindsight.backfill(self.st), 0)
+
+    def test_the_playbook_shift_is_split_off_the_blend(self):
+        from bot.signals.base import Reading
+        rs = [Reading("kalshi_market", .5, .9, {}), Reading("crypto_playbook", .47, .3, {"shift": -.03})]
+        rest, shift = hindsight.split_playbook(rs)
+        self.assertEqual([r.name for r in rest], ["kalshi_market"])
+        self.assertEqual(shift, -.03)
+        self.assertEqual(hindsight.split_playbook(rs[:1]), (rs[:1], 0.0))
+
     def test_only_rules_that_stay_profitable_after_fees_are_validated(self):
         hindsight.ensure_table(self.st)
         self.fill("trend_follow", "trend/volup", 78, 22)      # 78% on 100 windows: a real edge

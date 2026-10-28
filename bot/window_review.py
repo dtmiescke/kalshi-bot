@@ -94,7 +94,8 @@ def describe(coin, feats, kalshi_mid, bot_prob, spot=None, strike=None):
 
 def _compose(store, ticker, info, terms, now, readings, ctx, weights, late=False, playbook=None, pre_open=None):
     """Everything the bot sees at this moment, as a window_log row. None if it can't price the market."""
-    prob, conf = brain.blend(readings, weights)
+    from . import hindsight
+    prob, conf = brain.blend(hindsight.split_playbook(readings)[0], weights)
     if prob is None:
         return None
     prob = brain.calibrate(prob, store, domain="crypto")

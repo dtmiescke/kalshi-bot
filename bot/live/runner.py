@@ -545,7 +545,7 @@ class LiveRunner:
             # canonical pre-close decision cutoff, preventing per-second samples
             # from inflating the learning set. Research rows never place orders.
             if now - self.last_adaptive_audit.get(ticker, 0) >= 30:
-                model_prob, model_conf = brain.blend(readings, weights)
+                model_prob, model_conf = brain.blend(hindsight.split_playbook(readings)[0], weights)
                 if model_prob is not None:
                     model_prob = brain.calibrate(model_prob, self.store, domain="crypto")
                     # every coin's line on the app's chart, not only coins that reach a trade plan
@@ -653,11 +653,14 @@ class LiveRunner:
     def plan_for(self, ticker, readings, weights, maker=None):
         if not any(r.name == "crypto_model" for r in readings):
             return None
-        prob, conf = brain.blend(readings, weights)
+        blend_in, proven = hindsight.split_playbook(readings)
+        prob, conf = brain.blend(blend_in, weights)
         info = self.markets[ticker]
         if prob is not None:
             prob = brain.calibrate(prob, self.store, domain=brain.domain_of(info["series"]))
             prob = brain.shrink_to_market(prob, self.books[ticker].mid(), self.store, series=info["series"])
+            if proven:      # setups that paid after fees on settled windows: their proven edge is added, not diluted
+                prob = clamp(prob + proven, 0.01, 0.99)
             self.last_prob[ticker] = {"prob": round(prob, 4), "conf": round(conf or 0, 3), "ts": round(time.time())}
         snap = {"ticker": ticker, "event_ticker": info["event"], "series": info["series"],
                 "team": "UP"}
@@ -673,6 +676,9 @@ class LiveRunner:
         if meta and any(r.name == "ml_model" for r in readings):
             # the promoted model says which edge level actually paid on unseen data
             min_edge = max(min_edge, float(meta.get("min_edge", min_edge)))
+        if proven:
+            # the proven edge is a lower bound net of fees, so a thin margin is expected
+            min_edge = min(min_edge, max(0.015, abs(proven) * 0.5))
         # Tighten the required edge when independent model views disagree or
         # reference prices are sparse/divergent. The underlying probability is
         # unchanged; this is a transparent uncertainty margin, not fake alpha.

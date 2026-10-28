@@ -318,6 +318,10 @@ def run(store, client, days=3, series=None, fee_rate=0.07, max_markets=300, spot
         res["learned"] = {k: [round(a, 3), round(b, 3)]
                           for k, (a, b) in seed_learning(store, recs).items()}
         out["by_series"][ser] = res
+    try:    # settled windows stored as training rows get the toolbox scored on them too
+        out["hindsight_backfill"] = hindsight.backfill(store)
+    except Exception as exc:
+        log.warning("hindsight backfill failed: %s", exc)
     return out
 
 
