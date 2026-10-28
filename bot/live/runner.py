@@ -19,7 +19,7 @@ import subprocess
 import shlex
 import time
 
-from .. import alerts, brain, briefing, council, crypto_brain, entry_timing, fees, lead_lag as lead_lag_study, guard, handoff, hindsight, ml, risk, token_data, window_review
+from .. import alerts, brain, briefing, council, crypto_brain, entry_timing, fees, slices, lead_lag as lead_lag_study, guard, handoff, hindsight, ml, risk, token_data, window_review
 from .. import features, marketdata, vol as volmod
 from ..engine import Engine
 from ..grader import grade
@@ -85,6 +85,7 @@ class LiveRunner:
         self.tape = {}            # ticker -> {"close_ts", "strike", "pts"}: the last seconds of the chart
         self.pre_open = {}        # series -> {window start: [chart reads taken before the market opened]}
         self._pb = (0.0, None)    # (time, playbook table), refreshed every few minutes
+        self._sl = (0.0, None)    # (time, bet-slice table)
         self._et = (0.0, None)    # (time, entry-timing table), refreshed every 10 minutes
         self.lead_lag = lead_lag_study.LeadLag(store)   # records how fast Kalshi follows spot jumps (no bets)
         # A prior process may have died after Kalshi accepted a resting order.
@@ -399,6 +400,16 @@ class LiveRunner:
                 self._et = (now, self._et[1])
         return self._et[1]
 
+    def slice_table(self, now):
+        """Which kinds of bets have lost money on settled paper bets (bot/slices.py), recomputed every 10 minutes."""
+        if self._sl[1] is None or now - self._sl[0] >= 600:
+            try:
+                self._sl = (now, slices.table(self.store, now))
+            except Exception as exc:
+                log.warning("bet slices refresh failed: %s", exc)
+                self._sl = (now, self._sl[1])
+        return self._sl[1]
+
     def read_due(self, close_ts, now):
         """True from CRYPTO_READ_SECONDS (-20: before the window starts) until the bet is allowed (CRYPTO_ENTRY_DELAY_SECONDS)."""
         elapsed = 900 - (close_ts - now)
@@ -644,6 +655,12 @@ class LiveRunner:
             if float(p.get("edge", 0) or 0) < required_after_learning:
                 self._skip("adaptive setup history requires stronger edge")
                 continue
+            if os.environ.get("SLICE_GATE", "yes") == "yes":
+                why = slices.blocked(self.slice_table(now), info["series"], p.get("side"), float(p.get("price") or 0),
+                                     15.0 - mins_left)
+                if why:
+                    self._skip(f"proven loser: {why}")
+                    continue
             group_key = (info["series"], close_ts)
             candidate = (float(p.get("edge", 0.0)), float(conf or 0.0),
                          ticker, readings, ctx, plan, lock_key, close_ts)
