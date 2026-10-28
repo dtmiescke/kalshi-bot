@@ -65,6 +65,19 @@ def describe(coin, feats, kalshi_mid, bot_prob, spot=None, strike=None):
     vr = f.get("vol_ratio_15_60")
     if vr:
         bits.append("volatility " + ("rising" if vr >= 1.3 else "falling" if vr <= 0.75 else "steady"))
+    st = f.get("ex_structure")
+    if st is not None and abs(st) >= 0.6:
+        bits.append("making " + ("higher highs and lows" if st > 0 else "lower highs and lows"))
+    if f.get("ex_sweep"):
+        bits.append("swept the half-hour " + ("low and reclaimed it" if f["ex_sweep"] > 0 else "high and was rejected"))
+    if f.get("ex_squeeze_pct") is not None and f["ex_squeeze_pct"] <= 0.15:
+        bits.append("volatility squeezed")
+    if f.get("ex_rsi_div"):
+        bits.append(("bullish" if f["ex_rsi_div"] > 0 else "bearish") + " RSI divergence")
+    if f.get("ex_absorption"):
+        bits.append("heavy volume absorbed " + ("at the lows" if f["ex_absorption"] > 0 else "at the highs"))
+    if f.get("ex_us_open"):
+        bits.append("US open hour")
     depth = f.get("tk_k_depth_5c_log")
     if depth:
         bits.append("Kalshi book " + ("deep" if depth >= 4 else "thin" if depth < 3 else "ok"))

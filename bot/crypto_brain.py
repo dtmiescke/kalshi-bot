@@ -12,7 +12,7 @@ For one contract at one moment it produces:
 import math
 import time
 
-from . import features, marketdata, ml, token_data, vol as volmod
+from . import expert, features, marketdata, ml, token_data, vol as volmod
 from .live import settlement
 from .signals import implied_vol as iv
 from .signals.base import Reading, clamp
@@ -291,6 +291,7 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
                            vol_per_min=None, now_ts=int(now), avg_seconds=terms["avg_seconds"])
     if feats:   # token, liquidity and volume facts join the chart indicators as model inputs
         feats.update(token_data.token_features(ctx, candles, kalshi_stats))
+        feats.update(expert.build(candles[-300:], terms["strike"], secs, now_ts=int(now)))   # a chart trader's reads (not model inputs)
     # the trained model only knows 15-minute windows: never let it price an
     # hourly or daily contract it has never seen, and don't mix those rows in
     if feats and is_15m:
