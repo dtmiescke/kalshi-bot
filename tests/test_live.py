@@ -459,6 +459,39 @@ class TestRunnerExecution(unittest.TestCase):
         self.assertLess(row["pnl"], 10 * (0.48 - 0.60))  # entry and exit fees are included
         self.assertTrue(any("SOLD" in message for message in self.r.summary["alerts"]))
 
+    def _stop_bet(self, price=0.60, contracts=10, fee=0.17):
+        t = next(iter(self.r.markets))
+        self.store.add_bet({"ts": 1, "mode": "paper", "ticker": t, "event_ticker": "KXBTC15M-E",
+                            "series": "KXBTC15M", "team": "UP", "side": "yes", "price": price,
+                            "contracts": contracts, "stake": price * contracts, "fee": fee, "model_prob": .6,
+                            "edge": .1, "confidence": .8, "signals": {}})
+        return t
+
+    def test_stop_loss_holds_a_small_dip_and_cashes_out_before_20_percent(self):
+        t = self._stop_bet()
+        self.r.books[t].no = {0.40: 50}
+        self.r.books[t].yes = {0.56: 50}                      # about -12% after fees: hold
+        with mock.patch.object(self.r, "readings_for", return_value=([], {})):
+            self.r.check_exits(time.time())
+        self.assertEqual(self.store.q("SELECT result FROM bets")[0]["result"], None)
+        self.r.books[t].yes = {0.54: 50}                      # about -15%: out, with room under the 20% limit
+        with mock.patch.object(self.r, "readings_for", return_value=([], {})):
+            self.r.check_exits(time.time())
+        row = self.store.q("SELECT * FROM bets")[0]
+        self.assertEqual(row["result"], "sold")
+        self.assertGreater(row["pnl"] / (0.60 * 10 + 0.17), -0.20)
+
+    def test_stop_loss_sells_everything_through_thin_books(self):
+        t = self._stop_bet(contracts=30, fee=0.5)
+        self.r.books[t].no = {0.40: 100}
+        self.r.books[t].yes = {0.50: 10, 0.49: 10, 0.48: 10}  # no single level holds 30
+        with mock.patch.object(self.r, "readings_for", return_value=([], {})):
+            self.r.check_exits(time.time())
+        rows = self.store.q("SELECT * FROM bets")
+        self.assertEqual(len(rows), 1)                        # not split into pieces
+        self.assertEqual((rows[0]["result"], rows[0]["contracts"]), ("sold", 30))
+        self.assertAlmostEqual(rows[0]["exit_price"], 0.49, places=2)
+
     def test_early_exit_when_bid_beats_holding(self):
         t = next(iter(self.r.markets))
         self.store.add_bet({"ts": 1, "mode": "paper", "ticker": t, "event_ticker": "KXBTC15M-E",
