@@ -114,7 +114,8 @@ class TestAppSummary(unittest.TestCase):
         for metric in ("Profit factor", "Max drawdown", "Is the bot well calibrated?", "P/L by time of day"):
             self.assertIn(metric, html)
         self.assertIn('class="scrubbable" data-live="chart:', html)     # live charts can be read by press-and-hold
-        self.assertIn("{passive:false}", html)                         # a held finger reads the chart instead of scrolling
+        self.assertIn('el.addEventListener("touchmove",scrubMove,{passive:false})', html)  # held finger reads, not scrolls
+        self.assertNotIn('document.addEventListener("touchmove"', html)  # page scrolling never waits on JS
         self.assertIn("if(el._scrubbing)return;", html)                # the chart holds still while being read
 
     def test_bets_csv_carries_compact_signals_for_bet_details(self):

@@ -871,12 +871,14 @@ function scrubAt(el,clientX){const g=el._geo;if(!g||!g.pts||!g.pts.length)return
   if(!o){o=document.createElement("div");o.className="scrub";o.innerHTML='<i class="sl"></i><i class="sd"></i><b class="st num"></b>';el.appendChild(o)}
   o.style.setProperty("--x",g.x(p,best).toFixed(1)+"px");o.style.setProperty("--y",g.y(p).toFixed(1)+"px");o.querySelector(".st").textContent=g.label(p,best);
   if(navigator.vibrate&&scrub&&scrub.idx!==best&&scrub.idx!=null)navigator.vibrate(1);if(scrub)scrub.idx=best}
-function scrubEnd(){if(!scrub)return;const el=scrub.el;clearTimeout(scrub.timer);el._scrubbing=false;const o=el.querySelector(":scope>.scrub");if(o)o.remove();scrub=null}
+function scrubEnd(){if(!scrub)return;const el=scrub.el;clearTimeout(scrub.timer);el._scrubbing=false;el.removeEventListener("touchmove",scrubMove);const o=el.querySelector(":scope>.scrub");if(o)o.remove();scrub=null}
 document.addEventListener("touchstart",e=>{const el=e.target.closest(".scrubbable");if(!el||!el._geo||e.touches.length>1)return;scrubEnd();
-  const t=e.touches[0];scrub={el,x0:t.clientX,y0:t.clientY,on:false,timer:setTimeout(()=>{if(!scrub)return;scrub.on=true;el._scrubbing=true;scrubAt(el,scrub.x0)},230)}},{passive:true});
-document.addEventListener("touchmove",e=>{if(!scrub)return;const t=e.touches[0];
+  const t=e.touches[0];scrub={el,x0:t.clientX,y0:t.clientY,on:false,timer:setTimeout(()=>{if(!scrub)return;scrub.on=true;el._scrubbing=true;scrubAt(el,scrub.x0)},230)};
+  el.addEventListener("touchmove",scrubMove,{passive:false})},{passive:true});
+// Blocking (non-passive) only on the chart being held, so page scrolling never waits on it.
+function scrubMove(e){if(!scrub)return;const t=e.touches[0];
   if(scrub.on){e.preventDefault();scrubAt(scrub.el,t.clientX);return}
-  if(Math.hypot(t.clientX-scrub.x0,t.clientY-scrub.y0)>8)scrubEnd()},{passive:false}); // moved first: it's a swipe or scroll, not a read
+  if(Math.hypot(t.clientX-scrub.x0,t.clientY-scrub.y0)>8)scrubEnd()} // moved first: it's a swipe or scroll, not a read
 document.addEventListener("touchend",scrubEnd);document.addEventListener("touchcancel",scrubEnd);
 document.addEventListener("pointermove",e=>{if(e.pointerType!=="mouse")return;const el=e.target.closest(".scrubbable");
   if(!el||!el._geo){if(scrub&&scrub.mouse)scrubEnd();return}
