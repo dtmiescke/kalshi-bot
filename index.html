@@ -809,6 +809,7 @@ const BET_FIELDS=[
   {name:"APP_MAX_BET",label:"Biggest bet ($)",def:20,acct:"max_per_bet",min:1},
   {name:"APP_BETS_PER_HOUR",label:"Most crypto bets per hour",hint:"16 = all 4 coins every 15 minutes",def:16,acct:"crypto_max_trades_per_hour",min:0,max:60,int:true},
   {name:"APP_MAX_OPEN_COST",label:"Most money in open bets ($)",def:160,acct:"max_open_cost",min:1},
+  {name:"APP_MAX_LOSS_PCT",label:"Cash out a bet at this loss (%)",hint:"Sells a bet once it has lost this share of what it cost, fees included",def:20,min:5,max:50,int:true},
   {name:"APP_STOP_LOSS",label:"Stop betting after losing ($)",def:500,acct:"max_total_loss",min:1},
 ];
 const STYLES=[["conservative","Careful"],["balanced","Balanced"],["aggressive","Aggressive"],["adaptive","Adaptive"],["off","Strict (no boost)"]];

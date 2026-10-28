@@ -928,26 +928,36 @@ class LiveRunner:
             bid = levels[0][0] if levels else None
             if bid is None:
                 continue
-            # A 20% hard stop takes priority over the model-based early exit.
-            # Compare against the original entry price; never move the threshold.
-            stop_triggered = bid <= float(b["price"]) * 0.80
-            if not stop_triggered:
+            # The stop-loss takes priority over the model-based early exit: cash out once the
+            # bet has lost about MAX_LOSS_PER_BET of its cost, fees included (risk.stop_loss_hit).
+            entry_fee_per = b["fee"] / b["contracts"] if b["contracts"] else 0.0
+            exit_fee_one = risk.taker_fee(1, bid, fees.rate(t, self.s))
+            stop_triggered = risk.stop_loss_hit(b["price"], entry_fee_per, bid, exit_fee_one,
+                                                self.s.max_loss_per_bet, self.s.stop_loss_buffer)
+            sell_limit = bid
+            if stop_triggered:
+                # get out of all of it now, taking as many price levels as it needs
+                n, avg, sell_limit = risk.sweep_bids(levels, b["contracts"])
+                if n < 1:
+                    continue
+                bid = avg
+            else:
                 readings, _ = self.readings_for(t, now)
                 if not readings:
                     continue
                 prob, _ = brain.blend(readings, weights)
                 p_side = prob if b["side"] == "yes" else 1 - prob
-            # only sell what the best bid can actually absorb
-            n = int(min(b["contracts"], levels[0][1]))
-            if n < 1:
-                continue
+                # only sell what the best bid can actually absorb
+                n = int(min(b["contracts"], levels[0][1]))
+                if n < 1:
+                    continue
             exit_fee = risk.taker_fee(n, bid, fees.rate(t, self.s))
             # holding is worth p_side per contract; selling is worth the bid minus fees
             if not stop_triggered and bid - exit_fee / n <= p_side + self.s.exit_margin:
                 continue
             if self.s.mode in ("demo", "live"):
                 try:
-                    submitted = self.engine.trade.place_limit_sell(t, b["side"], n, bid)
+                    submitted = self.engine.trade.place_limit_sell(t, b["side"], n, sell_limit)
                     order_id = submitted.get("order_id") or submitted.get("id")
                     if not order_id:
                         raise RuntimeError("sell submission returned no order ID; fill outcome is ambiguous")
@@ -994,7 +1004,7 @@ class LiveRunner:
                 continue
             msg = f"SOLD {t} {b['side'].upper()} x{n} @ ${bid:.2f} (P&L ${pnl:+.2f})"
             self.summary["alerts"].append(msg)
-            alerts.send("Crypto 20% stop-loss" if stop_triggered else "Early exit", msg)
+            alerts.send(f"Stop-loss ({self.s.max_loss_per_bet:.0%} max)" if stop_triggered else "Early exit", msg)
             log.info(msg)
 
     # --- self-learning volatility --------------------------------------------------------

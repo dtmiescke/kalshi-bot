@@ -83,7 +83,7 @@ class TestAppSummary(unittest.TestCase):
         html = (ROOT / "index.html").read_text(encoding="utf-8")
         workflow = (ROOT / ".github" / "workflows" / "bot.yml").read_text(encoding="utf-8")
         for name in ("APP_BANKROLL", "APP_MIN_BET", "APP_MAX_BET", "APP_BETS_PER_HOUR",
-                     "APP_MAX_OPEN_COST", "APP_STOP_LOSS", "APP_STYLE", "APP_STATS_SINCE"):
+                     "APP_MAX_OPEN_COST", "APP_MAX_LOSS_PCT", "APP_STOP_LOSS", "APP_STYLE", "APP_STATS_SINCE"):
             self.assertIn(f'"{name}"', html, name)
             self.assertIn(f"vars.{name}", workflow, name)     # every app field reaches the bot
         for ignored in ("BANKROLL", "MAX_PER_BET", "MAX_OPEN_COST", "DAILY_LOSS_LIMIT", "AGGRESSION_LEVEL"):
