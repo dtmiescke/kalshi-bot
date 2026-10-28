@@ -141,7 +141,7 @@ class TestStorageRetention(unittest.TestCase):
         self.assertIn("80000000", script)
         self.assertIn("95000000", script)
         # the size check runs before anything is pushed
-        self.assertLess(script.index("95000000"), script.index("git push"))
+        self.assertLess(script.index("95000000"), script.index("push_with_retry.sh"))
 
 
 if __name__ == "__main__":
