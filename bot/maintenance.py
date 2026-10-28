@@ -4,6 +4,7 @@ Janitor A removes duplicate raw snapshots and adds uniqueness constraints.
 Janitor B removes invalid raw rows and applies existing retention windows.
 Neither janitor deletes bets, forecasts, grades, lessons, model weights, or audit history.
 """
+import json
 import sqlite3
 import time
 
@@ -79,10 +80,69 @@ def janitor_retention(store, now=None):
             "ts": now}
 
 
+# decision_audit keeps every decision forever (calibration and backtests read
+# model_prob/outcome), but its signals_json snapshot with per-signal details is
+# read only for the newest graded rows (about a day of them). Older rows keep
+# each signal's probability and confidence plus small fields; bulky nested
+# details are dropped. It was 270 MB of an 888 MB database.
+AUDIT_DETAIL_DAYS = 3
+AUDIT_SLIM_OVER = 1500      # bytes; smaller snapshots are left alone
+AUDIT_SLIM_BATCH = 50_000
+
+
+def slim_signals(raw):
+    """Compact one signals_json snapshot; returns the new text."""
+    try:
+        sig = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return "{}"
+    if not isinstance(sig, dict):
+        return "{}"
+    out = {}
+    for name, v in sig.items():
+        if isinstance(v, dict) and any(k in v for k in ("p", "prob")):
+            p, c = v.get("p", v.get("prob")), v.get("c", v.get("confidence"))
+            out[name] = {"p": round(p, 4) if isinstance(p, (int, float)) else p,
+                         "c": round(c, 3) if isinstance(c, (int, float)) else c}
+        else:
+            text = json.dumps(v, default=str)
+            if len(text) <= 200:          # small tags (regime, setups) stay
+                out[name] = v
+    return json.dumps(out, separators=(",", ":"), default=str)
+
+
+def janitor_slim_audit(store, now=None, keep_days=AUDIT_DETAIL_DAYS, batch=AUDIT_SLIM_BATCH):
+    now = int(time.time() if now is None else now)
+    cutoff = now - int(keep_days * 86400)
+    saved = slimmed = 0
+    with store.lock:
+        db = store.db
+        try:
+            rows = db.execute("""SELECT id, signals_json FROM decision_audit
+                                 WHERE ts < ? AND length(signals_json) > ? LIMIT ?""",
+                              (cutoff, AUDIT_SLIM_OVER, batch)).fetchall()
+        except sqlite3.OperationalError:
+            return {"janitor": "slim_audit", "slimmed": 0, "bytes_saved": 0, "ts": now}
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            for rid, raw in rows:
+                new = slim_signals(raw)
+                if len(new) < len(raw or ""):
+                    db.execute("UPDATE decision_audit SET signals_json=? WHERE id=?", (new, rid))
+                    saved += len(raw) - len(new)
+                    slimmed += 1
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+    return {"janitor": "slim_audit", "slimmed": slimmed, "bytes_saved": saved, "ts": now}
+
+
 # Deleting rows frees pages but doesn't shrink the file until VACUUM. After a
 # big trim (e.g. a tighter retention window taking effect) compact at once
 # instead of waiting up to a day for the scheduled compaction.
 COMPACT_AFTER_ROWS = 100_000
+COMPACT_AFTER_BYTES = 50_000_000
 
 
 def run_janitors(store, now=None, force=False, every_hours=1):
@@ -97,9 +157,10 @@ def run_janitors(store, now=None, force=False, every_hours=1):
     # Dedupe first so the unique constraints protect subsequent writes.
     a = janitor_dedupe(store, now=now)
     b = janitor_retention(store, now=now)
-    result = {"ok": True, "janitor_a": a, "janitor_b": b, "ts": int(now)}
+    c = janitor_slim_audit(store, now=now)
+    result = {"ok": True, "janitor_a": a, "janitor_b": b, "janitor_c": c, "ts": int(now)}
     trimmed = sum(b["before"][t] - b["after"].get(t, b["before"][t]) for t in b["before"])
-    if trimmed >= COMPACT_AFTER_ROWS:
+    if trimmed >= COMPACT_AFTER_ROWS or c["bytes_saved"] >= COMPACT_AFTER_BYTES:
         store.compact()
         store.set_kv("last_compact", now)
         result["compacted_after_rows"] = trimmed
