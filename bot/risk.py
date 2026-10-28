@@ -293,3 +293,30 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
         "contracts": contracts, "stake": round(contracts * avg, 2), "fee": fee,
         "p_win": p_win, "edge": round(p_win - avg - fee / contracts, 4),
     }, "ok"
+
+
+def stop_loss_hit(entry_price, entry_fee_per, bid, exit_fee_per, max_loss=0.20, buffer=0.05):
+    """True once selling at `bid` would lose (after both fees) about max_loss of what the bet cost.
+
+    The trigger sits `buffer` inside the limit because the price moves between checks and the
+    sale can only take what the book holds; a trigger at exactly max_loss would usually fill
+    past it."""
+    cost = float(entry_price) + float(entry_fee_per)
+    if cost <= 0 or bid is None:
+        return False
+    loss = (cost - (float(bid) - float(exit_fee_per))) / cost
+    return loss >= max(0.0, max_loss - buffer)
+
+
+def sweep_bids(levels, contracts):
+    """Sell `contracts` into the bids, best first. levels: [(price, size)].
+    Returns (contracts sold, average price, worst price touched); (0, None, None) if no bids."""
+    left, got, cash, worst = int(contracts), 0, 0.0, None
+    for price, size in levels:
+        take = min(left, int(size))
+        if take < 1:
+            continue
+        got, cash, worst, left = got + take, cash + take * price, price, left - take
+        if left < 1:
+            break
+    return (got, round(cash / got, 4), worst) if got else (0, None, None)

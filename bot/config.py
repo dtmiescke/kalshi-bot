@@ -216,6 +216,10 @@ class Settings:
     maker_wait_s: int = field(default_factory=lambda: _env_int("MAKER_WAIT_SECONDS", 45))
     # sell early when the bid is worth more than holding (by this margin)
     exit_margin: float = field(default_factory=lambda: _env_pct("EXIT_MARGIN", 2))
+    # Cash out a bet once it has lost about this share of what it cost (fees included).
+    # The trigger sits stop_loss_buffer inside it so the sale lands at or under the limit.
+    max_loss_per_bet: float = field(default_factory=lambda: _env_pct("MAX_LOSS_PER_BET", 20))
+    stop_loss_buffer: float = field(default_factory=lambda: _env_pct("STOP_LOSS_BUFFER", 5))
     exits_enabled: bool = field(default_factory=lambda: _env("EXITS_ENABLED", "yes") == "yes")
 
     # --- fees ---------------------------------------------------------------
@@ -370,6 +374,10 @@ class Settings:
                             ("MAKER_FEE_RATE", self.maker_fee_rate)):
             if not math.isfinite(value) or not 0 < value <= 1:
                 raise ValueError(f"{name} must be greater than 0 and at most 1")
+        if not math.isfinite(self.max_loss_per_bet) or not 0 < self.max_loss_per_bet <= 1:
+            raise ValueError("MAX_LOSS_PER_BET must be above 0% and at most 100%")
+        if not math.isfinite(self.stop_loss_buffer) or not 0 <= self.stop_loss_buffer < self.max_loss_per_bet:
+            raise ValueError("STOP_LOSS_BUFFER must be at least 0 and below MAX_LOSS_PER_BET")
         if not math.isfinite(self.exit_margin) or not 0 <= self.exit_margin < 1:
             raise ValueError("EXIT_MARGIN must be between 0 and 1")
         if self.order_style not in ("maker", "taker"):
