@@ -42,6 +42,13 @@ jobs:
       HF_MEMORY_REPO: ${{ vars.HF_MEMORY_REPO || secrets.HF_MEMORY_REPO }}
       VAL_TOWN_KALSHI_URL: ${{ vars.VAL_TOWN_KALSHI_URL || secrets.VAL_TOWN_KALSHI_URL }}
       ATI_INGEST_SHARED_TOKEN: ${{ secrets.ATI_INGEST_SHARED_TOKEN }}
+      # Account, set from the phone app (Settings > Bet settings) through the APP_*
+      # repository variables; the values after || are the defaults. STATS_SINCE
+      # restarts P/L, balance, win rate and the loss limits from that moment
+      # ("Restart stats" in the app); older bets stay in memory and keep teaching
+      # the bot. Keep these two lines identical in bot.yml, train.yml, clear-pause.yml.
+      STATS_SINCE: ${{ vars.APP_STATS_SINCE || '2026-10-28T11:45:00Z' }}
+      BANKROLL: ${{ vars.APP_BANKROLL || '500' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -59,9 +66,14 @@ jobs:
       - name: Set crypto hourly ceiling
         id: daily-limits
         shell: bash
+        env:
+          BETS_PER_HOUR: ${{ vars.APP_BETS_PER_HOUR || '16' }}
+          MAX_BET: ${{ vars.APP_MAX_BET || '20' }}
         run: |
           echo "bot_mode=paper" >> "$GITHUB_OUTPUT"
-          echo "crypto_cap=${{ vars.CRYPTO_MAX_TRADES_PER_HOUR || '12' }}" >> "$GITHUB_OUTPUT"
+          echo "crypto_cap=$BETS_PER_HOUR" >> "$GITHUB_OUTPUT"
+          # one window = BTC+ETH+SOL+BNB settling together: room for all four at the max bet
+          echo "per_window=$(awk -v m="$MAX_BET" 'BEGIN{printf "%.2f", 4*m}')" >> "$GITHUB_OUTPUT"
           echo "Crypto hourly ceiling set; entries are not forced."
       - name: Run
         id: run
@@ -124,7 +136,7 @@ jobs:
           LLM_DAILY_LIMIT: ${{ vars.LLM_DAILY_LIMIT || '45' }}
           # Protect eight shared daily calls for the two-review AI council.
           LLM_COUNCIL_RESERVE: ${{ vars.LLM_COUNCIL_RESERVE || '8' }}
-          CRYPTO_COMBO_MAX_PER_BET: ${{ vars.CRYPTO_COMBO_MAX_PER_BET || '25' }}
+          CRYPTO_COMBO_MAX_PER_BET: ${{ vars.APP_MAX_BET || '20' }}
           CRYPTO_COMBO_MIN_LEG_EDGE: ${{ vars.CRYPTO_COMBO_MIN_LEG_EDGE || '3' }}
           CRYPTO_COMBO_MIN_EDGE: ${{ vars.CRYPTO_COMBO_MIN_EDGE || '6' }}
           # Keep council calls from consuming all capacity needed for sports event research.
@@ -132,22 +144,24 @@ jobs:
           FIXED_BET: ${{ vars.FIXED_BET }}
           BOT_TIMEZONE: ${{ vars.BOT_TIMEZONE || 'America/Chicago' }}
           ORDER_STYLE: ${{ vars.ORDER_STYLE || 'maker' }}
-          # Risk and strategy settings, editable from the phone app (Control > Settings)
-          BANKROLL: '200000'
-          MIN_PER_BET: '25'
-          MAX_PER_BET: '100'
-          MAX_PER_GAME: '750'
-          MAX_PER_DAY: '20000'
-          MAX_TOTAL_LOSS: '20000'
-          MAX_OPEN_POSITIONS: ${{ vars.MAX_OPEN_POSITIONS || '5' }}
-          MAX_OPEN_COST: '3750'
-          AGGRESSION_LEVEL: ${{ vars.AGGRESSION_LEVEL || 'aggressive' }}
+          # Bet settings from the phone app (APP_* variables). Defaults: $5-$20 bets,
+          # up to 4 coins x 4 fifteen-minute windows = 16 crypto bets an hour (each
+          # only when a trade clears the edge checks), stop if the $500 is lost.
+          MIN_PER_BET: ${{ vars.APP_MIN_BET || '5' }}
+          MAX_PER_BET: ${{ vars.APP_MAX_BET || '20' }}
+          MAX_PER_GAME: ${{ vars.APP_MAX_BET || '20' }}
+          MAX_PER_DAY: '8000'
+          MAX_TOTAL_LOSS: ${{ vars.APP_STOP_LOSS || '500' }}
+          MAX_DRAWDOWN: '100'
+          MAX_OPEN_POSITIONS: '8'
+          MAX_OPEN_COST: ${{ vars.APP_MAX_OPEN_COST || '160' }}
+          AGGRESSION_LEVEL: ${{ vars.APP_STYLE || 'aggressive' }}
           MIN_EDGE: ${{ vars.MIN_EDGE || '3' }}
           CRYPTO_MIN_EDGE: ${{ vars.CRYPTO_MIN_EDGE || '5' }}
           CRYPTO_MAX_TRADES_PER_HOUR: ${{ steps.daily-limits.outputs.crypto_cap }}
-          CRYPTO_MIN_BET: '25'
-          CRYPTO_MAX_PER_BET: '100'
-          CRYPTO_MAX_PER_WINDOW: '100'
+          CRYPTO_MIN_BET: ${{ vars.APP_MIN_BET || '5' }}
+          CRYPTO_MAX_PER_BET: ${{ vars.APP_MAX_BET || '20' }}
+          CRYPTO_MAX_PER_WINDOW: ${{ steps.daily-limits.outputs.per_window }}
           LADDERS_ENABLED: ${{ vars.LADDERS_ENABLED || 'yes' }}
           COUNCIL_MODE: ${{ vars.COUNCIL_MODE || 'advisory' }}
         run: python -m bot.main scheduled
@@ -167,7 +181,6 @@ jobs:
           # mode/bankroll/timezone as the run. Without these it always showed PAPER.
           BOT_MODE: paper
           LIVE_TRADING_CONFIRMED: "no"
-          BANKROLL: ${{ vars.BANKROLL || '200000' }}
           BOT_TIMEZONE: ${{ vars.BOT_TIMEZONE || 'America/Chicago' }}
         run: bash .github/save.sh
       - name: Queue the next run

@@ -47,7 +47,7 @@ class TestRequestedRiskSettings(unittest.TestCase):
     def test_lifetime_loss_is_isolated_by_mode(self):
         store = FakeStore(-20000)
         self.assertTrue(total_loss_tripped(store, limit=20000, mode="paper"))
-        self.assertEqual(store.calls[-1][1], ("paper",))
+        self.assertEqual(store.calls[-1][1], ("paper", 0))   # no STATS_SINCE: all history
 
     def test_invalid_lifetime_limit_fails_closed(self):
         self.assertTrue(total_loss_tripped(FakeStore(0), limit=float("nan"), mode="paper"))

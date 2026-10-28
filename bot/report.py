@@ -5,6 +5,7 @@ from collections import defaultdict
 
 from . import brain, guard
 from .metrics import net_roi
+from .storage import stats_since
 
 
 def _pct(x):
@@ -13,7 +14,7 @@ def _pct(x):
 
 def build(store):
     lines = []
-    bets = store.q("SELECT * FROM bets")
+    bets = store.q("SELECT * FROM bets WHERE ts>=?", (stats_since(),))   # since the last stats reset
     graded = [b for b in bets if b["status"] == "graded"]
     open_ = [b for b in bets if b["status"] == "open"]
     lines.append("=== KALSHI SPORTS BOT REPORT ===")

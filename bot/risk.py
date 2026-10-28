@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from . import brain, fees
+from .storage import stats_since
 from .adaptive_aggression import AggressionPolicy, choose, safe_settled_paper_results
 from .contextual_calibration import contextual_policy
 
@@ -128,8 +129,8 @@ def decide(s, store, mkt, model_prob, confidence, book, min_edge=None, max_per_b
     if not math.isfinite(total_loss_limit) or total_loss_limit <= 0:
         return None, "invalid total-loss limit; betting paused"
     lifetime = store.q(
-        "SELECT COALESCE(SUM(pnl),0) AS p FROM bets WHERE status='graded' AND mode=?",
-        (s.mode,),
+        "SELECT COALESCE(SUM(pnl),0) AS p FROM bets WHERE status='graded' AND mode=? AND ts>=?",
+        (s.mode, stats_since()),
     )
     lifetime_pnl = float(lifetime[0]["p"] if lifetime else 0.0)
     if lifetime_pnl <= -total_loss_limit:

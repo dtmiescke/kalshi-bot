@@ -179,14 +179,7 @@ const COINS=[
 // Each coin's ladder series ("price on <date>?"): swiped to after the 15-minute chart.
 const LADDER={BTC:"KXBTCD",ETH:"KXETHD",SOL:"KXSOLD",BNB:"KXBNBD"};
 const SETTINGS=[
-  {name:"AGGRESSION_LEVEL",label:"Paper trading aggression",type:"select",opts:["off","conservative","balanced","aggressive","adaptive"],def:"aggressive"},
   {name:"FIXED_BET",label:"Fixed bet ($, blank = auto sizing)",type:"number"},
-  {name:"MAX_PER_BET",label:"Max per bet ($)",type:"number",def:"25"},
-  {name:"MAX_PER_DAY",label:"Max per day ($)",type:"number",def:"150"},
-  {name:"DAILY_LOSS_LIMIT",label:"Stop for the day after losing ($)",type:"number",def:"30"},
-  {name:"BANKROLL",label:"Bankroll ($)",type:"number",def:"1000"},
-  {name:"MAX_OPEN_POSITIONS",label:"Max open positions",type:"number",def:"5"},
-  {name:"MAX_OPEN_COST",label:"Max money in open bets ($)",type:"number",def:"200"},
   {name:"MIN_EDGE",label:"Minimum edge on sports (%)",type:"number",def:"3",pct:true},
   {name:"CRYPTO_MIN_EDGE",label:"Minimum edge on 15-min crypto (%)",type:"number",def:"5",pct:true},
   {name:"LADDERS_ENABLED",label:"Hourly and daily crypto ladders",type:"select",opts:["yes","no"],def:"yes"},
@@ -201,7 +194,7 @@ const $=id=>document.getElementById(id);
 const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
 let cfg=null;try{cfg=JSON.parse(localStorage.getItem("kbot")||"null")}catch(e){}
 let demo=false, vars={}, wfState=null, runsCache=[], bets=[], sample=false, briefing="", report="";
-let council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
+let account=null, council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
 
 function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),2800)}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
@@ -323,7 +316,7 @@ async function loadDB(){
     if(sf.sha===loadDB.sha)return;
     try{const s=JSON.parse(await file("summary.json"));
       council=s.council||[];model=s.model||null;lessons=s.lessons||[];audit=s.audit||[];combos=s.combos||[];storage=s.storage||null;
-      summaryKV=s.kv||{};members=s.members||{};loadDB.sha=sf.sha;dbNote="";return}
+      summaryKV=s.kv||{};members=s.members||{};account=s.account||null;loadDB.sha=sf.sha;dbNote="";return}
     catch(e){/* fall back to the full database below */}
   }
   const f=(list||[]).find(x=>x.name==="bot.sqlite.gz")||(list||[]).find(x=>x.name==="bot.sqlite");
@@ -527,7 +520,7 @@ function ynTiles(sym){const L=live[activeKey(sym)]||{},yes=L.market?dollars(L.ma
 function spotLine(sym){const c=COINS.find(x=>x.sym===sym),f=v=>v==null?"–":"$"+(+v).toLocaleString(undefined,{minimumFractionDigits:c.dp,maximumFractionDigits:c.dp});
   return f(live[sym].spot)+" / "+f(strikeOf(activeKey(sym)))}
 function settleLine(sym){const L=live[activeKey(sym)];return L&&L.close?closeLabel(L)+" · in "+countdown(activeKey(sym)):"–"}
-function kpis(){const s=statsOf(bets),br=+(vars.BANKROLL||1000),open=s.open.reduce((a,b)=>a+(b.stake||0),0);
+function kpis(){const s=statsOf(bets),br=account&&account.bankroll?+account.bankroll:500,open=s.open.reduce((a,b)=>a+(b.stake||0),0);
   const today=graded(bets).filter(b=>(b.exitTs||b.ts)>=new Date().setHours(0,0,0,0)).reduce((a,b)=>a+b.pnl,0);
   return`<section class="grid2">
     <div class="tile"><small>Total P/L</small><b class="num ${cls(s.total)}">${smoney(s.total)}</b><em>Today ${smoney(today)}</em></div>
@@ -645,10 +638,11 @@ function screenSettings(){
   return header("Settings")+
     `<section class="card" style="gap:0"><button class="switch" data-act="power"><span class="rowmain"><b>Bot ${wfState?(on?"running":"paused"):"not connected"}</b><small>${wfState?(on?"Runs on its own schedule. Tap to pause.":"Won’t run or bet. Tap to resume."):"Connect a token to control the bot."}</small></span><span class="tog ${on?"on":""}"><i></i></span></button>
       <div class="kv"><span>Mode</span><b>${esc((vars.BOT_MODE||"paper").replace(/^./,c=>c.toUpperCase()))} (locked)</b></div></section>`+
+    betCard()+
     `<div style="display:flex;gap:8px"><button class="btn primary" style="flex:1" data-act="run">Run now</button><button class="btn" style="flex:1" data-act="train">Retrain model</button></div>`+
     `<section class="card list"><div class="cardhead"><h2>Recent runs</h2></div>${runsCache.map(r=>{const lv=r.status!=="completed",word=lv?(r.status==="queued"?"Queued":"Running"):({success:"Done",failure:"Failed",cancelled:"Stopped"}[r.conclusion]||r.conclusion);
       return`<div class="row" style="min-height:52px"><span class="dot ${!lv&&r.conclusion==="failure"?"off":""}"></span><span class="rowmain"><b><a href="${esc(r.html_url)}" target="_blank" rel="noopener" style="color:inherit">${esc(r.name)} #${r.run_number}</a></b><small>${word} · ${ago(Date.parse(r.created_at))}</small></span>${lv?`<button class="btn small" data-act="stop" data-v="${r.id}">Stop</button>`:""}</div>`}).join("")||`<p class="empty">${demo?"Connect a token to see runs.":"No runs yet."}</p>`}</section>`+
-    `<section class="card"><h2>Trading settings</h2>${SETTINGS.map(s=>{let val=vars[s.name]??"";if(s.pct&&val!==""&&+val<=1)val=String(+(+val*100).toFixed(4));
+    `<section class="card"><h2>More settings</h2>${SETTINGS.map(s=>{let val=vars[s.name]??"";if(s.pct&&val!==""&&+val<=1)val=String(+(+val*100).toFixed(4));
       if(s.type==="select"){const cur=val||s.def;return`<label class="field">${s.label}<select data-var="${s.name}">${s.opts.map(o=>`<option${o===cur?" selected":""}>${o}</option>`).join("")}</select></label>`}
       return`<label class="field">${s.label}<input data-var="${s.name}" ${s.type==="text"?'type="text" autocapitalize="off"':'type="number" inputmode="decimal" step="any"'} value="${esc(val)}" placeholder="${s.def?"Default "+s.def:"Off"}"></label>`}).join("")}
       <button class="btn primary" data-act="saveVars">Save settings</button></section>`+
@@ -657,6 +651,46 @@ function screenSettings(){
     (dbNote?`<p class="note">${esc(dbNote)}</p>`:"")+
     `<button class="btn" data-act="logout">${demo?"Connect a token":"Disconnect this phone"}</button>`;
 }
+// Bet settings: the APP_* repository variables the bot workflow reads (defaults in bot.yml).
+const BET_FIELDS=[
+  {name:"APP_BANKROLL",label:"Bankroll ($)",def:500,acct:"bankroll",min:1},
+  {name:"APP_MIN_BET",label:"Smallest bet ($)",def:5,acct:"min_per_bet",min:1},
+  {name:"APP_MAX_BET",label:"Biggest bet ($)",def:20,acct:"max_per_bet",min:1},
+  {name:"APP_BETS_PER_HOUR",label:"Most crypto bets per hour",hint:"16 = all 4 coins every 15 minutes",def:16,acct:"crypto_max_trades_per_hour",min:0,max:60,int:true},
+  {name:"APP_MAX_OPEN_COST",label:"Most money in open bets ($)",def:160,acct:"max_open_cost",min:1},
+  {name:"APP_STOP_LOSS",label:"Stop betting after losing ($)",def:500,acct:"max_total_loss",min:1},
+];
+const STYLES=[["conservative","Careful"],["balanced","Balanced"],["aggressive","Aggressive"],["adaptive","Adaptive"],["off","Strict (no boost)"]];
+function betValue(f){const v=vars[f.name];if(v!=null&&v!=="")return String(v);const a=account&&account[f.acct];return String(a!=null?+a:f.def)}
+function betCard(){
+  const style=vars.APP_STYLE||(account&&account.aggression_level)||"aggressive",since=account&&account.stats_since;
+  return`<section class="card" id="betcard"><div class="cardhead"><h2>Bet settings</h2><span class="pill">Paper</span></div>
+    ${BET_FIELDS.map(f=>{const v=betValue(f);return`<label class="field">${f.label}<input data-bet="${f.name}" data-orig="${esc(v)}" type="number" inputmode="${f.int?"numeric":"decimal"}" step="${f.int?1:"any"}" min="${f.min}"${f.max?` max="${f.max}"`:""} value="${esc(v)}">${f.hint?`<small class="note">${f.hint}</small>`:""}</label>`}).join("")}
+    <label class="field">Style<select data-bet="APP_STYLE" data-orig="${esc(style)}">${STYLES.map(([v,l])=>`<option value="${v}"${v===style?" selected":""}>${l}</option>`).join("")}</select></label>
+    <button class="btn primary" data-act="saveBets">Save bet settings</button>
+    <div class="kv" style="border-top:1px solid var(--line2);margin-top:4px"><span>Stats since</span><b class="num">${since?when(since*1000):"The start"}</b></div>
+    <button class="btn" data-act="resetStats">Restart stats from now</button>
+    <small class="note">Changes apply from the bot’s next run (within about 15 minutes). Restarting stats clears P/L, balance and win rate; everything the bot learned is kept.</small>
+  </section>`}
+function betErrors(v){const n=k=>+v[k],e=[];
+  for(const f of BET_FIELDS){const x=n(f.name);if(!isFinite(x)||x<f.min||(f.max!=null&&x>f.max)||(f.int&&!Number.isInteger(x)))e.push(f.label.replace(/ \(\$\)/,"")+": enter "+(f.int?"a whole number":"an amount")+" of at least "+f.min+(f.max!=null?" and at most "+f.max:""))}
+  if(!e.length){
+    if(n("APP_MIN_BET")>n("APP_MAX_BET"))e.push("Smallest bet can’t be more than the biggest bet");
+    if(n("APP_MAX_BET")>n("APP_BANKROLL"))e.push("Biggest bet can’t be more than the bankroll");
+    if(n("APP_MAX_OPEN_COST")<n("APP_MAX_BET"))e.push("Money in open bets must allow at least one biggest bet");
+  }
+  return e}
+async function saveBets(btn){
+  const els=[...document.querySelectorAll("[data-bet]")],v={};els.forEach(el=>v[el.dataset.bet]=el.value.trim());
+  const errs=betErrors(v);if(errs.length){toast(errs[0]);return}
+  btn.disabled=true;let n=0;
+  try{for(const el of els){const val=v[el.dataset.bet];if(val===el.dataset.orig)continue;await setVar(el.dataset.bet,val);el.dataset.orig=val;n++}
+    toast(n?"Saved. The bot uses it from its next run.":"Nothing changed")}catch(e){toast(explain(e))}btn.disabled=false}
+async function resetStats(btn){
+  if(!confirm("Restart P/L, balance and win rate from now?\n\nPast bets stay in the bot’s memory, so nothing it learned is lost."))return;
+  btn.disabled=true;
+  try{const now=new Date().toISOString().slice(0,19)+"Z";await setVar("APP_STATS_SINCE",now);toast("Stats restart from now. The app shows it after the bot’s next save.")}
+  catch(e){toast(explain(e))}btn.disabled=false}
 function customizeSheet(){
   const leagues=[...new Set(bets.filter(b=>!b.coin).map(b=>b.league))].sort();
   return`<div class="sheetbg" data-act="closeSheet"><div class="sheet" role="dialog" aria-label="Customize sports" data-stop="1">
@@ -742,6 +776,8 @@ document.addEventListener("click",async e=>{
   if(a==="train")return dispatch(TRAIN_WF,"Training",t);
   if(a==="stop"){try{await gh("/actions/runs/"+v+"/cancel",{method:"POST"});toast("Stopping run");setTimeout(refresh,3000)}catch(err){toast(explain(err))}return}
   if(a==="saveVars")return saveVars(t);
+  if(a==="saveBets")return saveBets(t);
+  if(a==="resetStats")return resetStats(t);
   if(a==="logout"){localStorage.removeItem("kbot");location.reload()}
 });
 function saveCustom(){try{localStorage.setItem("kbot_custom",JSON.stringify(custom))}catch(e){}}
@@ -769,7 +805,8 @@ async function refresh(){
     file("LIVE.json").then(t=>{try{liveSnap=t?JSON.parse(t):null}catch(e){liveSnap=null}}).catch(()=>{});
   }else{sample=true;bets=sampleBets();briefing="Sample mode. Your bot’s AI briefing shows here once connected.";report="Sample mode."}
   await loadDB().catch(()=>{});
-  if(!document.querySelector("[data-var]:focus"))render();
+  const editing=document.querySelector("[data-var]:focus,[data-bet]:focus")||[...document.querySelectorAll("[data-bet]")].some(el=>el.value.trim()!==el.dataset.orig);
+  if(!editing)render();   // never wipe unsaved bet settings
 }
 function start(){
   $("setup").hidden=true;$("screen").hidden=false;$("tabs").hidden=false;

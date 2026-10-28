@@ -79,6 +79,19 @@ class TestAppSummary(unittest.TestCase):
         self.assertIn('data-live="yn:', html)                    # Yes/No prices follow the shown slide
         self.assertIn("Swipe for ladders", html)
 
+    def test_bet_settings_are_edited_through_the_variables_the_bot_reads(self):
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github" / "workflows" / "bot.yml").read_text(encoding="utf-8")
+        for name in ("APP_BANKROLL", "APP_MIN_BET", "APP_MAX_BET", "APP_BETS_PER_HOUR",
+                     "APP_MAX_OPEN_COST", "APP_STOP_LOSS", "APP_STYLE", "APP_STATS_SINCE"):
+            self.assertIn(f'"{name}"', html, name)
+            self.assertIn(f"vars.{name}", workflow, name)     # every app field reaches the bot
+        for ignored in ("BANKROLL", "MAX_PER_BET", "MAX_OPEN_COST", "DAILY_LOSS_LIMIT", "AGGRESSION_LEVEL"):
+            self.assertNotIn(f'{{name:"{ignored}"', html)      # old fields the bot never read
+        self.assertIn("account=s.account||null", html)           # current values from summary.json
+        self.assertIn('data-act="resetStats"', html)
+        self.assertIn("Smallest bet can’t be more than the biggest bet", html)
+
     def test_bets_csv_carries_compact_signals_for_bet_details(self):
         self.st.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,stake,fee,
                      status,signals_json) VALUES(1,'paper','KXBTC15M-X','E','KXBTC15M','yes',0.5,1,0.5,0,'open',?)""",

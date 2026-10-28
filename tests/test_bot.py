@@ -680,11 +680,17 @@ class TestCryptoFourCoinConfiguration(unittest.TestCase):
     def test_requested_stake_limits_are_enforced_by_workflow_configuration(self):
         from pathlib import Path
         workflow = Path(".github/workflows/bot.yml").read_text()
-        self.assertIn("MIN_PER_BET: '25'", workflow)
-        self.assertIn("MAX_PER_BET: '100'", workflow)
-        self.assertIn("CRYPTO_MIN_BET: '25'", workflow)
-        self.assertIn("CRYPTO_MAX_PER_BET: '100'", workflow)
-        self.assertIn("CRYPTO_MAX_PER_WINDOW: '100'", workflow)
+        # $500 bankroll, $5-$20 bets, all four coins every 15-minute window
+        # defaults (the app can change them): $500 bankroll, $5-$20 bets, all four coins every window
+        self.assertIn("BANKROLL: ${{ vars.APP_BANKROLL || '500' }}", workflow)
+        self.assertIn("MIN_PER_BET: ${{ vars.APP_MIN_BET || '5' }}", workflow)
+        self.assertIn("MAX_PER_BET: ${{ vars.APP_MAX_BET || '20' }}", workflow)
+        self.assertIn("CRYPTO_MIN_BET: ${{ vars.APP_MIN_BET || '5' }}", workflow)
+        self.assertIn("CRYPTO_MAX_PER_BET: ${{ vars.APP_MAX_BET || '20' }}", workflow)
+        self.assertIn("BETS_PER_HOUR: ${{ vars.APP_BETS_PER_HOUR || '16' }}", workflow)  # 4 coins x 4 windows
+        self.assertIn('printf "%.2f", 4*m', workflow)                 # window cap = 4 coins x biggest bet
+        self.assertIn("MAX_TOTAL_LOSS: ${{ vars.APP_STOP_LOSS || '500' }}", workflow)
+        self.assertIn("AGGRESSION_LEVEL: ${{ vars.APP_STYLE || 'aggressive' }}", workflow)
         self.assertIn("BOT_MODE: paper", workflow)
         self.assertIn('LIVE_TRADING_CONFIRMED: "no"', workflow)
         self.assertIn("PAPER-ONLY LOCK", workflow)
