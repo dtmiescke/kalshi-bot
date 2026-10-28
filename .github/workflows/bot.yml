@@ -167,14 +167,14 @@ jobs:
           MIN_EDGE: ${{ vars.MIN_EDGE || '3' }}
           CRYPTO_MIN_EDGE: ${{ vars.CRYPTO_MIN_EDGE || '5' }}
           # One long stream instead of 10-minute bursts: it ends 4 minutes into a window, saves
-          # memory every 10 minutes meanwhile, grades every 5, and hands over early when a
+          # memory every 20 minutes meanwhile, grades every 5, and hands over early when a
           # deploy or another run is waiting (bot/handoff.py).
           BURST_TARGET_MINUTES: '180'
           GRADE_EVERY_SECONDS: '300'
           PERIODIC_EVERY_SECONDS: '600'
           HANDOFF_CHECK: 'yes'
           SAVE_CMD: bash .github/save.sh
-          SAVE_EVERY_SECONDS: '600'
+          SAVE_EVERY_SECONDS: '1200'
           GITHUB_TOKEN: ${{ github.token }}
           SHRINK_TO_MARKET: ${{ vars.APP_CALIBRATE || 'yes' }}
           MAX_LOSS_PER_BET: ${{ vars.APP_MAX_LOSS_PCT || '20' }}

@@ -136,4 +136,4 @@ class TestStreamLoop(unittest.TestCase):
             self.assertLess(time.time() - started, 60)         # handed over at the stop point instead
             self.assertGreaterEqual(len(graded), 3)            # settled while streaming (+1 at the end)
             self.assertGreaterEqual(len(periodic), 2)          # ladders and combos keep running through the stream
-            self.assertEqual(len(alerts_sent), 1)              # a failing save alerts once, not every attempt
+            self.assertEqual(len(alerts_sent), 2)              # a failing save alerts at the first and third failure, not every attempt

@@ -28,6 +28,7 @@ python -c 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); result=c.execute(
 python -m bot.main report > /tmp/REPORT.txt || { echo "WARNING: report failed; saving memory anyway." >&2; echo "report unavailable" > /tmp/REPORT.txt; }
 python -m bot.main dashboard > /dev/null || echo "WARNING: dashboard failed; saving memory anyway." >&2
 
+HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 # Store a compressed SQLite snapshot on bot-data to keep Git objects below
@@ -106,7 +107,7 @@ if [ "$base" = "missing" ] || { [ "$base" = "none" ] && [ -n "$current" ]; } || 
   python -c 'import sys; from bot import alerts; alerts.send("Memory save skipped", sys.argv[1], priority="high", tags=["warning"])' "bot-data changed during this run; this run's memory was not saved so the newer copy is kept." || true
   exit 1
 fi
-if timeout --foreground "${GIT_REMOTE_TIMEOUT_SECONDS}s" git push --progress -f "$REMOTE" HEAD:bot-data; then
+if bash "$HERE/push_with_retry.sh" "$REMOTE" bot-data; then
   # a later save in the same job (e.g. a mid-session save) builds on this one
   git rev-parse HEAD > "$BASE_FILE"
   echo "Persistent memory saved."
