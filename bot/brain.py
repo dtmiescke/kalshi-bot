@@ -43,6 +43,11 @@ MIN_W, MAX_W = 0.05, 5.0
 ETA = 0.05            # learning rate: small = slow, steady learning
 CAL_MIN_SAMPLES = 60  # don't trust calibration until this many graded markets
 MIN_LEARN_SAMPLES = 20  # per signal and domain; prevents single-result overfitting
+# Learn only from markets that were still a real bet at the decision cutoff. When
+# Kalshi's price is already near 0 or 1 the outcome is decided and its quote is
+# often a stale mid: any signal "beats" it there, which taught the brain to trust
+# signals that lose to Kalshi on the markets the bot actually trades.
+LEARN_BAND = (0.10, 0.90)
 
 
 def domain_of(ticker_or_series):
@@ -167,7 +172,7 @@ def learn(store, graded, domain=None):
     for g in graded:
         y = g["_outcome"]
         mkt = g.get("kalshi_market")
-        if mkt is None:
+        if mkt is None or not LEARN_BAND[0] <= mkt <= LEARN_BAND[1]:
             continue
         base = log_loss(mkt, y)
         for name, p in g.items():

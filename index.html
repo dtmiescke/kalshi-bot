@@ -178,6 +178,11 @@ svg text{font-family:Inter,system-ui,sans-serif}
 .cal b{text-align:right;font-weight:600}
 .hours{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:4px}
 .hours .bar{height:80px} .hours .bar .u,.hours .bar .d{height:40px}
+.rc{display:grid;grid-template-columns:minmax(0,1fr) 80px 56px;align-items:center;gap:10px;min-height:48px;border-top:1px solid var(--line2)}
+.rcbar{position:relative;height:8px;background:var(--line2);border-radius:4px}
+.rcbar::after{content:"";position:absolute;left:50%;top:-3px;width:1px;height:14px;background:var(--muted2)}
+.rcbar i{position:absolute;top:0;bottom:0;border-radius:4px} .rcbar i.g{background:var(--blue)} .rcbar i.b{background:var(--down)}
+.rc>b{text-align:right;font-size:13px}
 .hourlab{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:4px;font-size:9px;color:var(--muted);text-align:center}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -231,7 +236,7 @@ const $=id=>document.getElementById(id);
 const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
 let cfg=null;try{cfg=JSON.parse(localStorage.getItem("kbot")||"null")}catch(e){}
 let demo=false, vars={}, wfState=null, runsCache=[], bets=[], sample=false, briefing="", report="";
-let account=null, council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
+let account=null, sigReport=[], council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
 
 function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),2800)}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
@@ -358,7 +363,7 @@ async function loadDB(){
     if(sf.sha===loadDB.sha)return;
     try{const s=JSON.parse(await file("summary.json"));
       council=s.council||[];model=s.model||null;lessons=s.lessons||[];audit=s.audit||[];combos=s.combos||[];storage=s.storage||null;
-      summaryKV=s.kv||{};members=s.members||{};account=s.account||null;loadDB.sha=sf.sha;dbNote="";return}
+      summaryKV=s.kv||{};members=s.members||{};account=s.account||null;sigReport=s.signals||[];loadDB.sha=sf.sha;dbNote="";return}
     catch(e){/* fall back to the full database below */}
   }
   const f=(list||[]).find(x=>x.name==="bot.sqlite.gz")||(list||[]).find(x=>x.name==="bot.sqlite");
@@ -622,11 +627,21 @@ function screenInsights(){
       ${I.cal.map(r=>`<div class="cal"><span class="muted">${r.l}</span><span class="track"><i style="width:${Math.round(r.won*100)}%"></i><u style="left:calc(${Math.round(r.said*100)}% - 1px)"></u></span><b class="num">${Math.round(r.won*100)}% <span class="muted" style="font-weight:500">of ${r.n}</span></b></div>`).join("")}</section>`+
     `<section class="card"><h2>P/L by time of day</h2><div class="bars hours">${I.hours.map(v=>`<div class="bar"><div class="u"><i style="height:${v>0?Math.round(v/mx*38):0}px"></i></div><div class="d"><i style="height:${v<0?Math.round(-v/mx*38):0}px"></i></div></div>`).join("")}</div>
       <div class="hourlab">${["12a","2a","4a","6a","8a","10a","12p","2p","4p","6p","8p","10p"].map(h=>`<span>${h}</span>`).join("")}</div></section>`+
+    (sym?"":reportCard())+
     `<section class="card" style="gap:0"><div class="cardhead"><h2>Edge check</h2></div>
       <div class="kv"><span>Avg edge on winners</span><b class="num">${pts(I.edgeW)}</b></div>
       <div class="kv"><span>Avg edge on losers</span><b class="num">${pts(I.edgeL)}</b></div>
       <div class="kv"><span>Read</span><b>${I.edgeW!=null&&I.edgeL!=null?(I.edgeW-I.edgeL>=0.01?"Bigger edges win more often":"Edge size isn’t predicting wins yet"):"Not enough data"}</b></div></section>`;
 }
+function reportCard(){ // each signal's record vs Kalshi's own price on the same settled markets (summary.json)
+  const rows=sample?[{type:"15m",signal:"crypto_model",n:332,skill:-0.057,weight:1.1},{type:"15m",signal:"crypto_orderbook",n:269,skill:-0.043,weight:0.31},{type:"15m",signal:"crypto_momentum",n:332,skill:-0.062,weight:0.17},{type:"ladder",signal:"_blend",n:1899,skill:0.486},{type:"ladder",signal:"crypto_model",n:2736,skill:0.601,weight:1.1}]:sigReport;
+  let last=null;
+  const body=rows.length?rows.map(r=>{const head=r.type!==last?`<span class="cap" style="margin-top:8px">${r.type==="ladder"?"LADDER MARKETS":"15-MINUTE MARKETS"}</span>`:"";last=r.type;return head+(()=>{const sk=r.skill*100,good=sk>=0,w=Math.min(50,Math.abs(sk)*5);
+    return`<div class="rc"><span class="rowmain"><b>${r.signal==="_blend"?"Bot’s final forecast":esc(SIGNAL_NAMES[r.signal]||r.signal)}</b><small>${plural(r.n,"market")}${r.weight!=null?" · weight "+r.weight.toFixed(2):""}</small></span>
+      <span class="rcbar"><i class="${good?"g":"b"}" style="${good?"left:50%":"right:50%"};width:${w.toFixed(1)}%"></i></span><b class="num ${good?"up":"down"}">${good?"+":"−"}${Math.abs(sk).toFixed(1)}%</b></div>`})()}).join("")
+    :`<p class="empty">Fills in as markets settle (needs 5 per signal).</p>`;
+  return`<section class="card"><div class="cardhead"><h2>Signal report card</h2><small class="muted">vs Kalshi’s price</small></div>
+    <small class="muted" style="margin-top:-6px">Right of center = more accurate than Kalshi’s own odds on the same markets (last 30 days, only where the price was 10–90¢). Left = Kalshi was better.</small>${body}</section>`}
 function coinRows(sub){return`<section class="card list"><div class="cardhead"><h2>Performance by coin</h2><small class="muted">Tap for details</small></div>
   ${COINS.map(c=>{const list=bets.filter(b=>b.coin===c.sym),s=statsOf(list);
     return`<button class="row" data-act="coin" data-v="${c.sym}" data-sub="${sub||"stats"}"><span class="badge">${c.sym}</span><span class="rowmain"><b>${c.name}</b><small>${plural(s.count,"bet")} · ${pct(s.win)} won</small></span><span id="spark-${c.sym}" data-live="spark:${c.sym}" style="width:64px;height:26px"></span><span class="rowend num ${cls(s.total)}">${smoney(s.total)}</span>${CHEV}</button>`}).join("")}</section>`}
