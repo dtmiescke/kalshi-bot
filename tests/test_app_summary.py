@@ -92,6 +92,13 @@ class TestAppSummary(unittest.TestCase):
         self.assertIn('data-act="resetStats"', html)
         self.assertIn("Smallest bet can’t be more than the biggest bet", html)
 
+    def test_pnl_card_swipes_to_bankroll(self):
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<div class="slides" data-sym="pnl">', html)   # same swipe widget as the live charts
+        self.assertIn('id="bankchart"', html)
+        self.assertIn('data-base="${br}"', html)                        # chart baseline = starting bankroll
+        self.assertIn("Swipe for bankroll", html)
+
     def test_bets_csv_carries_compact_signals_for_bet_details(self):
         self.st.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,stake,fee,
                      status,signals_json) VALUES(1,'paper','KXBTC15M-X','E','KXBTC15M','yes',0.5,1,0.5,0,'open',?)""",
