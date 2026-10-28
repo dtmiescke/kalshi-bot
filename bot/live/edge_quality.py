@@ -19,7 +19,7 @@ def edge_quality(readings, source_summary, max_divergence_bps=25.0):
     model_names = {
         "crypto_model", "crypto_model_iv", "ml_model", "crypto_trend_strategy",
         "crypto_mean_reversion_strategy", "crypto_breakout_strategy",
-        "crypto_multi_timeframe_chart", "spot_flow", "crypto_orderbook",
+        "crypto_multi_timeframe_chart", "spot_flow", "crypto_orderbook", "crypto_playbook",
     }
     values = []
     for reading in readings or ():

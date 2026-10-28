@@ -195,7 +195,15 @@ class Settings:
     crypto_longshot_price: float = field(
         default_factory=lambda: _env_float("CRYPTO_LONGSHOT_PRICE", 0.20))
     crypto_min_minutes: float = 2.0    # too close to the bell: our price feed lags
-    crypto_max_minutes: float = 13.0   # too early: strike may not be set yet
+    # Each 15-minute window: the bot reads and tests the chart READ_SECONDS in,
+    # then may bet from ENTRY_DELAY_SECONDS in (so max minutes left = 15 - delay).
+    crypto_read_seconds: float = field(default_factory=lambda: _env_float("CRYPTO_READ_SECONDS", -20.0))
+    crypto_read_every_seconds: float = field(default_factory=lambda: _env_float("CRYPTO_READ_EVERY_SECONDS", 10.0))
+    crypto_entry_delay_seconds: float = field(default_factory=lambda: _env_float("CRYPTO_ENTRY_DELAY_SECONDS", 90.0))
+
+    @property
+    def crypto_max_minutes(self):
+        return 15.0 - self.crypto_entry_delay_seconds / 60.0
 
     # --- execution ---------------------------------------------------------------
     # FIXED_BET: dollars per bet you choose (still capped by the limits above).

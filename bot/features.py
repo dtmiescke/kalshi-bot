@@ -252,4 +252,7 @@ def names():
     demo = [{"ts": 1_700_000_000 + 60 * i, "open": 100 + i * .01, "high": 100.1 + i * .01,
              "low": 99.9 + i * .01, "close": 100 + (i % 7) * .03 + i * .01, "volume": 1 + i % 3}
             for i in range(200)]
-    return sorted(build(demo, 101.0, 400, 0.4, 0.42).keys())
+    # token / liquidity / volume inputs (bot/token_data.py) sit after the chart
+    # indicators; rows logged before they existed read as 0.0 with tk_has = 0
+    from .token_data import FEATURE_NAMES as token_names
+    return sorted(build(demo, 101.0, 400, 0.4, 0.42).keys()) + list(token_names)

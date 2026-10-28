@@ -165,6 +165,9 @@ jobs:
           AGGRESSION_LEVEL: ${{ vars.APP_STYLE || 'aggressive' }}
           MIN_EDGE: ${{ vars.MIN_EDGE || '3' }}
           CRYPTO_MIN_EDGE: ${{ vars.CRYPTO_MIN_EDGE || '5' }}
+          CRYPTO_READ_SECONDS: '-20'
+          CRYPTO_READ_EVERY_SECONDS: '10'
+          CRYPTO_ENTRY_DELAY_SECONDS: '90'
           CRYPTO_MAX_TRADES_PER_HOUR: ${{ steps.daily-limits.outputs.crypto_cap }}
           CRYPTO_MIN_BET: ${{ vars.APP_MIN_BET || '5' }}
           CRYPTO_MAX_PER_BET: ${{ vars.APP_MAX_BET || '20' }}

@@ -145,6 +145,7 @@ def sim_trades(p, X, cols, y, groups, fee_rate=0.07, thresholds=(0.03, 0.05, 0.0
     REALISM: pays half a cent of slippage on top of the ask, and skips minutes
     where the spread was so wide the quoted ask likely had no real size."""
     li, si = cols.index("kalshi_logit"), cols.index("kalshi_spread")
+    ml_ = cols.index("min_left") if "min_left" in cols else None
     out = {}
     for t in thresholds:
         done, trades, wins = set(), [], 0
@@ -153,7 +154,7 @@ def sim_trades(p, X, cols, y, groups, fee_rate=0.07, thresholds=(0.03, 0.05, 0.0
                 continue
             mid = 1 / (1 + math.exp(-X[i, li]))
             sp = X[i, si]
-            if sp > MAX_SIM_SPREAD:
+            if sp > MAX_SIM_SPREAD or (ml_ is not None and X[i, ml_] > 13.55):   # the live bot doesn't trade before 90 s in (13.5 min left)
                 continue
             for side, pw, cost in (("yes", p[i], mid + sp / 2 + SLIPPAGE),
                                    ("no", 1 - p[i], 1 - mid + sp / 2 + SLIPPAGE)):

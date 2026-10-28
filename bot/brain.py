@@ -38,6 +38,7 @@ DEFAULT_WEIGHTS = {
     "crypto_multi_timeframe_chart": 0.15,
     "crypto_perp_funding": 0.10,   # Hyperliquid crowding (contrarian)
     "crypto_perp_premium": 0.10,   # Hyperliquid perp-vs-oracle flow
+    "crypto_playbook": 0.15,       # setups validated after fees in this market condition (bot/hindsight.py)
 }
 MIN_W, MAX_W = 0.05, 5.0
 ETA = 0.05            # learning rate: small = slow, steady learning
