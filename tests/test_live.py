@@ -1,4 +1,5 @@
 """Offline tests for live streaming, the council, and history replay."""
+import json
 import os
 import tempfile
 import time
@@ -221,6 +222,11 @@ class TestRunner(unittest.TestCase):
             self.assertEqual(len(bets), 1)
             self.assertEqual(bets[0]["side"], "yes")
             r.dump(now, os.path.join(d, "live.json"))
+            with open(os.path.join(d, "live.json")) as f:
+                dumped = json.load(f)
+            model = dumped["markets"][ticker]["model"]      # the app draws the bot's line from this
+            self.assertTrue(0 < model["prob"] < 1)
+            self.assertIn("conf", model)
             del os.environ["BOT_DB"]
 
 

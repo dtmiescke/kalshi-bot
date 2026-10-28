@@ -80,6 +80,7 @@ class LiveRunner:
         self.with_context = with_context
         self.seed_candles = {}    # series -> Coinbase 1-minute candles (OHLCV)
         self.makers = {}          # ticker -> resting maker order
+        self.last_prob = {}       # ticker -> latest blended model probability (for the app)
         # A prior process may have died after Kalshi accepted a resting order.
         # Do not resume trading until that exchange state is reconciled manually.
         prior_maker = self.store.get_kv("maker_recovery")
@@ -540,6 +541,7 @@ class LiveRunner:
         info = self.markets[ticker]
         if prob is not None:
             prob = brain.calibrate(prob, self.store, domain=brain.domain_of(info["series"]))
+            self.last_prob[ticker] = {"prob": round(prob, 4), "conf": round(conf or 0, 3), "ts": round(time.time())}
         snap = {"ticker": ticker, "event_ticker": info["event"], "series": info["series"],
                 "team": "UP"}
         if maker is None:
@@ -1125,6 +1127,7 @@ class LiveRunner:
                "coins": {s: a.summary(now) for s, a in self.coins.items()},
                "markets": {t: {"secs_left": round(m["terms"]["close_ts"] - now) if m["terms"]["close_ts"] else None,
                                "strike": m["terms"]["strike"], "kalshi_mid": self.books[t].mid(),
+                               "model": self.last_prob.get(t),
                                "ticker": self.ticker_updates.get(t)}
                            for t, m in self.markets.items() if t in self.books},
                "kalshi_feed": {"channel": "ticker + orderbook_delta",
