@@ -7,7 +7,7 @@ import json
 import logging
 import time
 
-from . import brain, ml, window_review
+from . import brain, hindsight, ml, window_review
 
 log = logging.getLogger("bot")
 
@@ -124,6 +124,7 @@ def learn_from_markets(store, client, max_fetch=150):
         ml.label(store, t, y)      # live decisions become training rows
         try:                       # and the window's opening read gets what really happened
             window_review.settle(store, t, y, now)
+            hindsight.review_window(store, t, y)      # which setup would have worked?
         except Exception as e:
             log.warning("window review failed for %s: %s", t, e)
         # the last reading of each signal before the game started

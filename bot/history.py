@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from . import brain, features, ml, vol as volmod
+from . import brain, features, hindsight, ml, vol as volmod
 from .live.settlement import contract_terms, prob_above
 from .risk import taker_fee
 from .metrics import binary_contract_roi
@@ -159,7 +159,7 @@ def vol_before(spot, ts, window=60):
     return math.sqrt(sum((r - mu) ** 2 for r in rets) / (len(rets) - 1))
 
 
-def replay_market(m, candles, spot, fee_rate, min_left=2, max_left=13, spot_list=None,
+def replay_market(m, candles, spot, fee_rate, min_left=2, max_left=13.5, spot_list=None,
                   store=None, spot_keys=None):
     """One record per minute where entry was allowed: model vs Kalshi prices.
     With spot_list (sorted full candles) and store, also saves the full feature
@@ -167,6 +167,7 @@ def replay_market(m, candles, spot, fee_rate, min_left=2, max_left=13, spot_list
     terms = contract_terms(m)
     y = 1 if m["result"] == "yes" else 0
     rows = []
+    scored = False    # the toolbox is scored once per window, at the first minute entry is allowed
     for c in candles:
         ts = int(c.get("end_period_ts", 0))
         secs = terms["close_ts"] - ts
@@ -195,6 +196,9 @@ def replay_market(m, candles, spot, fee_rate, min_left=2, max_left=13, spot_list
                                    avg_seconds=terms["avg_seconds"])
             if feats:
                 ml.add_row(store, m["ticker"], ts, ml.coin_of(m["ticker"]), feats, y, "history")
+                if not scored:
+                    scored = True
+                    hindsight.record(store, m["ticker"], ml.coin_of(m["ticker"]), ts, feats, y)
     return rows
 
 

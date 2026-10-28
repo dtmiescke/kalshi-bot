@@ -236,7 +236,7 @@ const $=id=>document.getElementById(id);
 const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
 let cfg=null;try{cfg=JSON.parse(localStorage.getItem("kbot")||"null")}catch(e){}
 let demo=false, vars={}, wfState=null, runsCache=[], bets=[], sample=false, briefing="", report="";
-let account=null, winReport=null, sigReport=[], council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
+let account=null, winReport=null, playbook=null, sigReport=[], council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
 
 function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),2800)}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
@@ -363,7 +363,7 @@ async function loadDB(){
     if(sf.sha===loadDB.sha)return;
     try{const s=JSON.parse(await file("summary.json"));
       council=s.council||[];model=s.model||null;lessons=s.lessons||[];audit=s.audit||[];combos=s.combos||[];storage=s.storage||null;
-      summaryKV=s.kv||{};members=s.members||{};account=s.account||null;sigReport=s.signals||[];winReport=s.windows&&s.windows.stats?s.windows:null;loadDB.sha=sf.sha;dbNote="";return}
+      summaryKV=s.kv||{};members=s.members||{};account=s.account||null;sigReport=s.signals||[];winReport=s.windows&&s.windows.stats?s.windows:null;playbook=s.playbook&&s.playbook.min_windows?s.playbook:null;loadDB.sha=sf.sha;dbNote="";return}
     catch(e){/* fall back to the full database below */}
   }
   const f=(list||[]).find(x=>x.name==="bot.sqlite.gz")||(list||[]).find(x=>x.name==="bot.sqlite");
@@ -627,7 +627,7 @@ function screenInsights(){
       ${I.cal.map(r=>`<div class="cal"><span class="muted">${r.l}</span><span class="track"><i style="width:${Math.round(r.won*100)}%"></i><u style="left:calc(${Math.round(r.said*100)}% - 1px)"></u></span><b class="num">${Math.round(r.won*100)}% <span class="muted" style="font-weight:500">of ${r.n}</span></b></div>`).join("")}</section>`+
     `<section class="card"><h2>P/L by time of day</h2><div class="bars hours">${I.hours.map(v=>`<div class="bar"><div class="u"><i style="height:${v>0?Math.round(v/mx*38):0}px"></i></div><div class="d"><i style="height:${v<0?Math.round(-v/mx*38):0}px"></i></div></div>`).join("")}</div>
       <div class="hourlab">${["12a","2a","4a","6a","8a","10a","12p","2p","4p","6p","8p","10p"].map(h=>`<span>${h}</span>`).join("")}</div></section>`+
-    readsCard(sym)+(sym?"":reportCard())+
+    readsCard(sym)+(sym?"":playbookCard()+reportCard())+
     `<section class="card" style="gap:0"><div class="cardhead"><h2>Edge check</h2></div>
       <div class="kv"><span>Avg edge on winners</span><b class="num">${pts(I.edgeW)}</b></div>
       <div class="kv"><span>Avg edge on losers</span><b class="num">${pts(I.edgeL)}</b></div>
@@ -635,18 +635,25 @@ function screenInsights(){
 }
 function readsCard(sym){ // the bot's read of every chart when it opens, and how each turned out (summary.json "windows")
   const now=Math.floor(Date.now()/1000);
-  const demo=[["BTC",now-3600,.57,.52,"Bitcoin 0.15% above the target. Trending up (ADX 31), volume surging, Kalshi book deep. Bot 57% vs Kalshi 52%; leans YES.",1,"YES won. Bot 57% was closer than Kalshi (52%)."],
+  const demo=[["BTC",now-3600,.57,.52,"Bitcoin 0.15% above the target. Trending up (ADX 31), volume surging, Kalshi book deep. Bot 57% vs Kalshi 52%; leans YES.",1,"YES won. Bot 57% was closer than Kalshi (52%). Closing tape pointed YES, as it settled.","Bot bet YES and won +6.20. Would have worked: Trend follow, MACD. Would not have: RSI fade."],
     ["ETH",now-3600,.41,.46,"Ethereum 0.08% below the target. Choppy (ADX 14), volume thin. Bot 41% vs Kalshi 46%; leans NO.",0,"NO won. Bot 41% was closer than Kalshi (46%)."],
     ["SOL",now-2700,.55,.49,"Solana 0.04% above the target. Volatility rising. Bot 55% vs Kalshi 49%; leans YES.",null,null]]
-    .map(r=>({coin:r[0],open_ts:r[1],bot_prob:r[2],kalshi_mid:r[3],summary:r[4],outcome:r[5],note:r[6]}));
+    .map(r=>({coin:r[0],open_ts:r[1],bot_prob:r[2],kalshi_mid:r[3],summary:r[4],outcome:r[5],note:r[6],hindsight:r[7]}));
   const rep=sample?{stats:{windows:2,skill:.12,hit_rate:1,kalshi_hit_rate:.5},recent:demo}:winReport;
   const rows=((rep&&rep.recent)||[]).filter(r=>!sym||r.coin===sym).slice(0,sym?12:10);
   if(!rows.length)return"";
   const st=rep.stats||{},sk=st.skill;
-  return`<section class="card"><div class="cardhead"><h2>Chart reads</h2><small class="muted">at the start of each window</small></div>
+  return`<section class="card"><div class="cardhead"><h2>Chart reads</h2><small class="muted">read at 45s, bet from 90s</small></div>
     <small class="muted" style="margin-top:-6px">${st.windows?`${plural(st.windows,"window")} scored: the bot leaned the right way ${pct(st.hit_rate)} of the time (Kalshi ${pct(st.kalshi_hit_rate)}), ${sk==null?"":(sk>=0?"closer":"further")+" than Kalshi’s price by "+Math.abs(sk*100).toFixed(1)+"%"}.`:"Scores appear once windows settle."}</small>
     ${rows.map(r=>{const done=r.outcome!=null,callYes=r.bot_prob>=.5,right=done&&(callYes===!!r.outcome);
-      return`<div class="row" style="align-items:flex-start;padding:10px 0;min-height:0"><span class="badge">${esc(r.coin)}</span><span class="rowmain"><b style="white-space:normal">${when(r.open_ts*1000)} · called ${Math.round(r.bot_prob*100)}% vs Kalshi ${Math.round(r.kalshi_mid*100)}%</b><small style="white-space:normal">${esc(r.summary||"")}</small>${done&&r.note?`<small style="white-space:normal">${esc(r.note)}</small>`:""}</span><span class="rowend ${done?(right?"up":"down"):"muted"}" style="font-size:12px">${done?(right?"Right":"Wrong"):"Open"}</span></div>`}).join("")}</section>`}
+      return`<div class="row" style="align-items:flex-start;padding:10px 0;min-height:0"><span class="badge">${esc(r.coin)}</span><span class="rowmain"><b style="white-space:normal">${when(r.open_ts*1000)} · called ${Math.round(r.bot_prob*100)}% vs Kalshi ${Math.round(r.kalshi_mid*100)}%</b><small style="white-space:normal">${esc(r.summary||"")}</small>${done&&r.note?`<small style="white-space:normal">${esc(r.note)}</small>`:""}${done&&r.closing_text?`<small style="white-space:normal">${esc(r.closing_text)}</small>`:""}${done&&r.hindsight?`<small style="white-space:normal">${esc(r.hindsight)}</small>`:""}</span><span class="rowend ${done?(right?"up":"down"):"muted"}" style="font-size:12px">${done?(right?"Right":"Wrong"):"Open"}</span></div>`}).join("")}</section>`}
+function playbookCard(){ // setups the bot has proven on settled windows, by market condition (summary.json "playbook")
+  const pb=sample?{windows:212,tested:54,validated:2,min_windows:50,top:[{regime:"trend/volup",label:"Trend follow",n:84,hit:.64,edge:.021},{regime:"range/voldown",label:"RSI fade",n:61,hit:.61,edge:.013}]}:playbook;
+  if(!pb)return"";
+  const rows=(pb.top||[]).map(r=>`<div class="row" style="min-height:0;padding:8px 0"><span class="rowmain"><b>${esc(r.label)}</b><small>${esc(r.regime.replace("/"," · "))} · ${plural(r.n,"window")} · ${pct(r.hit)} right</small></span><span class="rowend up num">+${(r.edge*100).toFixed(1)}¢</span></div>`).join("");
+  return`<section class="card"><div class="cardhead"><h2>Playbook</h2><small class="muted">learned after every window</small></div>
+    <small class="muted" style="margin-top:-6px">After each window settles the bot replays every tool on it. ${plural(pb.windows,"window")} reviewed; a setup is trusted only after ${pb.min_windows}+ windows with a proven edge after fees (${pb.validated} so far).</small>
+    ${rows||`<p class="empty">No setup has proven itself yet. It keeps testing.</p>`}</section>`}
 function reportCard(){ // each signal's record vs Kalshi's own price on the same settled markets (summary.json)
   const rows=sample?[{type:"15m",signal:"crypto_model",n:332,skill:-0.057,weight:1.1},{type:"15m",signal:"crypto_orderbook",n:269,skill:-0.043,weight:0.31},{type:"15m",signal:"crypto_momentum",n:332,skill:-0.062,weight:0.17},{type:"ladder",signal:"_blend",n:1899,skill:0.486},{type:"ladder",signal:"crypto_model",n:2736,skill:0.601,weight:1.1}]:sigReport;
   let last=null;

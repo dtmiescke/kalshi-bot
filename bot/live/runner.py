@@ -19,7 +19,7 @@ import subprocess
 import shlex
 import time
 
-from .. import alerts, brain, briefing, council, crypto_brain, fees, guard, ml, risk, token_data, window_review
+from .. import alerts, brain, briefing, council, crypto_brain, fees, guard, hindsight, ml, risk, token_data, window_review
 from .. import marketdata, vol as volmod
 from ..engine import Engine
 from ..grader import grade
@@ -82,6 +82,8 @@ class LiveRunner:
         self.makers = {}          # ticker -> resting maker order
         self.last_prob = {}       # ticker -> latest blended model probability (for the app)
         self.window_read = set()  # tickers whose opening read is already recorded
+        self.tape = {}            # ticker -> {"close_ts", "strike", "pts"}: the last seconds of the chart
+        self._pb = (0.0, None)    # (time, playbook table), refreshed every few minutes
         # A prior process may have died after Kalshi accepted a resting order.
         # Do not resume trading until that exchange state is reconciled manually.
         prior_maker = self.store.get_kv("maker_recovery")
@@ -354,6 +356,10 @@ class LiveRunner:
         if rinfo.get("vol_parts") and spot:
             self._vol_sample(info["series"], now, spot, rinfo["vol_parts"])
         feats = rinfo.get("features") or {}
+        # the playbook: setups that stayed profitable after fees in this market condition
+        playbook = hindsight.playbook_reading(self.playbook_table(now), feats)
+        if playbook:
+            readings.append(playbook)
         spot_summary = a.summary(now)
         chart_setups = analyze_chart_setups(candles, book_imbalance=spot_summary.get("book_imbalance_0.1%"), aggressor_imbalance=spot_summary.get("flow_60s", {}).get("aggressor_imbalance"))
         multi_timeframe = analyze_multi_timeframe(candles, book_imbalance=spot_summary.get("book_imbalance_0.1%"), aggressor_imbalance=spot_summary.get("flow_60s", {}).get("aggressor_imbalance"))
@@ -369,6 +375,55 @@ class LiveRunner:
                                            "vol_ratio_15_60", "dist_sigma")},
                    "signals": {r.name: round(r.prob, 3) for r in readings}}
         return readings, context
+
+    def playbook_table(self, now):
+        """Validated setups per market condition, recomputed every 5 minutes."""
+        if self._pb[1] is None or now - self._pb[0] >= 300:
+            try:
+                self._pb = (now, hindsight.playbook(self.store))
+            except Exception as exc:
+                log.warning("playbook refresh failed: %s", exc)
+                self._pb = (now, self._pb[1] or {"rules": {}, "windows": 0})
+        return self._pb[1]
+
+    def read_due(self, close_ts, now):
+        """True from CRYPTO_READ_SECONDS into the window until the bet is allowed (CRYPTO_ENTRY_DELAY_SECONDS)."""
+        elapsed = 900 - (close_ts - now)
+        return self.s.crypto_read_seconds <= elapsed < self.s.crypto_entry_delay_seconds
+
+    def take_window_read(self, ticker, info, terms, now, readings, ctx, weights, late=False):
+        """Record this window's read once. Failures are logged and never block trading."""
+        if ticker in self.window_read:
+            return
+        self.window_read.add(ticker)
+        try:
+            pb = next((r for r in readings if r.name == "crypto_playbook"), None)
+            if window_review.record_open(self.store, ticker, info, terms, now, readings, ctx, weights, late=late,
+                                         playbook=pb.detail if pb else None):
+                log.info("window read %s%s", ticker, " (late)" if late else "")
+        except Exception as exc:
+            log.warning("window read %s failed: %s", ticker, exc)
+
+    def closing_tapes(self, now):
+        """Keep the composite price for the last 20 seconds of every window, and when a
+        window has closed, review those seconds against the target."""
+        for ticker, info in self.markets.items():
+            close_ts = int(info["terms"].get("close_ts") or 0)
+            if close_ts and 0 < close_ts - now <= 20:
+                a = self.coins[info["series"]]
+                px = a.composite_price(now) or a.book.mid()
+                t = self.tape.setdefault(ticker, {"close_ts": close_ts, "strike": info["terms"].get("strike"), "pts": []})
+                if px and (not t["pts"] or now - t["pts"][-1][0] >= 0.5):
+                    t["pts"].append((now, px))
+        self.window_read.intersection_update(self.markets)      # finished windows drop out
+        for ticker, t in list(self.tape.items()):
+            if now >= t["close_ts"]:
+                del self.tape[ticker]
+                try:
+                    if window_review.record_close(self.store, ticker, t["strike"], t["pts"]):
+                        log.info("closing read %s", ticker)
+                except Exception as exc:
+                    log.warning("closing read %s failed: %s", ticker, exc)
 
     def kalshi_flow_reading(self, ticker, kalshi_mid, now=None):
         """Build an independent signal from anonymous Kalshi prints in the last 5m."""
@@ -388,6 +443,7 @@ class LiveRunner:
         if self.s.exits_enabled:
             self.check_exits(now)
         self.learn_vol(now)
+        self.closing_tapes(now)
         weights = brain.get_weights(self.store, "crypto")
         if now - self.adaptive_report_cache["ts"] >= 60:
             try:
@@ -434,16 +490,10 @@ class LiveRunner:
                 continue
             self.store.set_kv(f"start_{ticker}", close_ts)
             self.store.set_kv(f"settle_after_{ticker}", close_ts + 300)
-            # The first read of a new chart: everything the bot can see, written down once
-            # and later matched with what really happened (bot/window_review.py).
-            if ticker not in self.window_read and 11.0 <= (close_ts - now) / 60 <= 15.1:
-                try:
-                    if window_review.record_open(self.store, ticker, info, terms, now, readings, ctx, weights):
-                        log.info("window read %s", ticker)
-                    self.window_read.add(ticker)
-                except Exception as exc:
-                    log.warning("window read %s failed: %s", ticker, exc)
-                    self.window_read.add(ticker)
+            # The read of a new chart, CRYPTO_READ_SECONDS in (45 s): everything the bot can
+            # see, written down once; the bet comes later (bot/window_review.py).
+            if self.read_due(close_ts, now):
+                self.take_window_read(ticker, info, terms, now, readings, ctx, weights)
             # Keep one research snapshot every 30s. The grader scores only the
             # canonical pre-close decision cutoff, preventing per-second samples
             # from inflating the learning set. Research rows never place orders.
@@ -505,6 +555,9 @@ class LiveRunner:
             if self.store.get_kv(lock_key):
                 # A trade or in-flight attempt already owns this coin/window.
                 continue
+            # A bet always follows a read: if the 45-second one was missed (a restart, a late
+            # discovery), read now, before betting.
+            self.take_window_read(ticker, info, terms, now, readings, ctx, weights, late=True)
             plan = self.plan_for(ticker, readings, weights)
             if not plan:
                 continue

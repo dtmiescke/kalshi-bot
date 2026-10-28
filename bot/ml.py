@@ -154,7 +154,7 @@ def sim_trades(p, X, cols, y, groups, fee_rate=0.07, thresholds=(0.03, 0.05, 0.0
                 continue
             mid = 1 / (1 + math.exp(-X[i, li]))
             sp = X[i, si]
-            if sp > MAX_SIM_SPREAD or (ml_ is not None and X[i, ml_] > 13.05):   # the live bot doesn't trade before 13 min left
+            if sp > MAX_SIM_SPREAD or (ml_ is not None and X[i, ml_] > 13.55):   # the live bot doesn't trade before 90 s in (13.5 min left)
                 continue
             for side, pw, cost in (("yes", p[i], mid + sp / 2 + SLIPPAGE),
                                    ("no", 1 - p[i], 1 - mid + sp / 2 + SLIPPAGE)):

@@ -1,7 +1,8 @@
-"""A full read of every 15-minute chart when it opens, and a verdict when it settles.
+"""A full read of every 15-minute chart 45 seconds in, the last 20 seconds
+when it ends, and a verdict when it settles.
 
-For each coin's new window the live bot records (once, within the first four
-minutes) everything it can see: spot and the cross-exchange composite, the
+For each coin's new window the live bot records (once, 45 seconds in; the bet
+comes from 90 seconds in) everything it can see: spot and the cross-exchange composite, the
 Kalshi price and book, every signal, the chart indicators, the token,
 liquidity and volume facts, and its own blended forecast, plus a one-line
 plain-English read. When Kalshi settles the window, the same record gets what
@@ -14,6 +15,7 @@ bets themselves. The same moment is also saved as a labelled training row
 (crypto_brain.research logs it), so each new chart teaches the next model.
 """
 import json
+import math
 import time
 
 from . import brain
@@ -26,11 +28,16 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS window_log (
     mins_left REAL, strike REAL, spot REAL, kalshi_mid REAL, kalshi_spread REAL,
     bot_prob REAL, bot_conf REAL, signals TEXT, snapshot TEXT, summary TEXT,
     outcome INTEGER, bot_brier REAL, kalshi_brier REAL, best_signal TEXT, worst_signal TEXT,
-    settled_ts INTEGER, note TEXT)"""
+    settled_ts INTEGER, note TEXT, closing TEXT, closing_text TEXT, hindsight TEXT)"""
+NEW_COLUMNS = ("closing TEXT", "closing_text TEXT", "hindsight TEXT")
 
 
 def ensure_table(store):
     store.x(SCHEMA)
+    have = {r["name"] for r in store.q("PRAGMA table_info(window_log)")}
+    for col in NEW_COLUMNS:
+        if col.split()[0] not in have:      # older databases: add the review columns in place
+            store.x(f"ALTER TABLE window_log ADD COLUMN {col}")
 
 
 def _r(x, n=3):
@@ -71,8 +78,9 @@ def describe(coin, feats, kalshi_mid, bot_prob, spot=None, strike=None):
             f"Bot {bot_prob:.0%} vs Kalshi {kalshi_mid:.0%}; leans {call}.").strip()
 
 
-def record_open(store, ticker, info, terms, now, readings, ctx, weights):
-    """Write the opening read once. Returns the new record, or None if nothing to record."""
+def record_open(store, ticker, info, terms, now, readings, ctx, weights, late=False, playbook=None):
+    """Write the opening read once. Returns the new record, or None if nothing to record.
+    late=True marks a read taken at bet time because the 45-second one was missed."""
     ensure_table(store)
     if store.q("SELECT 1 FROM window_log WHERE ticker=?", (ticker,)):
         return None
@@ -96,6 +104,10 @@ def record_open(store, ticker, info, terms, now, readings, ctx, weights):
         "context": {k: _r(v, 4) for k, v in (ctx.get("market_context") or {}).items()
                     if isinstance(v, (int, float))},
         "sigma_per_min": _r(ctx.get("vol_forecast_per_min"), 7),
+        "features": {k: _r(v, 4) for k, v in feats.items() if isinstance(v, (int, float))},   # what the hindsight review replays
+        "late": bool(late),
+        "elapsed_s": round(900 - (close_ts - now)),
+        "playbook": playbook,
     }
     row = {
         "ticker": ticker, "coin": info.get("coin") or _coin(info.get("series")), "series": info.get("series"),
@@ -111,6 +123,52 @@ def record_open(store, ticker, info, terms, now, readings, ctx, weights):
     store.x(f"INSERT OR IGNORE INTO window_log ({','.join(cols)}) VALUES({','.join('?' * len(cols))})",
             tuple(row[c] for c in cols))
     return row
+
+
+def tape_stats(pts, strike):
+    """The last seconds of the chart: where price went relative to the target.
+    pts: [(ts, price)] oldest first. None if there is too little to say."""
+    pts = sorted(p for p in pts if p[1] and p[1] > 0)
+    if len(pts) < 3 or not strike:
+        return None
+    prices = [p for _, p in pts]
+    start, end = prices[0], prices[-1]
+    rets = [math.log(b / a) for a, b in zip(prices, prices[1:]) if a > 0 and b > 0]
+    mean = sum(rets) / len(rets) if rets else 0.0
+    vol = math.sqrt(sum((x - mean) ** 2 for x in rets) / max(len(rets) - 1, 1)) if rets else 0.0
+    above = [p >= strike for p in prices]
+    avg = sum(prices) / len(prices)
+    return {
+        "seconds": round(pts[-1][0] - pts[0][0], 1), "points": len(pts), "start": start, "end": end,
+        "high": max(prices), "low": min(prices),
+        "change_bps": round((end / start - 1) * 1e4, 2),
+        "end_vs_strike_bps": round((end / strike - 1) * 1e4, 2),
+        "avg_vs_strike_bps": round((avg / strike - 1) * 1e4, 2),
+        "crossed": any(a != b for a, b in zip(above, above[1:])),
+        "side": "YES" if avg >= strike else "NO",
+        "vol_bps_per_s": round(vol * 1e4, 3),
+    }
+
+
+def closing_text(coin, st):
+    move = "up" if st["change_bps"] > 0 else "down" if st["change_bps"] < 0 else "flat"
+    where = "above" if st["end_vs_strike_bps"] >= 0 else "below"
+    held = "crossed the target during it" if st["crossed"] else f"never crossed the target"
+    return (f"Last {st['seconds']:.0f}s: {COIN_NAME.get(coin, coin)} {move} {abs(st['change_bps']):.1f} bps, "
+            f"finished {abs(st['end_vs_strike_bps']):.1f} bps {where} the target, {held}; "
+            f"the closing average pointed {st['side']}.")
+
+
+def record_close(store, ticker, strike, tape):
+    """Attach the final seconds of the chart to the window's read. Returns the stats or None."""
+    ensure_table(store)
+    rows = store.q("SELECT coin FROM window_log WHERE ticker=?", (ticker,))
+    st = tape_stats(tape, strike)
+    if not rows or not st:
+        return None
+    store.x("UPDATE window_log SET closing=?, closing_text=? WHERE ticker=?",
+            (json.dumps(st), closing_text(rows[0]["coin"], st), ticker))
+    return st
 
 
 def _coin(series):
@@ -137,6 +195,9 @@ def settle(store, ticker, y, now=None):
     else:
         verdict = "closer than Kalshi" if bot_b < kal_b else "further than Kalshi"
     note = f"{result} won. Bot {r['bot_prob']:.0%} was {verdict} ({r['kalshi_mid']:.0%})."
+    if r["closing"]:
+        pointed = json.loads(r["closing"]).get("side")
+        note += f" The closing tape pointed {pointed}" + (", as it settled." if pointed == result else ", but it settled the other way.")
     store.x("""UPDATE window_log SET outcome=?, bot_brier=?, kalshi_brier=?, best_signal=?, worst_signal=?,
                settled_ts=?, note=? WHERE ticker=?""",
             (y, bot_b, kal_b, best, worst, int(now or time.time()), note, ticker))
@@ -165,6 +226,6 @@ def report(store, recent=24, days=14):
                 ck = sum(r["kalshi_brier"] for r in cr) / len(cr)
                 stats["by_coin"][c] = {"windows": len(cr), "skill": round(1 - cb / ck, 4) if ck else None}
     last = store.q("""SELECT ticker, coin, open_ts, mins_left, strike, spot, kalshi_mid, bot_prob, summary,
-                      outcome, note, best_signal, worst_signal FROM window_log ORDER BY open_ts DESC, coin LIMIT ?""",
+                      outcome, note, best_signal, worst_signal, closing_text, hindsight FROM window_log ORDER BY open_ts DESC, coin LIMIT ?""",
                    (recent,))
     return {"stats": stats, "recent": [dict(r) for r in last]}
