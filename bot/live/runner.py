@@ -436,9 +436,12 @@ class LiveRunner:
             # canonical pre-close decision cutoff, preventing per-second samples
             # from inflating the learning set. Research rows never place orders.
             if now - self.last_adaptive_audit.get(ticker, 0) >= 30:
-                model_prob, _ = brain.blend(readings, weights)
+                model_prob, model_conf = brain.blend(readings, weights)
                 if model_prob is not None:
                     model_prob = brain.calibrate(model_prob, self.store, domain="crypto")
+                    # every coin's line on the app's chart, not only coins that reach a trade plan
+                    self.last_prob[ticker] = {"prob": round(model_prob, 4),
+                                              "conf": round(model_conf or 0, 3), "ts": round(now)}
                     yes_bid = ctx.get("kalshi_yes_bid")
                     yes_ask = ctx.get("kalshi_yes_ask")
                     market_mid = ((float(yes_bid) + float(yes_ask)) / 2.0

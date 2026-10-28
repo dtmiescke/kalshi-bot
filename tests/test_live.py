@@ -230,6 +230,36 @@ class TestRunner(unittest.TestCase):
             del os.environ["BOT_DB"]
 
 
+class TestRunnerModelLineForEveryCoin(unittest.TestCase):
+    def test_model_prob_saved_even_when_no_trade_is_planned(self):
+        """The app draws the bot's line for every coin, so the probability is
+        recorded from the 30-second research pass, not only from trade plans."""
+        from bot.live.runner import LiveRunner
+        with tempfile.TemporaryDirectory() as d:
+            os.environ["BOT_DB"] = os.path.join(d, "b.db")
+            try:
+                s = Settings()
+                store = Store(s.db_path)
+                now = time.time()
+                r = LiveRunner(s, store, rest=FakeRest(now + 360), llm=None,
+                               dvol_fetch=lambda c: 45.0, seed=False)
+                a = r.coins["KXBTC15M"]
+                a.book.snapshot([(100290, 1)], [(100310, 1)], now)
+                for i in range(3600, 0, -1):
+                    a.mids.append((now - i, 100300 + (i % 7) * 3 - 9))
+                r.discover()
+                r.poll_books()
+                with mock.patch("bot.live.runner.marketdata.context", return_value={}):
+                    r.refresh_context()
+                with mock.patch.object(LiveRunner, "plan_for", return_value=None):
+                    list(r.tick(now))
+                ticker = next(t for t in r.markets if t in r.books)
+                self.assertIn(ticker, r.last_prob)
+                self.assertTrue(0 < r.last_prob[ticker]["prob"] < 1)
+            finally:
+                del os.environ["BOT_DB"]
+
+
 class TestRunnerSeedHistory(unittest.TestCase):
     def test_kraken_history_fallback_when_coinbase_seed_is_insufficient(self):
         from bot.live.runner import LiveRunner
