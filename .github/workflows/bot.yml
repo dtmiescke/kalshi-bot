@@ -46,7 +46,7 @@ jobs:
       # the loss limits from that moment; older bets stay in memory and keep
       # teaching the bot (calibration, coin learning, council records).
       # Keep both values identical in bot.yml, train.yml and clear-pause.yml.
-      STATS_SINCE: '2026-10-28T11:30:00Z'
+      STATS_SINCE: '2026-10-28T11:45:00Z'
       BANKROLL: '500'
     steps:
       - uses: actions/checkout@v5

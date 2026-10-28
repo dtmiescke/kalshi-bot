@@ -98,7 +98,7 @@ jobs:
           BOT_MODE: paper
           LIVE_TRADING_CONFIRMED: 'no'
           # Same account values as bot.yml (this step rebuilds the dashboard and bets.csv).
-          STATS_SINCE: '2026-10-28T11:30:00Z'
+          STATS_SINCE: '2026-10-28T11:45:00Z'
           BANKROLL: '500'
           BOT_TIMEZONE: ${{ vars.BOT_TIMEZONE || 'America/Chicago' }}
         run: bash .github/save.sh

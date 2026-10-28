@@ -10,8 +10,8 @@ from unittest.mock import patch
 from bot import coin_learning, dashboard, guard, report
 from bot.storage import Store, stats_since
 
-RESET = "2026-10-28T11:30:00Z"
-RESET_TS = 1793187000  # 2026-10-28T11:30:00Z
+RESET = "2026-10-28T11:45:00Z"
+RESET_TS = 1793187000  # 2026-10-28T11:45:00Z
 
 
 class TestStatsSince(unittest.TestCase):
