@@ -261,6 +261,78 @@ SUMMARY_KV = ("janitors_last_result", "janitors_last_run", "nerd_last_health",
               "members_last_ruling", "don_theo_last", "sunday_sitdown", "odds_quota")
 
 
+def _safe(fn, *a):
+    try:
+        return fn(*a)
+    except Exception:
+        return []
+
+
+CRYPTO_SEGMENTS = ("KXBTC%", "KXETH%", "KXSOL%", "KXBNB%")
+
+
+MARKET_TYPES = (("15m", "g.segment LIKE '%15M-%'", "series LIKE '%15M'"),
+                ("ladder", "g.segment NOT LIKE '%15M-%'", "series NOT LIKE '%15M'"))
+
+
+def signal_report(store, days=30, min_n=5):
+    """Each crypto signal's forecasting record against Kalshi's own price.
+
+    Paired on the same settled markets, and only where Kalshi's price was still
+    a real bet (brain.LEARN_BAND) at the decision cutoff: a signal's Brier score
+    (lower is better) next to the Kalshi price's Brier on exactly those markets.
+    skill > 0 means the signal beat the market; < 0 means following Kalshi
+    would have done better. Split by market type (15-minute vs ladders). The
+    bot's blended forecast is scored the same way from the canonical pre-close
+    decision (one per market).
+    """
+    since = int(time.time()) - days * 86400
+    lo, hi = brain.LEARN_BAND
+    like = " OR ".join("g.segment LIKE ?" for _ in CRYPTO_SEGMENTS)
+    like_a = " OR ".join("series LIKE ?" for _ in CRYPTO_SEGMENTS)
+    try:
+        weights = brain.get_weights(store, "crypto")
+    except Exception:
+        weights = {}
+    out = []
+    for kind, seg_cond, series_cond in MARKET_TYPES:
+        rows = store.q(f"""SELECT g.signal AS signal, COUNT(*) AS n, AVG(g.brier) AS brier,
+                               AVG(k.brier) AS market_brier
+                           FROM signal_grades g JOIN signal_grades k
+                             ON k.segment = g.segment AND k.ts = g.ts AND k.signal = 'kalshi_market'
+                           WHERE g.signal != 'kalshi_market' AND g.ts >= ? AND ({like})
+                             AND {seg_cond} AND k.prob BETWEEN ? AND ?
+                           GROUP BY g.signal""", (since, *CRYPTO_SEGMENTS, lo, hi))
+        for r in rows:
+            if r["n"] >= min_n and r["market_brier"]:
+                out.append({"type": kind, "signal": r["signal"], "n": r["n"],
+                            "brier": round(r["brier"], 5), "market_brier": round(r["market_brier"], 5),
+                            "skill": round(1 - r["brier"] / r["market_brier"], 4),
+                            "weight": round(weights.get(r["signal"], 0.0), 3)})
+        # the blended forecast the bot actually trades on
+        audit = store.q(f"""SELECT model_prob, outcome, signals_json FROM decision_audit
+                            WHERE brier IS NOT NULL AND outcome IN (0,1) AND settled_ts >= ?
+                            AND ({like_a}) AND {series_cond}""", (since, *CRYPTO_SEGMENTS))
+        pairs = []
+        for r in audit:
+            try:
+                sig = json.loads(r["signals_json"] or "{}")
+            except (TypeError, ValueError):
+                continue
+            k = sig.get("kalshi_market") if isinstance(sig, dict) else None
+            mp = k.get("p", k.get("prob")) if isinstance(k, dict) else k
+            if isinstance(mp, (int, float)) and lo <= mp <= hi and r["model_prob"] is not None:
+                y = int(r["outcome"])
+                pairs.append(((float(r["model_prob"]) - y) ** 2, (float(mp) - y) ** 2))
+        if len(pairs) >= min_n:
+            b = sum(p[0] for p in pairs) / len(pairs)
+            mb = sum(p[1] for p in pairs) / len(pairs)
+            if mb:
+                out.append({"type": kind, "signal": "_blend", "n": len(pairs), "brier": round(b, 5),
+                            "market_brier": round(mb, 5), "skill": round(1 - b / mb, 4), "weight": None})
+    return sorted(out, key=lambda x: (x["type"] != "15m", x["signal"] != "_blend", -x["skill"]))
+
+
 def storage_report(store, top=12):
     """Where the memory file's bytes go: the biggest tables and indexes (from
     SQLite's dbstat; row counts if dbstat is unavailable) plus free pages a
@@ -356,6 +428,7 @@ def summary(store):
                        GROUP BY leg_count ORDER BY leg_count"""),
         "kv": {k: v for k, v in kv.items() if v is not None},
         "storage": storage_report(store),
+        "signals": _safe(signal_report, store),
         "account": account,
     }
 
