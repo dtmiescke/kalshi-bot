@@ -278,6 +278,14 @@ def storage_report(store, top=12):
     except Exception:
         names = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")]
         out["table_rows"] = {n: db.execute(f'SELECT COUNT(*) FROM "{n}"').fetchone()[0] for n in names}
+    try:   # the decision log is the biggest learned table: what is it made of?
+        cutoff = int(time.time()) - 3 * 86400
+        out["decision_audit"] = [dict(zip(("decision", "rows", "older_3d", "avg_signals_b", "avg_reason_b"), r))
+                                 for r in db.execute("""SELECT decision, COUNT(*), SUM(ts < ?),
+                                     CAST(AVG(length(signals_json)) AS INT), CAST(AVG(length(reason)) AS INT)
+                                     FROM decision_audit GROUP BY decision ORDER BY 2 DESC""", (cutoff,))]
+    except Exception:
+        pass
     return out
 
 

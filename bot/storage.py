@@ -138,6 +138,12 @@ RAW_RETENTION_SUBSETS = (
 )
 
 
+# Row caps on top of the time windows: (table, time column, newest rows kept).
+# Sports news arrives ~14k items a day (~6 KB each) but readers take the newest
+# few hundred (sports_intel.latest caps at 1000), so 3 days was still 270 MB.
+RAW_ROW_CAPS = (("sports_intel_items", "observed_ts", 2000),)
+
+
 def trim_raw(db, now, retention=None):
     """Delete raw rows older than their retention window. Returns rows deleted
     per table; tables that don't exist yet are skipped."""
@@ -153,6 +159,12 @@ def trim_raw(db, now, retention=None):
             continue
         cur = db.execute(f"DELETE FROM {table} WHERE {where} AND {column} < ?",
                          (int(now - days * 86400),))
+        deleted[table] = deleted.get(table, 0) + max(0, cur.rowcount)
+    for table, column, keep in RAW_ROW_CAPS:
+        if table not in existing:
+            continue
+        cur = db.execute(f"""DELETE FROM {table} WHERE rowid NOT IN
+                             (SELECT rowid FROM {table} ORDER BY {column} DESC LIMIT ?)""", (keep,))
         deleted[table] = deleted.get(table, 0) + max(0, cur.rowcount)
     return deleted
 
