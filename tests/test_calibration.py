@@ -79,6 +79,25 @@ class TestShrink(Base):
         self.assertEqual(brain.shrink_weight(self.st, "KXBTC15M"), brain.SHRINK_PRIOR[0])
 
 
+class TestEdgeReport(Base):
+    def test_reports_windows_errors_and_the_share_bet_on(self):
+        import time
+        from bot import dashboard
+        now = int(time.time())
+        for i in range(60):                      # recent settled windows, band prices
+            self.st.x("""INSERT INTO decision_audit(ts,ticker,event_ticker,series,decision,market_price,model_prob,outcome,brier)
+                         VALUES(?,?,?,?,?,?,?,?,?)""", (now - 100 - i, f"KXETH15M-W{i}", f"E{i}", "KXETH15M", "research",
+                                                        0.5, 0.6, i % 2, (0.6 - i % 2) ** 2))
+        self.st.x("""INSERT INTO decision_audit(ts,ticker,event_ticker,series,decision,market_price,model_prob,outcome,brier)
+                     VALUES(?,?,?,?,?,?,?,?,?)""", (now, "KXBTCD-L1", "L", "KXBTCD", "research", 0.5, 0.9, 1, 0.01))   # a ladder: not counted
+        e = dashboard.edge_report(self.st)
+        self.assertEqual(e["windows"], 60)
+        self.assertAlmostEqual(e["kalshi_brier"], 0.25)
+        self.assertAlmostEqual(e["bot_brier"], 0.26, places=2)
+        self.assertTrue(0.1 <= e["share"] <= 1.0)
+        self.assertTrue(e["on"])
+
+
 def ml_row(store, coin, source, i, model, kalshi, y):
     f = {"model_prob": model, "kalshi_logit": __import__("math").log(kalshi / (1 - kalshi)), "min_left": 8.0}
     ml.add_row(store, f"KX{coin}15M-{source}{i}", 1_700_000_000 + i, coin, f, y, source)
