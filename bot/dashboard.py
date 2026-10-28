@@ -365,6 +365,23 @@ def storage_report(store, top=12):
     return out
 
 
+def edge_report(store):
+    """Does the bot's forecast beat Kalshi's price on settled 15-minute windows, and how much of
+    its disagreement with the price does it bet on (brain.shrink_weight)?"""
+    from . import brain
+    rows = store.q("""SELECT ticker, model_prob, market_price, outcome, series FROM decision_audit
+                      WHERE brier IS NOT NULL AND outcome IN (0,1) AND model_prob IS NOT NULL
+                      AND market_price BETWEEN ? AND ? AND ts >= ?""",
+                   (*brain.LEARN_BAND, time.time() - 30 * 86400))
+    rows = [r for r in rows if brain.shrink_group(r["series"]) == "15m"]
+    n = len(rows)
+    return {"windows": len({r["ticker"] for r in rows}),
+            "bot_brier": round(sum((r["model_prob"] - r["outcome"]) ** 2 for r in rows) / n, 4) if n else None,
+            "kalshi_brier": round(sum((r["market_price"] - r["outcome"]) ** 2 for r in rows) / n, 4) if n else None,
+            "share": round(brain.shrink_weight(store, "KXBTC15M"), 3),
+            "on": os.environ.get("SHRINK_TO_MARKET", "yes") == "yes"}
+
+
 def summary(store):
     """The small JSON the phone app reads instead of downloading the whole
     database (known problem 11). Same queries the app runs on the database, so
@@ -432,6 +449,7 @@ def summary(store):
         "signals": _safe(signal_report, store),
         "windows": _safe(window_review.report, store),
         "playbook": _safe(hindsight.playbook_summary, store),
+        "edge": _safe(edge_report, store),
         "account": account,
     }
 

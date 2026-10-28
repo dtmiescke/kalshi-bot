@@ -83,7 +83,7 @@ class TestAppSummary(unittest.TestCase):
         html = (ROOT / "index.html").read_text(encoding="utf-8")
         workflow = (ROOT / ".github" / "workflows" / "bot.yml").read_text(encoding="utf-8")
         for name in ("APP_BANKROLL", "APP_MIN_BET", "APP_MAX_BET", "APP_BETS_PER_HOUR",
-                     "APP_MAX_OPEN_COST", "APP_MAX_LOSS_PCT", "APP_STOP_LOSS", "APP_STYLE", "APP_STATS_SINCE"):
+                     "APP_MAX_OPEN_COST", "APP_MAX_LOSS_PCT", "APP_CALIBRATE", "APP_STOP_LOSS", "APP_STYLE", "APP_STATS_SINCE"):
             self.assertIn(f'"{name}"', html, name)
             self.assertIn(f"vars.{name}", workflow, name)     # every app field reaches the bot
         for ignored in ("BANKROLL", "MAX_PER_BET", "MAX_OPEN_COST", "DAILY_LOSS_LIMIT", "AGGRESSION_LEVEL"):
@@ -124,10 +124,12 @@ class TestAppSummary(unittest.TestCase):
         self.assertIn("winReport=s.windows&&s.windows.stats?s.windows:null", html)    # from summary.json
         self.assertIn("playbook=s.playbook&&s.playbook.min_windows?s.playbook:null", html)
         self.assertIn("function playbookCard()", html)
+        self.assertIn("function edgeCard()", html)
+        self.assertIn("edgeRep=s.edge&&s.edge.windows!=null?s.edge:null", html)
         self.assertIn("r.closing_text", html)                                          # last-20-seconds review shown
         self.assertIn("r.hindsight", html)                                             # what would have worked
         self.assertIn("Chart reads", html)
-        self.assertIn("readsCard(sym)+(sym?\"\":playbookCard()+reportCard())", html)                # on the overall and per-coin pages
+        self.assertIn("readsCard(sym)+(sym?\"\":edgeCard()+playbookCard()+reportCard())", html)                # on the overall and per-coin pages
 
     def test_bets_csv_carries_compact_signals_for_bet_details(self):
         self.st.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,stake,fee,

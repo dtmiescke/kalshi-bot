@@ -236,7 +236,7 @@ const $=id=>document.getElementById(id);
 const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
 let cfg=null;try{cfg=JSON.parse(localStorage.getItem("kbot")||"null")}catch(e){}
 let demo=false, vars={}, wfState=null, runsCache=[], bets=[], sample=false, briefing="", report="";
-let account=null, winReport=null, playbook=null, sigReport=[], council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
+let account=null, winReport=null, playbook=null, edgeRep=null, sigReport=[], council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
 
 function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),2800)}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
@@ -363,7 +363,7 @@ async function loadDB(){
     if(sf.sha===loadDB.sha)return;
     try{const s=JSON.parse(await file("summary.json"));
       council=s.council||[];model=s.model||null;lessons=s.lessons||[];audit=s.audit||[];combos=s.combos||[];storage=s.storage||null;
-      summaryKV=s.kv||{};members=s.members||{};account=s.account||null;sigReport=s.signals||[];winReport=s.windows&&s.windows.stats?s.windows:null;playbook=s.playbook&&s.playbook.min_windows?s.playbook:null;loadDB.sha=sf.sha;dbNote="";return}
+      summaryKV=s.kv||{};members=s.members||{};account=s.account||null;sigReport=s.signals||[];winReport=s.windows&&s.windows.stats?s.windows:null;playbook=s.playbook&&s.playbook.min_windows?s.playbook:null;edgeRep=s.edge&&s.edge.windows!=null?s.edge:null;loadDB.sha=sf.sha;dbNote="";return}
     catch(e){/* fall back to the full database below */}
   }
   const f=(list||[]).find(x=>x.name==="bot.sqlite.gz")||(list||[]).find(x=>x.name==="bot.sqlite");
@@ -627,7 +627,7 @@ function screenInsights(){
       ${I.cal.map(r=>`<div class="cal"><span class="muted">${r.l}</span><span class="track"><i style="width:${Math.round(r.won*100)}%"></i><u style="left:calc(${Math.round(r.said*100)}% - 1px)"></u></span><b class="num">${Math.round(r.won*100)}% <span class="muted" style="font-weight:500">of ${r.n}</span></b></div>`).join("")}</section>`+
     `<section class="card"><h2>P/L by time of day</h2><div class="bars hours">${I.hours.map(v=>`<div class="bar"><div class="u"><i style="height:${v>0?Math.round(v/mx*38):0}px"></i></div><div class="d"><i style="height:${v<0?Math.round(-v/mx*38):0}px"></i></div></div>`).join("")}</div>
       <div class="hourlab">${["12a","2a","4a","6a","8a","10a","12p","2p","4p","6p","8p","10p"].map(h=>`<span>${h}</span>`).join("")}</div></section>`+
-    readsCard(sym)+(sym?"":playbookCard()+reportCard())+
+    readsCard(sym)+(sym?"":edgeCard()+playbookCard()+reportCard())+
     `<section class="card" style="gap:0"><div class="cardhead"><h2>Edge check</h2></div>
       <div class="kv"><span>Avg edge on winners</span><b class="num">${pts(I.edgeW)}</b></div>
       <div class="kv"><span>Avg edge on losers</span><b class="num">${pts(I.edgeL)}</b></div>
@@ -647,6 +647,17 @@ function readsCard(sym){ // the bot's read of every chart when it opens, and how
     <small class="muted" style="margin-top:-6px">${st.windows?`${plural(st.windows,"window")} scored: the bot leaned the right way ${pct(st.hit_rate)} of the time (Kalshi ${pct(st.kalshi_hit_rate)}), ${sk==null?"":(sk>=0?"closer":"further")+" than Kalshi’s price by "+Math.abs(sk*100).toFixed(1)+"%"}.`:"Scores appear once windows settle."}</small>
     ${rows.map(r=>{const done=r.outcome!=null,callYes=r.bot_prob>=.5,right=done&&(callYes===!!r.outcome);
       return`<div class="row" style="align-items:flex-start;padding:10px 0;min-height:0"><span class="badge">${esc(r.coin)}</span><span class="rowmain"><b style="white-space:normal">${when(r.open_ts*1000)} · called ${Math.round(r.bot_prob*100)}% vs Kalshi ${Math.round(r.kalshi_mid*100)}%</b><small style="white-space:normal">${esc(r.summary||"")}</small>${done&&r.note?`<small style="white-space:normal">${esc(r.note)}</small>`:""}${done&&r.closing_text?`<small style="white-space:normal">${esc(r.closing_text)}</small>`:""}${done&&r.hindsight?`<small style="white-space:normal">${esc(r.hindsight)}</small>`:""}</span><span class="rowend ${done?(right?"up":"down"):"muted"}" style="font-size:12px">${done?(right?"Right":"Wrong"):"Open"}</span></div>`}).join("")}</section>`}
+function edgeCard(){ // does the bot's forecast beat Kalshi's price, and how much of the gap it bets on (summary.json "edge")
+  const e=sample?{windows:258,bot_brier:.2082,kalshi_brier:.207,share:.13,on:true}:edgeRep;
+  if(!e||!e.windows)return"";
+  const better=e.bot_brier!=null&&e.bot_brier<e.kalshi_brier-.002,worse=e.bot_brier!=null&&e.bot_brier>e.kalshi_brier+.002;
+  return`<section class="card" style="gap:0"><div class="cardhead"><h2>Is the edge real?</h2><small class="muted">15-minute coins, last 30 days</small></div>
+    <div class="kv"><span>Settled windows</span><b class="num">${e.windows}</b></div>
+    <div class="kv"><span>Bot’s odds error</span><b class="num">${e.bot_brier==null?"–":e.bot_brier.toFixed(3)}</b></div>
+    <div class="kv"><span>Kalshi’s price error</span><b class="num">${e.kalshi_brier==null?"–":e.kalshi_brier.toFixed(3)}</b></div>
+    <div class="kv"><span>Share of its disagreement it bets on</span><b class="num">${e.on?Math.round(e.share*100)+"%":"All (calibration off)"}</b></div>
+    <div class="kv"><span>Read</span><b>${better?"Beating Kalshi’s price":worse?"Behind Kalshi’s price":"Level with Kalshi’s price"}</b></div>
+    <small class="note" style="margin-top:8px">Lower error is better. Until the bot clearly beats Kalshi’s own price it bets only on the part of its disagreement that has held up, so it bets less often. That share grows as it proves itself.</small></section>`}
 function playbookCard(){ // setups the bot has proven on settled windows, by market condition (summary.json "playbook")
   const pb=sample?{windows:212,tested:54,validated:2,min_windows:50,top:[{regime:"trend/volup",label:"Trend follow",n:84,hit:.64,edge:.021},{regime:"range/voldown",label:"RSI fade",n:61,hit:.61,edge:.013}]}:playbook;
   if(!pb)return"";
@@ -815,9 +826,10 @@ const BET_FIELDS=[
 const STYLES=[["conservative","Careful"],["balanced","Balanced"],["aggressive","Aggressive"],["adaptive","Adaptive"],["off","Strict (no boost)"]];
 function betValue(f){const v=vars[f.name];if(v!=null&&v!=="")return String(v);const a=account&&account[f.acct];return String(a!=null?+a:f.def)}
 function betCard(){
-  const style=vars.APP_STYLE||(account&&account.aggression_level)||"aggressive",since=account&&account.stats_since;
+  const style=vars.APP_STYLE||(account&&account.aggression_level)||"aggressive",since=account&&account.stats_since,cal=vars.APP_CALIBRATE||"yes";
   return`<section class="card" id="betcard">
     ${BET_FIELDS.map(f=>{const v=betValue(f);return`<label class="field">${f.label}<input data-bet="${f.name}" data-orig="${esc(v)}" type="number" inputmode="${f.int?"numeric":"decimal"}" step="${f.int?1:"any"}" min="${f.min}"${f.max?` max="${f.max}"`:""} value="${esc(v)}">${f.hint?`<small class="note">${f.hint}</small>`:""}</label>`}).join("")}
+    <label class="field">Calibrate to Kalshi’s price<select data-bet="APP_CALIBRATE" data-orig="${esc(cal)}">${[["yes","Yes (recommended)"],["no","No: bet on the bot’s full forecast"]].map(([v,l])=>`<option value="${v}"${v===cal?" selected":""}>${l}</option>`).join("")}</select><small class="note">Yes bets only on the part of its disagreement with Kalshi’s price that has proven right. It bets less often until the bot beats Kalshi.</small></label>
     <label class="field">Style<select data-bet="APP_STYLE" data-orig="${esc(style)}">${STYLES.map(([v,l])=>`<option value="${v}"${v===style?" selected":""}>${l}</option>`).join("")}</select></label>
     <button class="btn primary" data-act="saveBets">Save bet settings</button>
     <div class="kv" style="border-top:1px solid var(--line2);margin-top:4px"><span>Stats since</span><b class="num">${since?when(since*1000):"The start"}</b></div>

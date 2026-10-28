@@ -176,6 +176,7 @@ jobs:
           SAVE_CMD: bash .github/save.sh
           SAVE_EVERY_SECONDS: '600'
           GITHUB_TOKEN: ${{ github.token }}
+          SHRINK_TO_MARKET: ${{ vars.APP_CALIBRATE || 'yes' }}
           MAX_LOSS_PER_BET: ${{ vars.APP_MAX_LOSS_PCT || '20' }}
           CRYPTO_READ_SECONDS: '-20'
           CRYPTO_READ_EVERY_SECONDS: '10'
