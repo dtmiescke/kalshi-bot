@@ -748,6 +748,14 @@ class LiveRunner:
             return None
         return filled
 
+    @staticmethod
+    def paper_maker_fill(book, plan):
+        """(contracts filled, terminal) for a resting paper buy at plan['limit']."""
+        asks = risk.asks_from_book(book.as_rest_book())[plan["side"]]
+        through = sum(int(size) for price, size in asks if price < plan["limit"])
+        filled = min(int(plan["contracts"]), through)
+        return filled, filled > 0
+
     def check_makers(self, now):
         if self.makers:
             self.betting_ok, self.betting_why = guard.status(
@@ -766,10 +774,10 @@ class LiveRunner:
                     self._skip("maker status unavailable")
                     continue
             elif book is not None:
-                # Paper fills require price penetration, not merely a touch.
-                asks = risk.asks_from_book(book.as_rest_book())[plan["side"]]
-                if asks and asks[0][0] < plan["limit"]:
-                    filled, terminal = plan["contracts"], True
+                # Paper fills require price penetration, not merely a touch, and
+                # only up to the size actually offered through our price: a
+                # 3-contract ask below the limit can't fill a 40-contract order.
+                filled, terminal = self.paper_maker_fill(book, plan)
 
             edge_gone = self._maker_edge_gone(ticker, plan, now)
             expired = now - mk["placed"] >= self.s.maker_wait_s
