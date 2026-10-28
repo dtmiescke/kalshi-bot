@@ -233,17 +233,19 @@ def run_scheduled(s, store, data):
                 store.set_kv("last_sports_scan", time.time())
     finally:
         s.crypto_enabled = keep
-    if keep:
+    every = float(os.environ.get("PERIODIC_EVERY_SECONDS", 0))
+    streaming = keep and burst > 0 and every > 0       # a long stream runs these itself, every PERIODIC_EVERY_SECONDS
+    if keep and not streaming:
         run_ladders(s, store, data)
     if keep and burst > 0:
         from .live.runner import run as run_live
         burst = aligned_burst_minutes(time.time(), burst)
-        every = float(os.environ.get("PERIODIC_EVERY_SECONDS", 0))
         print("live burst:", json.dumps(run_live(
             s, store, burst, sports=False,
             periodic=(lambda: periodic_cycle(s, store, data)) if every > 0 else None,
             periodic_every=every), default=str))
-    run_combos(s, store, data)
+    if not streaming:       # during a long stream they already ran minutes ago; starting and ending the stream is the only blind time
+        run_combos(s, store, data)
     grade(store, data)
     try:
         from . import crypto_combo

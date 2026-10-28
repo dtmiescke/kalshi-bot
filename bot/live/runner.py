@@ -433,10 +433,11 @@ class LiveRunner:
                     log.warning("closing read %s failed: %s", ticker, exc)
 
     def new_window_missing(self, now, last_discover):
-        """Just after a :00/:15/:30/:45 mark, look for the new windows every 3 s until every
-        coin has one, so the reads start at the open instead of up to a minute later."""
+        """Just after a :00/:15/:30/:45 mark, look for the new windows every 3 s until every coin has
+        one, so the reads start the moment Kalshi activates them (30-100 s after the mark) instead
+        of up to a minute later."""
         since_open = now % 900
-        if since_open > 45 or now - last_discover < 3:
+        if since_open > 150 or now - last_discover < 3:
             return False
         opens = now - since_open + 900              # the new windows close 15 minutes after the mark
         have = {m["series"] for m in self.markets.values() if int(m["terms"].get("close_ts") or 0) == opens}
@@ -1161,14 +1162,60 @@ class LiveRunner:
         handoff_every = float(os.environ.get("HANDOFF_EVERY_SECONDS", 120))
         last_grade = last_handoff = last_periodic = time.time()
         handed_off = save_failed = False
+        bg = {}
+
+        def spawn(name, job, *args):
+            """Run slow work (REST scans, grading, saving) off the loop, one copy per name. The
+            loop awaiting it would stop every tick, stop-loss and read for as long as it took:
+            ladders and combos alone held it for four minutes at a time."""
+            t = bg.get(name)
+            if t and not t.done():
+                return
+
+            async def run():
+                try:
+                    if asyncio.iscoroutinefunction(job):
+                        await job(*args)
+                    else:
+                        await asyncio.to_thread(job, *args)
+                except Exception as exc:
+                    log.error("%s failed: %s", name, exc)
+            bg[name] = asyncio.create_task(run())
+
+        async def discover_job():
+            nonlocal kalshi_task
+            changed = await asyncio.to_thread(self.discover)
+            if use_ws and changed:          # resubscribe to the new windows
+                kalshi_task.cancel()
+                kalshi_task = start_kalshi()
+
+        def save_job():
+            # Treat SAVE_CMD as an argument vector, not shell source.
+            # This avoids shell injection and reports failed persistence attempts.
+            nonlocal save_failed
+            try:
+                subprocess.run(shlex.split(save_cmd), check=True, capture_output=True, text=True)
+                save_failed = False
+            except Exception as exc:
+                log.error("mid-session memory save failed: %s", exc)
+                if not save_failed:          # one alert per outage, not one per attempt
+                    alerts.send("Memory save failed", str(exc)[:500], priority="high", tags=["warning"])
+                save_failed = True
+
+        def handoff_job():
+            nonlocal handed_off, end
+            reason = handoff.restart_reason(os.environ.get("GITHUB_SHA"), os.environ.get("GITHUB_REPOSITORY"),
+                                            os.environ.get("GITHUB_TOKEN"))
+            if reason and not handed_off:
+                handed_off = True
+                end = min(end, handoff.next_stop(time.time(), float(os.environ.get("BURST_END_PHASE_SECONDS", 240))))
+                log.info("handing over at %s: %s", time.strftime("%H:%M:%S", time.gmtime(end)), reason)
+
         while time.time() < end:
             now = time.time()
             if now - last_discover >= 60 or self.new_window_missing(now, last_discover):
-                changed = await asyncio.to_thread(self.discover)
                 last_discover = now
-                if use_ws and changed:          # resubscribe to the new windows
-                    kalshi_task.cancel()
-                    kalshi_task = start_kalshi()
+                spawn("discover", discover_job)
             if now - last_poll >= 3:
                 # Without the WebSocket, poll everything. WITH it, still poll any
                 # book that missed an update or has gone quiet for 8s: if the feed
@@ -1201,48 +1248,26 @@ class LiveRunner:
                 last_dump = now
             if sports and now - last_sports >= sports_every:
                 # the full sports scan + grading + learning, every 12 minutes
-                await asyncio.to_thread(self.sports_cycle)
                 last_sports = now
+                spawn("sports", self.sports_cycle)
             if grade_every and now - last_grade >= grade_every:
                 # settle and learn while streaming: a long run must not wait for its end to do this
                 last_grade = now
-                try:
-                    await asyncio.to_thread(grade, self.store, self.rest)
-                except Exception as exc:
-                    log.error("mid-session grading failed: %s", exc)
+                spawn("grade", grade, self.store, self.rest)
             if periodic and periodic_every > 0 and now - last_periodic >= periodic_every:
                 last_periodic = now
-                try:
-                    await asyncio.to_thread(periodic)
-                except Exception as exc:
-                    log.error("periodic cycle failed: %s", exc)
+                spawn("periodic", periodic)
             if handoff_check and now - last_handoff >= handoff_every and not handed_off:
                 last_handoff = now
-                reason = await asyncio.to_thread(
-                    handoff.restart_reason, os.environ.get("GITHUB_SHA"),
-                    os.environ.get("GITHUB_REPOSITORY"), os.environ.get("GITHUB_TOKEN"))
-                if reason:
-                    handed_off = True
-                    end = min(end, handoff.next_stop(now, float(os.environ.get("BURST_END_PHASE_SECONDS", 240))))
-                    log.info("handing over at %s: %s", time.strftime("%H:%M:%S", time.gmtime(end)), reason)
+                spawn("handoff", handoff_job)
             if save_cmd and now - last_save >= save_every:
-                # Treat SAVE_CMD as an argument vector, not shell source.
-                # This avoids shell injection and reports failed persistence attempts.
-                try:
-                    await asyncio.to_thread(
-                        subprocess.run, shlex.split(save_cmd), check=True,
-                        capture_output=True, text=True
-                    )
-                    save_failed = False
-                except Exception as exc:
-                    log.error("mid-session memory save failed: %s", exc)
-                    if not save_failed:          # one alert per outage, not one per attempt
-                        alerts.send("Memory save failed", str(exc)[:500],
-                                    priority="high", tags=["warning"])
-                    save_failed = True
-                last_save = now                  # retry after the usual interval either way
+                last_save = now                  # the next attempt is a full interval away, pass or fail
+                spawn("save", save_job)
             await asyncio.sleep(max(0.0, 1.0 - (time.time() - now)))
         stop.set()
+        pending = [t for t in bg.values() if not t.done()]
+        if pending:      # let a save or grading that is mid-flight finish before the post-stream work starts
+            await asyncio.wait(pending, timeout=float(os.environ.get("STREAM_DRAIN_SECONDS", 90)))
         for t in tasks + ([kalshi_task] if kalshi_task else []):
             t.cancel()
         for ticker, mk in list(self.makers.items()):
