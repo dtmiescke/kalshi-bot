@@ -85,8 +85,8 @@ def janitor_retention(store, now=None):
 # read only for the newest graded rows (about a day of them). Older rows keep
 # each signal's probability and confidence plus small fields; bulky nested
 # details are dropped. It was 270 MB of an 888 MB database.
-AUDIT_DETAIL_DAYS = 3
-AUDIT_SLIM_OVER = 1500      # bytes; smaller snapshots are left alone
+AUDIT_DETAIL_DAYS = 2
+AUDIT_SLIM_OVER = 400       # bytes; smaller snapshots are left alone
 AUDIT_SLIM_BATCH = 50_000
 
 
@@ -138,6 +138,39 @@ def janitor_slim_audit(store, now=None, keep_days=AUDIT_DETAIL_DAYS, batch=AUDIT
     return {"janitor": "slim_audit", "slimmed": slimmed, "bytes_saved": saved, "ts": now}
 
 
+# Grading settles every scan of a market but scores (Brier) only the canonical
+# pre-close forecast, so repeated scans are kept "as settled audit history".
+# Every reader that matters (calibration, backtest, reports, adaptive learning,
+# edge research) filters on brier IS NOT NULL; learning_impact reads only rows
+# newer than the latest weight update. Those unscored repeats were ~44k rows a
+# day (130k rejected rows, 290 MB). They go a day after settling; rows that
+# never settled are dropped after 14 days (their market is long gone).
+AUDIT_UNSCORED_KEEP_DAYS = 1
+AUDIT_UNSETTLED_KEEP_DAYS = 14
+
+
+def janitor_prune_audit(store, now=None):
+    now = int(time.time() if now is None else now)
+    with store.lock:
+        db = store.db
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            unscored = db.execute("""DELETE FROM decision_audit WHERE outcome IS NOT NULL
+                                     AND brier IS NULL AND COALESCE(settled_ts, ts) < ?""",
+                                  (now - AUDIT_UNSCORED_KEEP_DAYS * 86400,)).rowcount
+            unsettled = db.execute("""DELETE FROM decision_audit WHERE outcome IS NULL AND ts < ?""",
+                                   (now - AUDIT_UNSETTLED_KEEP_DAYS * 86400,)).rowcount
+            db.commit()
+        except sqlite3.OperationalError:
+            db.rollback()
+            return {"janitor": "prune_audit", "unscored": 0, "unsettled": 0, "ts": now}
+        except Exception:
+            db.rollback()
+            raise
+    return {"janitor": "prune_audit", "unscored": max(0, unscored),
+            "unsettled": max(0, unsettled), "ts": now}
+
+
 # Deleting rows frees pages but doesn't shrink the file until VACUUM. After a
 # big trim (e.g. a tighter retention window taking effect) compact at once
 # instead of waiting up to a day for the scheduled compaction.
@@ -157,9 +190,11 @@ def run_janitors(store, now=None, force=False, every_hours=1):
     # Dedupe first so the unique constraints protect subsequent writes.
     a = janitor_dedupe(store, now=now)
     b = janitor_retention(store, now=now)
+    d = janitor_prune_audit(store, now=now)
     c = janitor_slim_audit(store, now=now)
-    result = {"ok": True, "janitor_a": a, "janitor_b": b, "janitor_c": c, "ts": int(now)}
+    result = {"ok": True, "janitor_a": a, "janitor_b": b, "janitor_c": c, "janitor_d": d, "ts": int(now)}
     trimmed = sum(b["before"][t] - b["after"].get(t, b["before"][t]) for t in b["before"])
+    trimmed += d["unscored"] + d["unsettled"]
     if trimmed >= COMPACT_AFTER_ROWS or c["bytes_saved"] >= COMPACT_AFTER_BYTES:
         store.compact()
         store.set_kv("last_compact", now)
