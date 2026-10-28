@@ -9,7 +9,8 @@ A jump is a move of the composite spot over the last 5 seconds of at least JUMP_
 mid and the formula probability at 2, 5, 10, 20, 30 and 60 seconds, and when the window settles the
 profit of buying the jump's direction at the ask quoted when it was spotted, plus half a cent, held to settlement. report() then answers two
 questions: how much of the formula's move had Kalshi's mid made by each horizon (the slope), and
-whether that trade made money after fees (mean, z). Nothing here places a bet."""
+whether that trade made money after fees (mean, z), both bought the instant the jump is seen and bought
+LATENCY_S seconds later at the quote then, which is what an order could actually get. Nothing here places a bet."""
 import json
 import math
 import time
@@ -18,6 +19,7 @@ from collections import deque
 from . import risk
 
 HORIZONS = (2, 5, 10, 20, 30, 60)
+LATENCY_S = 2          # a real order is not filled the instant a jump is seen; the realistic entry is this many seconds later
 JUMP_Z = 2.0
 LOOK_S = 5
 COOLDOWN_S = 90
@@ -56,7 +58,7 @@ class LeadLag:
         for ev in [e for e in self.pending if e["ticker"] == ticker]:
             for s in HORIZONS:
                 if s not in ev["follow"] and now - ev["ts"] >= s:
-                    ev["follow"][s] = [round(mid, 4), round(float(model_prob), 4)]
+                    ev["follow"][s] = [round(mid, 4), round(float(model_prob), 4), round(float(bid), 4), round(float(ask), 4)]
             if len(ev["follow"]) == len(HORIZONS) or now - ev["ts"] > HORIZONS[-1] + 30:
                 self._store(ev)
                 self.pending.remove(ev)
@@ -106,18 +108,30 @@ def report(store, now=None, fee_rate=0.07):
                 pairs.append((r["direction"] * (f[1] - mid0), r["direction"] * (f[0] - mid0)))
         b, se = _slope(pairs)
         follow[str(s)] = None if b is None else {"slope": round(b, 3), "se": round(se, 3), "n": len(pairs)}
-    pnl = []
+    def trade(side_yes, ask, bid, outcome):
+        cost = min((ask if side_yes else 1 - bid) + 0.005, 0.99)
+        fee = risk.taker_fee(100, cost, fee_rate) / 100
+        return (1 - cost - fee) if (outcome == 1) == side_yes else (-cost - fee)
+
+    def stats(pnl):
+        n = len(pnl)
+        mean = sum(pnl) / n if n else None
+        se = (math.sqrt(sum((v - mean) ** 2 for v in pnl) / (n - 1) / n) if n > 1 else None)
+        return n, mean, (mean / se if se else None)
+
+    instant, delayed = [], []
     for r in rows:
         if r["outcome"] not in (0, 1):
             continue
-        side_yes = r["direction"] > 0
-        # buy the jump's direction at the ask quoted when it was spotted
-        cost = min((r["ask0"] if side_yes else 1 - r["bid0"]) + 0.005, 0.99)
-        fee = risk.taker_fee(100, cost, fee_rate) / 100
-        won = (r["outcome"] == 1) == side_yes
-        pnl.append((1 - cost - fee) if won else (-cost - fee))
-    n = len(pnl)
-    mean = sum(pnl) / n if n else None
-    se = (math.sqrt(sum((v - mean) ** 2 for v in pnl) / (n - 1) / n) if n > 1 else None)
+        up = r["direction"] > 0
+        instant.append(trade(up, r["ask0"], r["bid0"], r["outcome"]))       # at the quote when the jump was spotted
+        f = json.loads(r["follow"] or "{}").get(str(LATENCY_S))
+        if f and len(f) >= 4:                                               # at the quote LATENCY_S seconds later
+            delayed.append(trade(up, f[3], f[2], r["outcome"]))
+    n, mean, z = stats(instant)
+    dn, dmean, dz = stats(delayed)
     return {"events": len(rows), "settled": n, "mean_pnl": None if mean is None else round(mean, 4),
-            "z": None if not se else round(mean / se, 2), "follow": follow, "jump_z": JUMP_Z}
+            "z": None if z is None else round(z, 2),
+            "delayed": {"latency_s": LATENCY_S, "settled": dn, "mean_pnl": None if dmean is None else round(dmean, 4),
+                        "z": None if dz is None else round(dz, 2)},
+            "follow": follow, "jump_z": JUMP_Z}
