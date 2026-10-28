@@ -1,15 +1,19 @@
 name: kalshi-train
 
-# Daily at 09:07 UTC: download a bounded sample of REAL settled Kalshi
-# 15-minute windows, add them to the training set, retrain, and promote only if
-# the new model beats Kalshi AND the current champion on unseen data. Then a
-# backtest, the regression tests and the report go to the log (read-only).
-# Shares the bot's concurrency group, so it never runs alongside a trading run.
+# Twice a day (09:07 and 21:07 UTC): download a bounded sample of REAL settled
+# Kalshi 15-minute windows, add them to the training set, retrain, and promote
+# only if the new model beats Kalshi AND the current champion on unseen data.
+# Then a backtest, the regression tests and the report go to the log.
+#
+# It never pauses the bot: it trains on its own copy of memory, outside the
+# bot's lock, and publishes only what training added (new rows, changed kv
+# settings, model files) to the train-delta branch. The next bot run imports
+# that delta into the live memory and saves it (bot/train_delta.py).
 # Run it by hand (Actions -> kalshi-train -> Run workflow) any time.
 
 on:
   schedule:
-    - cron: "7 9 * * *"         # daily 09:07 UTC; UTC avoids DST-dependent local-time claims
+    - cron: "7 9,21 * * *"      # 09:07 and 21:07 UTC; UTC avoids DST-dependent local-time claims
   # Narrow recovery hook: only a deliberate marker-file commit starts an extra run.
   push:
     branches: [main]
@@ -23,12 +27,11 @@ on:
         required: true
 
 concurrency:
-  group: kalshi-bot
+  group: kalshi-train      # one trainer at a time; never the bot's lock
   cancel-in-progress: false
 
 permissions:
-  contents: write
-  actions: write   # restart the bot's run chain after training
+  contents: write          # publish the training delta branch
 
 jobs:
   train:
@@ -51,6 +54,8 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Load memory
         run: bash .github/load.sh
+      - name: Mark memory before training
+        run: python -m bot.main train-mark data/train_mark.json
       - name: Download history + train
         id: train-cycle
         # 10 min download + at most 25 min training, with room for the last fit
@@ -88,21 +93,25 @@ jobs:
           fi
           python -m bot.main history "$DAYS"
           python -m bot.main train
-      - name: Save memory
-        # Keep the last known-good snapshot if history download or training fails.
+      - name: Publish the training delta
+        # Only what training added goes out; the next bot run imports it.
+        # Keep the last delta if history download or training fails.
         if: steps.train-cycle.outcome == 'success'
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          # The save step rebuilds the dashboard + bets.csv, so it needs the same
-          # mode/bankroll/timezone as the run. Without these it always showed PAPER.
-          BOT_MODE: paper
-          LIVE_TRADING_CONFIRMED: 'no'
-          # Same account values as bot.yml (this step rebuilds the dashboard and bets.csv).
-          STATS_SINCE: ${{ vars.APP_STATS_SINCE || '2026-10-28T11:45:00Z' }}
-          BANKROLL: ${{ vars.APP_BANKROLL || '500' }}
-          BOT_TIMEZONE: ${{ vars.BOT_TIMEZONE || 'America/Chicago' }}
-        run: bash .github/save.sh
-      # Read-only audits run AFTER memory is saved and each has a time limit:
+        run: |
+          mkdir -p /tmp/delta/models
+          python -m bot.main train-export data/train_mark.json /tmp/delta/delta.sqlite "${{ github.run_id }}"
+          gzip -n /tmp/delta/delta.sqlite
+          cp -r data/models/. /tmp/delta/models/ 2>/dev/null || true
+          cd /tmp/delta
+          git init -q -b train-delta
+          git add .
+          git -c user.name="kalshi-train" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qm "Training delta from run ${{ github.run_id }}"
+          git push -qf "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" train-delta
+          echo "Training delta published; the next bot run imports it."
+      # Read-only audits run after the delta is published and each has a time limit:
       # a backtest with no limit once ran 25+ minutes and held the bot's lock.
       - name: Backtest (read-only audit)
         if: steps.train-cycle.outcome == 'success'
@@ -128,10 +137,3 @@ jobs:
         continue-on-error: true
         timeout-minutes: 5
         run: python -m bot.main report
-      - name: Restart the bot's run chain
-        # bot.yml steps aside while training waits; start it again when done,
-        # whether or not training succeeded.
-        if: always() && github.ref == 'refs/heads/main' && vars.CHAIN_RUNS != 'no'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash .github/chain_next.sh after-training

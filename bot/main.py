@@ -207,7 +207,9 @@ def run_scheduled(s, store, data):
     # attempt and status separately so insufficient data is retried on a short
     # backoff instead of silently suppressing training for a full day.
     train_now = time.time()
-    if training_due(
+    # kalshi-train trains in the background now (bot/train_delta.py); training
+    # inside a bot run delayed that run's trading by up to 8 minutes.
+    if os.environ.get("TRAIN_IN_RUN", "yes") == "yes" and training_due(
         store, train_now,
         every_hours=float(os.environ.get("TRAIN_EVERY_HOURS", 24)),
         retry_hours=float(os.environ.get("TRAIN_RETRY_HOURS", 6)),
@@ -433,6 +435,18 @@ def main(argv=None):
         minutes = float(argv[1]) if len(argv) > 1 else 60
         print(json.dumps(run_live(s, store, minutes), indent=2, default=str))
         print(build(store))
+        return
+    if cmd in ("train-mark", "train-export", "train-import"):
+        # No-pause training (bot/train_delta.py): mark before, export after, import in the bot run.
+        from . import train_delta
+        db_path = os.environ.get("BOT_DB", "data/bot.sqlite")
+        if cmd == "train-mark":
+            train_delta.mark(db_path, argv[1])
+        elif cmd == "train-export":
+            print(json.dumps(train_delta.export(db_path, argv[1], argv[2], argv[3])))
+        else:
+            got = train_delta.import_delta(db_path, argv[1], models_src=argv[2] if len(argv) > 2 else None)
+            print("training delta: " + ("already applied" if got is None else json.dumps(got)))
         return
     if cmd == "history":
         from . import history
