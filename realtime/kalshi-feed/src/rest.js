@@ -50,8 +50,10 @@ export function upstreamFor(url) {
   return null;
 }
 
-/** Handles /api/* requests; returns null for other paths. */
-export async function handleRest(request, fetchImpl = fetch) {
+/** Handles /api/* requests; returns null for other paths.
+ * sign(path) -> auth headers (optional); cache: a Cache API store shared by all
+ * phones for a few seconds (optional). One retry after a 429. */
+export async function handleRest(request, fetchImpl = fetch, sign = null, cache = null, wait = ms => new Promise(r => setTimeout(r, ms))) {
   const url = new URL(request.url);
   if (!url.pathname.startsWith("/api/")) return null;
   if (request.method === "OPTIONS") return reply("", 204);
@@ -59,12 +61,24 @@ export async function handleRest(request, fetchImpl = fetch) {
   const target = upstreamFor(url);
   if (!target) return reply({ error: "Use /api/markets, /api/market or /api/candles" }, 404);
   if (target.error) return reply({ error: target.error }, 400);
+  if (cache) {
+    try { const hit = await cache.match(target.url); if (hit) return hit; } catch {}
+  }
   let res;
-  try {
-    res = await fetchImpl(target.url, { headers: { accept: "application/json" }, cf: { cacheTtl: target.maxAge } });
-  } catch {
-    return reply({ error: "Kalshi unreachable; retry shortly" }, 502);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const headers = { accept: "application/json", ...(sign ? await sign(new URL(target.url).pathname) : {}) };
+    try {
+      res = await fetchImpl(target.url, { headers });
+    } catch {
+      return reply({ error: "Kalshi unreachable; retry shortly" }, 502);
+    }
+    if (res.status !== 429) break;
+    await wait(400 + attempt * 600);
   }
   const text = await res.text();
-  return reply(text, res.ok ? 200 : res.status, res.ok ? target.maxAge : 0);
+  const out = reply(text, res.ok ? 200 : res.status, res.ok ? target.maxAge : 0);
+  if (cache && res.ok) {
+    try { await cache.put(target.url, out.clone()); } catch {}
+  }
+  return out;
 }

@@ -44,7 +44,7 @@ function containsBytes(haystack, needle) {
   return false;
 }
 
-async function authHeaders(env) {
+async function authHeaders(env, path = SIGN_PATH, upgrade = true) {
   if (!env.KALSHI_DATA_KEY_ID || !env.KALSHI_DATA_PRIVATE_KEY) {
     throw new Error("Kalshi feed credentials are not configured");
   }
@@ -53,7 +53,7 @@ async function authHeaders(env) {
   const der = parsed.der;
   // Kalshi keys may be Ed25519 (PKCS#8) or legacy RSA-PSS (PKCS#1/PKCS#8).
   const isEd25519 = parsed.label === "PRIVATE KEY" && containsBytes(der, [0x06, 0x03, 0x2b, 0x65, 0x70]);
-  const message = new TextEncoder().encode(timestamp + "GET" + SIGN_PATH);
+  const message = new TextEncoder().encode(timestamp + "GET" + path);
   let signature;
   try {
     if (isEd25519) {
@@ -67,12 +67,13 @@ async function authHeaders(env) {
     // Never include the key, PEM text, or signature in diagnostics.
     throw new Error("private key import/sign failed (" + (error?.name || "CryptoError") + "; detected " + (isEd25519 ? "Ed25519" : "RSA") + ")");
   }
-  return {
+  const headers = {
     "KALSHI-ACCESS-KEY": env.KALSHI_DATA_KEY_ID,
     "KALSHI-ACCESS-TIMESTAMP": timestamp,
     "KALSHI-ACCESS-SIGNATURE": b64(signature),
-    "Upgrade": "websocket"
   };
+  if (upgrade) headers.Upgrade = "websocket";
+  return headers;
 }
 
 function json(data, status = 200) {
@@ -89,7 +90,10 @@ export default {
       return json({ ok: true, service: "kalshi-readonly-feed", now: Date.now(),
         credentialsConfigured: Boolean(env.KALSHI_DATA_KEY_ID && env.KALSHI_DATA_PRIVATE_KEY) });
     }
-    const rest = await handleRest(request);
+    // Signed with the read-only data key when configured: authenticated reads get
+    // Kalshi's higher rate limit (unsigned calls from shared Cloudflare IPs hit 429).
+    const sign = async path => { try { return await authHeaders(env, path, false); } catch { return {}; } };
+    const rest = await handleRest(request, fetch, sign, globalThis.caches?.default ?? null);
     if (rest) return rest;
     if (url.pathname !== "/ws") return json({ error: "Use /health, /ws or /api/*" }, 404);
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
