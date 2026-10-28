@@ -20,7 +20,7 @@ import shlex
 import time
 
 from .. import alerts, brain, briefing, council, crypto_brain, fees, guard, handoff, hindsight, ml, risk, token_data, window_review
-from .. import marketdata, vol as volmod
+from .. import features, marketdata, vol as volmod
 from ..engine import Engine
 from ..grader import grade
 from ..kalshi_client import KalshiClient, price
@@ -83,6 +83,7 @@ class LiveRunner:
         self.last_prob = {}       # ticker -> latest blended model probability (for the app)
         self.window_read = {}  # ticker -> time of its latest read
         self.tape = {}            # ticker -> {"close_ts", "strike", "pts"}: the last seconds of the chart
+        self.pre_open = {}        # series -> {window start: [chart reads taken before the market opened]}
         self._pb = (0.0, None)    # (time, playbook table), refreshed every few minutes
         # A prior process may have died after Kalshi accepted a resting order.
         # Do not resume trading until that exchange state is reconciled manually.
@@ -400,9 +401,10 @@ class LiveRunner:
         try:
             pb = next((r for r in readings if r.name == "crypto_playbook"), None)
             detail = pb.detail if pb else None
+            pre = self.pre_open.get(info.get("series"), {}).get(int(terms["close_ts"]) - 900)
             if last is None:
                 if window_review.record_open(self.store, ticker, info, terms, now, readings, ctx, weights, late=late,
-                                             playbook=detail):
+                                             playbook=detail, pre_open=pre):
                     log.info("window read %s%s", ticker, " (late)" if late else "")
             else:
                 window_review.record_read(self.store, ticker, info, terms, now, readings, ctx, weights, playbook=detail)
@@ -430,6 +432,44 @@ class LiveRunner:
                 except Exception as exc:
                     log.warning("closing read %s failed: %s", ticker, exc)
 
+    def new_window_missing(self, now, last_discover):
+        """Just after a :00/:15/:30/:45 mark, look for the new windows every 3 s until every
+        coin has one, so the reads start at the open instead of up to a minute later."""
+        since_open = now % 900
+        if since_open > 45 or now - last_discover < 3:
+            return False
+        opens = now - since_open + 900              # the new windows close 15 minutes after the mark
+        have = {m["series"] for m in self.markets.values() if int(m["terms"].get("close_ts") or 0) == opens}
+        return any(series not in have for series in self.coins)
+
+    def pre_open_reads(self, now):
+        """Kalshi lists the next window ('initialized') with no strike or book until the mark, so
+        for the 20 seconds before it the bot reads each coin's chart on its own: indicators on
+        the live candles, with the current price standing in for the strike. That read is saved
+        with the window once it opens."""
+        lead = -self.s.crypto_read_seconds
+        if lead <= 0:
+            return
+        opens = now - now % 900 + 900
+        if not 0 < opens - now <= lead:
+            self.pre_open = {sr: {t: v for t, v in w.items() if t >= opens - 900} for sr, w in self.pre_open.items()}
+            return
+        for series, a in self.coins.items():
+            reads = self.pre_open.get(series, {}).get(opens, [])
+            if reads and now - reads[-1]["ts"] < 5:
+                continue
+            try:
+                candles = minute_candles(a, now, self.seed_candles.get(series))
+                spot = a.composite_price(now) or a.book.mid()
+                f = features.build(candles, spot, 900.0) if spot else None
+                if f:
+                    reads = self.pre_open.setdefault(series, {}).setdefault(opens, [])
+                    reads.append({"ts": round(now, 1), "s": round(now - opens), "spot": window_review._r(spot, 2),
+                                  "ind": {k: window_review._r(f.get(k)) for k in window_review.KEEP_FEATURES
+                                          if f.get(k) is not None}})
+            except Exception as exc:
+                log.warning("pre-open read %s failed: %s", series, exc)
+
     def kalshi_flow_reading(self, ticker, kalshi_mid, now=None):
         """Build an independent signal from anonymous Kalshi prints in the last 5m."""
         now = time.time() if now is None else now
@@ -449,6 +489,7 @@ class LiveRunner:
             self.check_exits(now)
         self.learn_vol(now)
         self.closing_tapes(now)
+        self.pre_open_reads(now)
         weights = brain.get_weights(self.store, "crypto")
         if now - self.adaptive_report_cache["ts"] >= 60:
             try:
@@ -1057,7 +1098,7 @@ class LiveRunner:
         except Exception as exc:
             log.warning("crypto trade-flow poll %s: %s", ticker, exc)
 
-    async def main(self, minutes, sports=True):
+    async def main(self, minutes, sports=True, periodic=None, periodic_every=0):
         stop = asyncio.Event()
         if self.seed:
             await asyncio.to_thread(self.seed_history)
@@ -1116,11 +1157,11 @@ class LiveRunner:
         grade_every = float(os.environ.get("GRADE_EVERY_SECONDS", 0))
         handoff_check = os.environ.get("HANDOFF_CHECK", "no") == "yes"
         handoff_every = float(os.environ.get("HANDOFF_EVERY_SECONDS", 120))
-        last_grade = last_handoff = time.time()
+        last_grade = last_handoff = last_periodic = time.time()
         handed_off = save_failed = False
         while time.time() < end:
             now = time.time()
-            if now - last_discover >= 60:
+            if now - last_discover >= 60 or self.new_window_missing(now, last_discover):
                 changed = await asyncio.to_thread(self.discover)
                 last_discover = now
                 if use_ws and changed:          # resubscribe to the new windows
@@ -1167,6 +1208,12 @@ class LiveRunner:
                     await asyncio.to_thread(grade, self.store, self.rest)
                 except Exception as exc:
                     log.error("mid-session grading failed: %s", exc)
+            if periodic and periodic_every > 0 and now - last_periodic >= periodic_every:
+                last_periodic = now
+                try:
+                    await asyncio.to_thread(periodic)
+                except Exception as exc:
+                    log.error("periodic cycle failed: %s", exc)
             if handoff_check and now - last_handoff >= handoff_every and not handed_off:
                 last_handoff = now
                 reason = await asyncio.to_thread(
@@ -1277,5 +1324,6 @@ class LiveRunner:
             pass
 
 
-def run(settings, store, minutes, sports=True):
-    return asyncio.run(LiveRunner(settings, store).main(minutes, sports=sports))
+def run(settings, store, minutes, sports=True, periodic=None, periodic_every=0):
+    return asyncio.run(LiveRunner(settings, store).main(minutes, sports=sports, periodic=periodic,
+                                                       periodic_every=periodic_every))

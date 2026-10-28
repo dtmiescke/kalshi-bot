@@ -228,7 +228,7 @@ class TestPlaybook(Base):
         hindsight.ensure_table(self.st)
         self.fill("trend_follow", "trend/volup", 78, 22)
         r = LiveRunner.__new__(LiveRunner)
-        r.store, r._pb, r.window_read = self.st, (0.0, None), {}
+        r.store, r._pb, r.window_read, r.pre_open = self.st, (0.0, None), {}, {}
         table = r.playbook_table(self.now)
         self.assertTrue(table["rules"]["trend/volup|trend_follow"]["validated"])
         pb = hindsight.playbook_reading(table, feats())

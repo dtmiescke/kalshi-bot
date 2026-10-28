@@ -90,14 +90,15 @@ class TestStreamLoop(unittest.TestCase):
             s = Settings()
             r = rn.LiveRunner(s, Store(s.db_path), rest=FakeRest(time.time() + 600), llm=None,
                               seed=False, with_context=False)
-            graded, alerts_sent = [], []
+            graded, alerts_sent, periodic = [], [], []
             started = time.time()
             with mock.patch.object(rn.feeds, "run_feed", idle_feed), \
                  mock.patch.object(rn, "grade", lambda *a: graded.append(1)), \
                  mock.patch.object(rn.alerts, "send", lambda *a, **k: alerts_sent.append(a)), \
                  mock.patch.object(rn.handoff, "restart_reason", return_value="a deploy is waiting"), \
                  mock.patch.object(rn.handoff, "next_stop", lambda now, *a, **k: now + 5):
-                asyncio.run(r.main(10))                       # asked for ten minutes
+                asyncio.run(r.main(10, periodic=lambda: periodic.append(1), periodic_every=1))   # asked for ten minutes
             self.assertLess(time.time() - started, 60)         # handed over at the stop point instead
             self.assertGreaterEqual(len(graded), 3)            # settled while streaming (+1 at the end)
+            self.assertGreaterEqual(len(periodic), 2)          # ladders and combos keep running through the stream
             self.assertEqual(len(alerts_sent), 1)              # a failing save alerts once, not every attempt

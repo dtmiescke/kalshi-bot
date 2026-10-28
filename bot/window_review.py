@@ -79,7 +79,7 @@ def describe(coin, feats, kalshi_mid, bot_prob, spot=None, strike=None):
             f"Bot {bot_prob:.0%} vs Kalshi {kalshi_mid:.0%}; leans {call}.").strip()
 
 
-def _compose(store, ticker, info, terms, now, readings, ctx, weights, late=False, playbook=None):
+def _compose(store, ticker, info, terms, now, readings, ctx, weights, late=False, playbook=None, pre_open=None):
     """Everything the bot sees at this moment, as a window_log row. None if it can't price the market."""
     prob, conf = brain.blend(readings, weights)
     if prob is None:
@@ -105,6 +105,7 @@ def _compose(store, ticker, info, terms, now, readings, ctx, weights, late=False
         "late": bool(late),
         "elapsed_s": round(900 - (close_ts - now)),
         "playbook": playbook,
+        "pre_open": [{k: v for k, v in r.items() if k != "ts"} for r in (pre_open or [])][-6:],
     }
     row = {
         "ticker": ticker, "coin": info.get("coin") or _coin(info.get("series")), "series": info.get("series"),
@@ -119,13 +120,13 @@ def _compose(store, ticker, info, terms, now, readings, ctx, weights, late=False
     return row, snapshot
 
 
-def record_open(store, ticker, info, terms, now, readings, ctx, weights, late=False, playbook=None):
+def record_open(store, ticker, info, terms, now, readings, ctx, weights, late=False, playbook=None, pre_open=None):
     """Write the first read of a window. Returns the new record, or None if nothing to record.
     late=True marks a first read taken at bet time because the earlier ones were missed."""
     ensure_table(store)
     if store.q("SELECT 1 FROM window_log WHERE ticker=?", (ticker,)):
         return None
-    made = _compose(store, ticker, info, terms, now, readings, ctx, weights, late, playbook)
+    made = _compose(store, ticker, info, terms, now, readings, ctx, weights, late, playbook, pre_open)
     if not made:
         return None
     row, snap = made
@@ -157,10 +158,11 @@ def record_read(store, ticker, info, terms, now, readings, ctx, weights, playboo
         return None
     row, snap = made
     try:
-        trail = json.loads(old[0]["snapshot"] or "{}").get("reads") or []
+        first = json.loads(old[0]["snapshot"] or "{}")
     except ValueError:
-        trail = []
-    snap["reads"] = (trail + [_step(row, snap)])[-MAX_READS:]
+        first = {}
+    snap["pre_open"] = first.get("pre_open") or []
+    snap["reads"] = ((first.get("reads") or []) + [_step(row, snap)])[-MAX_READS:]
     row["snapshot"] = json.dumps(snap, default=str)
     for k in ("ticker", "coin", "series", "open_ts", "close_ts"):
         row.pop(k)
