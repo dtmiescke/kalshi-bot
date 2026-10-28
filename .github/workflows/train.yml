@@ -19,7 +19,7 @@ on:
     inputs:
       days:
         description: "Days of history to download (1-90)"
-        default: "3"
+        default: "7"
         required: true
 
 concurrency:
@@ -59,8 +59,8 @@ jobs:
         env:
           # Bound the amount of history per series so slow historical endpoints
           # cannot consume the whole runner allocation. Override in repo vars.
-          DAYS: ${{ github.event.inputs.days || '3' }}
-          HISTORY_MAX_MARKETS: ${{ vars.HISTORY_MAX_MARKETS || '20' }}
+          DAYS: ${{ github.event.inputs.days || '7' }}
+          HISTORY_MAX_MARKETS: ${{ vars.HISTORY_MAX_MARKETS || '150' }}
           # the download stops here and keeps what it has (it used to eat the step)
           HISTORY_TIME_LIMIT_MINUTES: ${{ vars.HISTORY_TIME_LIMIT_MINUTES || '10' }}
           PYTHONUNBUFFERED: "1"

@@ -60,6 +60,27 @@ class TestHistoryBudget(unittest.TestCase):
         self.assertFalse(any("W0-00" in p for p in candle_calls))
         self.assertTrue(any("W1-00" in p for p in candle_calls))
 
+    def test_skip_applies_before_the_limit_so_runs_reach_further_back(self):
+        c = FakeKalshi(n=10)
+        have = {f"KXBTC15M-W{i}-00" for i in range(3)}            # the 3 newest are already in
+        got = history.settled_markets(c, "KXBTC15M", NOW - 86400, NOW, limit=3, skip=have)
+        self.assertEqual([m["ticker"] for m in got], [f"KXBTC15M-W{i}-00" for i in (5, 4, 3)])
+
+    def test_each_coin_gets_a_share_of_the_time(self):
+        seen = []
+        real = history.settled_markets
+
+        def spy(client, ser, *a, **k):
+            seen.append(ser)
+            return []
+        history.settled_markets = spy
+        try:
+            history.run(self.st, FakeKalshi(), days=1, deadline_ts=time.time() + 60,
+                        spot_get=lambda *a, **k: _Empty())
+        finally:
+            history.settled_markets = real
+        self.assertEqual(seen, list(history.SERIES_PAIR))          # no coin starved by an earlier one
+
     def test_stops_at_deadline(self):
         c = FakeKalshi()
         out = history.run(self.st, c, days=1, deadline_ts=NOW - 1, spot_get=lambda *a, **k: _Empty())
