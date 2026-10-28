@@ -107,6 +107,16 @@ class TestAppSummary(unittest.TestCase):
         self.assertIn('route.page==="coin")spot(', html)                  # spot prices only where they're shown
         self.assertIn('addEventListener("visibilitychange"', html)       # catch up when the app is reopened
 
+    def test_insights_and_press_and_hold_charts(self):
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("insights:screenInsights", html)                 # its own page
+        self.assertIn('data-act="insights"', html)                     # reachable from the dashboard and coin stats
+        for metric in ("Profit factor", "Max drawdown", "Is the bot well calibrated?", "P/L by time of day"):
+            self.assertIn(metric, html)
+        self.assertIn('class="scrubbable" data-live="chart:', html)     # live charts can be read by press-and-hold
+        self.assertIn("{passive:false}", html)                         # a held finger reads the chart instead of scrolling
+        self.assertIn("if(el._scrubbing)return;", html)                # the chart holds still while being read
+
     def test_bets_csv_carries_compact_signals_for_bet_details(self):
         self.st.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,stake,fee,
                      status,signals_json) VALUES(1,'paper','KXBTC15M-X','E','KXBTC15M','yes',0.5,1,0.5,0,'open',?)""",
