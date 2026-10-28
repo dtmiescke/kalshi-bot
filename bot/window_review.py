@@ -1,8 +1,9 @@
-"""A full read of every 15-minute chart 45 seconds in, the last 20 seconds
-when it ends, and a verdict when it settles.
+"""A running read of every 15-minute chart from 20 seconds before it starts to
+90 seconds in, the last 20 seconds when it ends, and a verdict when it settles.
 
-For each coin's new window the live bot records (once, 45 seconds in; the bet
-comes from 90 seconds in) everything it can see: spot and the cross-exchange composite, the
+For each coin's new window the live bot reads (every few seconds from 20 seconds
+before the start until the bet is allowed at 90 seconds; the latest read is
+kept and the trail of earlier ones with it) everything it can see: spot and the cross-exchange composite, the
 Kalshi price and book, every signal, the chart indicators, the token,
 liquidity and volume facts, and its own blended forecast, plus a one-line
 plain-English read. When Kalshi settles the window, the same record gets what
@@ -78,12 +79,8 @@ def describe(coin, feats, kalshi_mid, bot_prob, spot=None, strike=None):
             f"Bot {bot_prob:.0%} vs Kalshi {kalshi_mid:.0%}; leans {call}.").strip()
 
 
-def record_open(store, ticker, info, terms, now, readings, ctx, weights, late=False, playbook=None):
-    """Write the opening read once. Returns the new record, or None if nothing to record.
-    late=True marks a read taken at bet time because the 45-second one was missed."""
-    ensure_table(store)
-    if store.q("SELECT 1 FROM window_log WHERE ticker=?", (ticker,)):
-        return None
+def _compose(store, ticker, info, terms, now, readings, ctx, weights, late=False, playbook=None):
+    """Everything the bot sees at this moment, as a window_log row. None if it can't price the market."""
     prob, conf = brain.blend(readings, weights)
     if prob is None:
         return None
@@ -119,9 +116,56 @@ def record_open(store, ticker, info, terms, now, readings, ctx, weights, late=Fa
         "snapshot": json.dumps(snapshot, default=str),
     }
     row["summary"] = describe(row["coin"], {**feats, **snapshot["indicators"]}, mid, prob, spot, terms.get("strike"))
+    return row, snapshot
+
+
+def record_open(store, ticker, info, terms, now, readings, ctx, weights, late=False, playbook=None):
+    """Write the first read of a window. Returns the new record, or None if nothing to record.
+    late=True marks a first read taken at bet time because the earlier ones were missed."""
+    ensure_table(store)
+    if store.q("SELECT 1 FROM window_log WHERE ticker=?", (ticker,)):
+        return None
+    made = _compose(store, ticker, info, terms, now, readings, ctx, weights, late, playbook)
+    if not made:
+        return None
+    row, snap = made
+    snap["reads"] = [_step(row, snap)]
+    row["snapshot"] = json.dumps(snap, default=str)
     cols = list(row)
     store.x(f"INSERT OR IGNORE INTO window_log ({','.join(cols)}) VALUES({','.join('?' * len(cols))})",
             tuple(row[c] for c in cols))
+    return row
+
+
+def _step(row, snap):
+    return {"s": snap["elapsed_s"], "prob": row["bot_prob"], "mid": row["kalshi_mid"], "spot": row["spot"]}
+
+
+MAX_READS = 24
+
+
+def record_read(store, ticker, info, terms, now, readings, ctx, weights, playbook=None):
+    """Re-read an open window: from 20 s before it starts to the moment the bot may bet, the bot
+    keeps reading and testing everything. The row always holds the latest read (the one the
+    bet comes from) and the snapshot keeps the trail of how the read moved."""
+    ensure_table(store)
+    old = store.q("SELECT snapshot, outcome FROM window_log WHERE ticker=?", (ticker,))
+    if not old or old[0]["outcome"] is not None:
+        return None
+    made = _compose(store, ticker, info, terms, now, readings, ctx, weights, False, playbook)
+    if not made:
+        return None
+    row, snap = made
+    try:
+        trail = json.loads(old[0]["snapshot"] or "{}").get("reads") or []
+    except ValueError:
+        trail = []
+    snap["reads"] = (trail + [_step(row, snap)])[-MAX_READS:]
+    row["snapshot"] = json.dumps(snap, default=str)
+    for k in ("ticker", "coin", "series", "open_ts", "close_ts"):
+        row.pop(k)
+    sets = ",".join(f"{c}=?" for c in row)
+    store.x(f"UPDATE window_log SET {sets} WHERE ticker=? AND outcome IS NULL", (*row.values(), ticker))
     return row
 
 

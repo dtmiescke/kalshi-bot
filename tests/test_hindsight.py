@@ -1,4 +1,4 @@
-"""Read at 45 s, bet from 90 s; the last 20 s of every window; and the hindsight
+"""Read from 20 s before the start, bet from 90 s; the last 20 s of every window; and the hindsight
 review: after a window settles, which setup would have worked, and which of those
 setups have earned a place in the playbook."""
 import json
@@ -27,23 +27,24 @@ def feats(**kw):
 
 
 class TestTiming(unittest.TestCase):
-    def test_read_at_45_seconds_and_bet_from_90(self):
+    def test_read_from_20_seconds_before_the_start_and_bet_from_90(self):
         s = Settings(mode="paper")
-        self.assertEqual((s.crypto_read_seconds, s.crypto_entry_delay_seconds), (45.0, 90.0))
+        self.assertEqual((s.crypto_read_seconds, s.crypto_entry_delay_seconds), (-20.0, 90.0))
+        self.assertEqual(s.crypto_read_every_seconds, 10.0)
         self.assertEqual(s.crypto_max_minutes, 13.5)               # 15 min - 90 s
         with patch.dict(os.environ, {"CRYPTO_ENTRY_DELAY_SECONDS": "120"}):
             self.assertEqual(Settings(mode="paper").crypto_max_minutes, 13.0)
 
-    def test_the_read_window_is_45_to_90_seconds_in(self):
+    def test_the_read_window_is_20_seconds_before_the_start_to_90_seconds_in(self):
         r = LiveRunner.__new__(LiveRunner)
         r.s = Settings(mode="paper")
         close = 10_000
-        for elapsed, due in ((44.9, False), (45.0, True), (89.9, True), (90.0, False)):
+        for elapsed, due in ((-20.1, False), (-20.0, True), (0.0, True), (45.0, True), (89.9, True), (90.0, False)):
             self.assertEqual(r.read_due(close, close - 900 + elapsed), due, elapsed)
 
     def test_workflow_pins_the_timing(self):
         wf = open(os.path.join(os.path.dirname(__file__), "..", ".github", "workflows", "bot.yml")).read()
-        self.assertIn("CRYPTO_READ_SECONDS: '45'", wf)
+        self.assertIn("CRYPTO_READ_SECONDS: '-20'", wf)
         self.assertIn("CRYPTO_ENTRY_DELAY_SECONDS: '90'", wf)
 
 
@@ -109,7 +110,7 @@ class TestClosingTape(Base):
 
     def test_runner_keeps_the_last_20_seconds_then_reviews_them_at_the_close(self):
         r = LiveRunner.__new__(LiveRunner)
-        r.store, r.tape, r.window_read = self.st, {}, set()
+        r.store, r.tape, r.window_read = self.st, {}, {}
         close = self.now + 30
 
         class A:
@@ -227,15 +228,22 @@ class TestPlaybook(Base):
         hindsight.ensure_table(self.st)
         self.fill("trend_follow", "trend/volup", 78, 22)
         r = LiveRunner.__new__(LiveRunner)
-        r.store, r._pb, r.window_read = self.st, (0.0, None), set()
+        r.store, r._pb, r.window_read = self.st, (0.0, None), {}
         table = r.playbook_table(self.now)
         self.assertTrue(table["rules"]["trend/volup|trend_follow"]["validated"])
         pb = hindsight.playbook_reading(table, feats())
         terms = {"strike": 80_500.0, "close_ts": self.now + 855, "avg_seconds": 60}
         readings = [Reading("kalshi_market", 0.50, 0.9, {}), pb]
         ctx = {"kalshi_yes_bid": 0.49, "kalshi_yes_ask": 0.51, "spot": {}, "features": feats()}
-        r.take_window_read("KXBTC15M-T1", {"series": "KXBTC15M"}, terms, self.now, readings, ctx, brain.DEFAULT_WEIGHTS)
-        r.take_window_read("KXBTC15M-T1", {"series": "KXBTC15M"}, terms, self.now, readings, ctx, brain.DEFAULT_WEIGHTS)
+        r.s = Settings(mode="paper")
+        t = {"series": "KXBTC15M"}
+        r.take_window_read("KXBTC15M-T1", t, terms, self.now, readings, ctx, brain.DEFAULT_WEIGHTS)
+        r.take_window_read("KXBTC15M-T1", t, terms, self.now + 3, readings, ctx, brain.DEFAULT_WEIGHTS)   # too soon: skipped
+        r.take_window_read("KXBTC15M-T1", t, terms, self.now + 12, readings, ctx, brain.DEFAULT_WEIGHTS)  # keeps reading
+        r.take_window_read("KXBTC15M-T1", t, terms, self.now + 24, readings, ctx, brain.DEFAULT_WEIGHTS)
+        trail = json.loads(self.st.q("SELECT snapshot FROM window_log")[0]["snapshot"])["reads"]
+        self.assertEqual(len(trail), 3)                                            # one step per read, newest last
+        self.assertEqual(self.st.q("SELECT read_ts FROM window_log")[0]["read_ts"], self.now + 24)
         snap = json.loads(self.st.q("SELECT snapshot FROM window_log")[0]["snapshot"])
         self.assertEqual(snap["playbook"]["rules"], ["trend_follow"])             # the read records what the playbook said
         self.assertEqual(self.st.q("SELECT COUNT(*) c FROM window_log")[0]["c"], 1)

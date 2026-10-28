@@ -197,7 +197,8 @@ class Settings:
     crypto_min_minutes: float = 2.0    # too close to the bell: our price feed lags
     # Each 15-minute window: the bot reads and tests the chart READ_SECONDS in,
     # then may bet from ENTRY_DELAY_SECONDS in (so max minutes left = 15 - delay).
-    crypto_read_seconds: float = field(default_factory=lambda: _env_float("CRYPTO_READ_SECONDS", 45.0))
+    crypto_read_seconds: float = field(default_factory=lambda: _env_float("CRYPTO_READ_SECONDS", -20.0))
+    crypto_read_every_seconds: float = field(default_factory=lambda: _env_float("CRYPTO_READ_EVERY_SECONDS", 10.0))
     crypto_entry_delay_seconds: float = field(default_factory=lambda: _env_float("CRYPTO_ENTRY_DELAY_SECONDS", 90.0))
 
     @property

@@ -81,7 +81,7 @@ class LiveRunner:
         self.seed_candles = {}    # series -> Coinbase 1-minute candles (OHLCV)
         self.makers = {}          # ticker -> resting maker order
         self.last_prob = {}       # ticker -> latest blended model probability (for the app)
-        self.window_read = set()  # tickers whose opening read is already recorded
+        self.window_read = {}  # ticker -> time of its latest read
         self.tape = {}            # ticker -> {"close_ts", "strike", "pts"}: the last seconds of the chart
         self._pb = (0.0, None)    # (time, playbook table), refreshed every few minutes
         # A prior process may have died after Kalshi accepted a resting order.
@@ -387,20 +387,25 @@ class LiveRunner:
         return self._pb[1]
 
     def read_due(self, close_ts, now):
-        """True from CRYPTO_READ_SECONDS into the window until the bet is allowed (CRYPTO_ENTRY_DELAY_SECONDS)."""
+        """True from CRYPTO_READ_SECONDS (-20: before the window starts) until the bet is allowed (CRYPTO_ENTRY_DELAY_SECONDS)."""
         elapsed = 900 - (close_ts - now)
         return self.s.crypto_read_seconds <= elapsed < self.s.crypto_entry_delay_seconds
 
     def take_window_read(self, ticker, info, terms, now, readings, ctx, weights, late=False):
-        """Record this window's read once. Failures are logged and never block trading."""
-        if ticker in self.window_read:
+        """Read this window again, at most every CRYPTO_READ_EVERY_SECONDS. Failures are logged and never block trading."""
+        last = self.window_read.get(ticker)
+        if last is not None and now - last < self.s.crypto_read_every_seconds:
             return
-        self.window_read.add(ticker)
+        self.window_read[ticker] = now
         try:
             pb = next((r for r in readings if r.name == "crypto_playbook"), None)
-            if window_review.record_open(self.store, ticker, info, terms, now, readings, ctx, weights, late=late,
-                                         playbook=pb.detail if pb else None):
-                log.info("window read %s%s", ticker, " (late)" if late else "")
+            detail = pb.detail if pb else None
+            if last is None:
+                if window_review.record_open(self.store, ticker, info, terms, now, readings, ctx, weights, late=late,
+                                             playbook=detail):
+                    log.info("window read %s%s", ticker, " (late)" if late else "")
+            else:
+                window_review.record_read(self.store, ticker, info, terms, now, readings, ctx, weights, playbook=detail)
         except Exception as exc:
             log.warning("window read %s failed: %s", ticker, exc)
 
@@ -415,7 +420,7 @@ class LiveRunner:
                 t = self.tape.setdefault(ticker, {"close_ts": close_ts, "strike": info["terms"].get("strike"), "pts": []})
                 if px and (not t["pts"] or now - t["pts"][-1][0] >= 0.5):
                     t["pts"].append((now, px))
-        self.window_read.intersection_update(self.markets)      # finished windows drop out
+        self.window_read = {t: v for t, v in self.window_read.items() if t in self.markets}   # finished windows drop out
         for ticker, t in list(self.tape.items()):
             if now >= t["close_ts"]:
                 del self.tape[ticker]
@@ -490,8 +495,8 @@ class LiveRunner:
                 continue
             self.store.set_kv(f"start_{ticker}", close_ts)
             self.store.set_kv(f"settle_after_{ticker}", close_ts + 300)
-            # The read of a new chart, CRYPTO_READ_SECONDS in (45 s): everything the bot can
-            # see, written down once; the bet comes later (bot/window_review.py).
+            # Read and test everything from 20 s before the window starts until the bet is
+            # allowed at 90 s in, every few seconds (bot/window_review.py).
             if self.read_due(close_ts, now):
                 self.take_window_read(ticker, info, terms, now, readings, ctx, weights)
             # Keep one research snapshot every 30s. The grader scores only the
@@ -555,8 +560,8 @@ class LiveRunner:
             if self.store.get_kv(lock_key):
                 # A trade or in-flight attempt already owns this coin/window.
                 continue
-            # A bet always follows a read: if the 45-second one was missed (a restart, a late
-            # discovery), read now, before betting.
+            # A bet always follows a fresh read: if none was taken (a restart, a late
+            # discovery) or the last is a few seconds old, read now, before betting.
             self.take_window_read(ticker, info, terms, now, readings, ctx, weights, late=True)
             plan = self.plan_for(ticker, readings, weights)
             if not plan:

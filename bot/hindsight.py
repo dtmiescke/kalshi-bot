@@ -1,6 +1,6 @@
 """After every window settles: which setup would have worked?
 
-Each coin's window is read at 45 seconds in (bot/window_review.py). When Kalshi
+Each coin's window is read from 20 seconds before it starts to 90 seconds in (bot/window_review.py). When Kalshi
 settles it, this module goes back to that same read and runs the whole toolbox
 over it: every rule in RULES says YES, NO or "no opinion" from the chart
 indicators, token/liquidity/volume facts and the Kalshi price as they stood at
@@ -12,7 +12,7 @@ One window proves nothing: with 18 rules, one will always have "worked". So the
 results are filed by market condition (trend strength x volatility trend) and
 only a rule that stays profitable after fees across many windows in the same
 condition, with a strict statistical margin (99% one-sided), becomes part of the
-PLAYBOOK. At the next 45-second read the bot looks up the current condition and
+PLAYBOOK. At the next read the bot looks up the current condition and
 the validated rules that fire now become one more signal ("crypto_playbook"),
 which, like every signal, starts at a small weight and keeps it only if it keeps
 beating Kalshi on settled markets (brain.learn).

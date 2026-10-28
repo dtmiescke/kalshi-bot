@@ -643,7 +643,7 @@ function readsCard(sym){ // the bot's read of every chart when it opens, and how
   const rows=((rep&&rep.recent)||[]).filter(r=>!sym||r.coin===sym).slice(0,sym?12:10);
   if(!rows.length)return"";
   const st=rep.stats||{},sk=st.skill;
-  return`<section class="card"><div class="cardhead"><h2>Chart reads</h2><small class="muted">read at 45s, bet from 90s</small></div>
+  return`<section class="card"><div class="cardhead"><h2>Chart reads</h2><small class="muted">read from -20s, bet at 90s</small></div>
     <small class="muted" style="margin-top:-6px">${st.windows?`${plural(st.windows,"window")} scored: the bot leaned the right way ${pct(st.hit_rate)} of the time (Kalshi ${pct(st.kalshi_hit_rate)}), ${sk==null?"":(sk>=0?"closer":"further")+" than Kalshi’s price by "+Math.abs(sk*100).toFixed(1)+"%"}.`:"Scores appear once windows settle."}</small>
     ${rows.map(r=>{const done=r.outcome!=null,callYes=r.bot_prob>=.5,right=done&&(callYes===!!r.outcome);
       return`<div class="row" style="align-items:flex-start;padding:10px 0;min-height:0"><span class="badge">${esc(r.coin)}</span><span class="rowmain"><b style="white-space:normal">${when(r.open_ts*1000)} · called ${Math.round(r.bot_prob*100)}% vs Kalshi ${Math.round(r.kalshi_mid*100)}%</b><small style="white-space:normal">${esc(r.summary||"")}</small>${done&&r.note?`<small style="white-space:normal">${esc(r.note)}</small>`:""}${done&&r.closing_text?`<small style="white-space:normal">${esc(r.closing_text)}</small>`:""}${done&&r.hindsight?`<small style="white-space:normal">${esc(r.hindsight)}</small>`:""}</span><span class="rowend ${done?(right?"up":"down"):"muted"}" style="font-size:12px">${done?(right?"Right":"Wrong"):"Open"}</span></div>`}).join("")}</section>`}
