@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from . import brain, guard
-from . import entry_timing, hindsight, lead_lag, online, sweep, window_review
+from . import entry_rules, entry_timing, hindsight, lead_lag, online, sweep, window_review
 from .storage import stats_since
 
 E = html.escape
@@ -451,6 +451,7 @@ def summary(store):
         "playbook": _safe(hindsight.playbook_summary, store),
         "edge": _safe(edge_report, store),
         "entry_timing": _safe(entry_timing.summary, store),
+        "entry_rules": _safe(entry_rules.summary, store),
         "lead_lag": _safe(lead_lag.report, store),
         "online": _safe(online.report, store),
         "sweep": _safe(sweep.report, store),

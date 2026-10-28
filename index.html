@@ -236,7 +236,7 @@ const $=id=>document.getElementById(id);
 const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
 let cfg=null;try{cfg=JSON.parse(localStorage.getItem("kbot")||"null")}catch(e){}
 let demo=false, vars={}, wfState=null, runsCache=[], bets=[], sample=false, briefing="", report="";
-let account=null, winReport=null, playbook=null, edgeRep=null, timingRep=null, lagRep=null, onlineRep=null, sweepRep=null, sigReport=[], council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
+let account=null, winReport=null, playbook=null, edgeRep=null, timingRep=null, rulesRep=null, lagRep=null, onlineRep=null, sweepRep=null, sigReport=[], council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
 
 function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),2800)}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
@@ -363,7 +363,7 @@ async function loadDB(){
     if(sf.sha===loadDB.sha)return;
     try{const s=JSON.parse(await file("summary.json"));
       council=s.council||[];model=s.model||null;lessons=s.lessons||[];audit=s.audit||[];combos=s.combos||[];storage=s.storage||null;
-      summaryKV=s.kv||{};members=s.members||{};account=s.account||null;sigReport=s.signals||[];winReport=s.windows&&s.windows.stats?s.windows:null;playbook=s.playbook&&s.playbook.min_windows?s.playbook:null;edgeRep=s.edge&&s.edge.windows!=null?s.edge:null;timingRep=s.entry_timing&&s.entry_timing.buckets?s.entry_timing:null;lagRep=s.lead_lag&&s.lead_lag.events!=null?s.lead_lag:null;onlineRep=s.online&&s.online.online?s.online:null;sweepRep=s.sweep&&s.sweep.verdict?s.sweep:null;loadDB.sha=sf.sha;dbNote="";return}
+      summaryKV=s.kv||{};members=s.members||{};account=s.account||null;sigReport=s.signals||[];winReport=s.windows&&s.windows.stats?s.windows:null;playbook=s.playbook&&s.playbook.min_windows?s.playbook:null;edgeRep=s.edge&&s.edge.windows!=null?s.edge:null;timingRep=s.entry_timing&&s.entry_timing.buckets?s.entry_timing:null;rulesRep=s.entry_rules&&s.entry_rules.rules?s.entry_rules:null;lagRep=s.lead_lag&&s.lead_lag.events!=null?s.lead_lag:null;onlineRep=s.online&&s.online.online?s.online:null;sweepRep=s.sweep&&s.sweep.verdict?s.sweep:null;loadDB.sha=sf.sha;dbNote="";return}
     catch(e){/* fall back to the full database below */}
   }
   const f=(list||[]).find(x=>x.name==="bot.sqlite.gz")||(list||[]).find(x=>x.name==="bot.sqlite");
@@ -627,7 +627,7 @@ function screenInsights(){
       ${I.cal.map(r=>`<div class="cal"><span class="muted">${r.l}</span><span class="track"><i style="width:${Math.round(r.won*100)}%"></i><u style="left:calc(${Math.round(r.said*100)}% - 1px)"></u></span><b class="num">${Math.round(r.won*100)}% <span class="muted" style="font-weight:500">of ${r.n}</span></b></div>`).join("")}</section>`+
     `<section class="card"><h2>P/L by time of day</h2><div class="bars hours">${I.hours.map(v=>`<div class="bar"><div class="u"><i style="height:${v>0?Math.round(v/mx*38):0}px"></i></div><div class="d"><i style="height:${v<0?Math.round(-v/mx*38):0}px"></i></div></div>`).join("")}</div>
       <div class="hourlab">${["12a","2a","4a","6a","8a","10a","12p","2p","4p","6p","8p","10p"].map(h=>`<span>${h}</span>`).join("")}</div></section>`+
-    readsCard(sym)+(sym?"":edgeCard()+scoreCard()+sweepCard()+lagCard()+timingCard()+playbookCard()+reportCard())+
+    readsCard(sym)+(sym?"":edgeCard()+scoreCard()+sweepCard()+lagCard()+timingCard()+rulesCard()+playbookCard()+reportCard())+
     `<section class="card" style="gap:0"><div class="cardhead"><h2>Edge check</h2></div>
       <div class="kv"><span>Avg edge on winners</span><b class="num">${pts(I.edgeW)}</b></div>
       <div class="kv"><span>Avg edge on losers</span><b class="num">${pts(I.edgeL)}</b></div>
@@ -693,6 +693,13 @@ function timingCard(){ // when in the 15-minute window would-be entries have pai
   return`<section class="card" style="gap:0"><div class="cardhead"><h2>Best time to bet</h2><small class="muted">would-be entries, per contract</small></div>
     ${b.map(r=>`<div class="kv"><span>${name(r)} <small class="muted">· ${plural(r.n,"window")}</small></span><b class="num ${r.n&&r.mean>0?"up":r.n&&r.mean<0?"down":""}">${r.n?(r.mean>=0?"+":"−")+Math.abs(r.mean*100).toFixed(1)+"¢":"–"} · ${word[r.state]||r.state}</b></div>`).join("")}
     <small class="note" style="margin-top:8px">The bot bets the first time its edge clears the bar, any time from 90 seconds in. A stretch is skipped only once ${timingRep?timingRep.min_windows:60}+ windows show entries there lose money. Until then nothing is skipped.</small></section>`}
+function rulesCard(){ // would waiting for confirmation have paid? (summary.json "entry_rules")
+  const r=sample?{min_trades:60,rules:[{label:"Bet when the edge clears (current)",n:83,mean:-.041,state:"no proof"},{label:"Skip prices near 50¢ (higher fees)",n:68,mean:-.036,state:"no proof"},{label:"Wait for a 5-minute candle that agrees",n:49,mean:-.054,state:"learning"},{label:"5-min, 15-min and strike all agree, 8+ min in",n:24,mean:-.079,state:"learning"}]}:rulesRep;
+  if(!r||!r.rules.length)return"";
+  const word={learning:"Learning",paying:"Paying","no proof":"No proof",losing:"Losing"};
+  return`<section class="card" style="gap:0"><div class="cardhead"><h2>Wait for confirmation?</h2><small class="muted">would-be entries, per contract</small></div>
+    ${r.rules.map(x=>`<div class="kv"><span>${esc(x.label)} <small class="muted">· ${plural(x.n,"entry")}</small></span><b class="num ${x.n&&x.mean>0?"up":x.n&&x.mean<0?"down":""}">${x.n?(x.mean>=0?"+":"−")+Math.abs(x.mean*100).toFixed(1)+"¢":"–"} · ${word[x.state]||x.state}</b></div>`).join("")}
+    <small class="note" style="margin-top:8px">Each rule is replayed on settled windows after fees. A later entry pays Kalshi’s later price, so waiting only helps if the confirmation is worth more than the price move. A rule counts only with ${r.min_trades}+ entries and a result that beats luck; nothing here places or changes a bet.</small></section>`}
 function playbookCard(){ // setups the bot has proven on settled windows, by market condition (summary.json "playbook")
   const pb=sample?{windows:212,tested:54,validated:2,min_windows:50,top:[{regime:"trend/volup",label:"Trend follow",n:84,hit:.64,edge:.021},{regime:"range/voldown",label:"RSI fade",n:61,hit:.61,edge:.013}]}:playbook;
   if(!pb)return"";
