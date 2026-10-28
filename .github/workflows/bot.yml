@@ -34,7 +34,7 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 245
     # Optional Hugging Face memory (bot/hf_memory.py): unset = bot-data only.
     # Optional Val Town bridge (bot/valtown_bridge.py) for public Kalshi catalog
     # reads; unset = direct Kalshi. Never used for order books or orders.
@@ -84,7 +84,7 @@ jobs:
           echo "Crypto hourly ceiling set; entries are not forced."
       - name: Run
         id: run
-        timeout-minutes: 18
+        timeout-minutes: 225
         env:
           BOT_MODE: paper
           LIVE_TRADING_CONFIRMED: "no"
@@ -166,6 +166,15 @@ jobs:
           AGGRESSION_LEVEL: ${{ vars.APP_STYLE || 'aggressive' }}
           MIN_EDGE: ${{ vars.MIN_EDGE || '3' }}
           CRYPTO_MIN_EDGE: ${{ vars.CRYPTO_MIN_EDGE || '5' }}
+          # One long stream instead of 10-minute bursts: it ends 4 minutes into a window, saves
+          # memory every 10 minutes meanwhile, grades every 5, and hands over early when a
+          # deploy or another run is waiting (bot/handoff.py).
+          BURST_TARGET_MINUTES: '180'
+          GRADE_EVERY_SECONDS: '300'
+          HANDOFF_CHECK: 'yes'
+          SAVE_CMD: bash .github/save.sh
+          SAVE_EVERY_SECONDS: '600'
+          GITHUB_TOKEN: ${{ github.token }}
           MAX_LOSS_PER_BET: ${{ vars.APP_MAX_LOSS_PCT || '20' }}
           CRYPTO_READ_SECONDS: '-20'
           CRYPTO_READ_EVERY_SECONDS: '10'

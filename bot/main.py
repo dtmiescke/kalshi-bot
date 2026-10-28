@@ -35,7 +35,7 @@ from .kalshi_client import KalshiClient
 from .report import build
 from .storage import Store
 from .watchlist import Watchlist
-from . import alerts, backtest, briefing
+from . import alerts, backtest, briefing, handoff
 from .llm import LLM
 
 FULL_SCAN_MINUTES = 60
@@ -43,12 +43,9 @@ FULL_SCAN_MINUTES = 60
 
 
 def aligned_burst_minutes(now, default, env=None):
-    """How long to stream so the pause between bursts lands mid-window, not on a boundary.
-
-    Every 15-minute window is read from 20 s before it starts until the bet at 90 s, so the
-    stream must be running across each :00/:15/:30/:45 mark. A burst therefore ends
-    BURST_END_PHASE_SECONDS (default 240) into a window; the save and restart that follow
-    fall in minutes 4-9, after the early reads and bets are done. BURST_ALIGN=no keeps the
+    """How long to stream. One long run (BURST_TARGET_MINUTES) that ends BURST_END_PHASE_SECONDS
+    (default 240) into a window, so the restart after it falls in minutes 4-9, after the read
+    from 20 s before the start and the bet at 90 s (bot/handoff.py). BURST_ALIGN=no keeps the
     fixed BURST_MINUTES."""
     env = os.environ if env is None else env
     if str(env.get("BURST_ALIGN", "yes")).lower() in ("no", "false", "0"):
@@ -56,13 +53,11 @@ def aligned_burst_minutes(now, default, env=None):
     try:
         phase = float(env.get("BURST_END_PHASE_SECONDS", 240))
         lo = float(env.get("BURST_MIN_MINUTES", 4)) * 60
-        hi = float(env.get("BURST_MAX_MINUTES", 13)) * 60
+        target = float(env.get("BURST_TARGET_MINUTES", 13)) * 60
     except (TypeError, ValueError):
         return default
-    end = now - (now % 900) + phase
-    while end - now < lo:
-        end += 900
-    return min(end - now, hi) / 60.0
+    return (handoff.stop_point(now, target, phase, lo) - now) / 60.0
+
 
 def _attach_code_health(store_health, code_health):
     """Keep source-structure results alongside the final database health check."""
