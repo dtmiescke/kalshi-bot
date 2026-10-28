@@ -41,6 +41,29 @@ from .llm import LLM
 FULL_SCAN_MINUTES = 60
 
 
+
+def aligned_burst_minutes(now, default, env=None):
+    """How long to stream so the pause between bursts lands mid-window, not on a boundary.
+
+    Every 15-minute window is read from 20 s before it starts until the bet at 90 s, so the
+    stream must be running across each :00/:15/:30/:45 mark. A burst therefore ends
+    BURST_END_PHASE_SECONDS (default 240) into a window; the save and restart that follow
+    fall in minutes 4-9, after the early reads and bets are done. BURST_ALIGN=no keeps the
+    fixed BURST_MINUTES."""
+    env = os.environ if env is None else env
+    if str(env.get("BURST_ALIGN", "yes")).lower() in ("no", "false", "0"):
+        return default
+    try:
+        phase = float(env.get("BURST_END_PHASE_SECONDS", 240))
+        lo = float(env.get("BURST_MIN_MINUTES", 4)) * 60
+        hi = float(env.get("BURST_MAX_MINUTES", 13)) * 60
+    except (TypeError, ValueError):
+        return default
+    end = now - (now % 900) + phase
+    while end - now < lo:
+        end += 900
+    return min(end - now, hi) / 60.0
+
 def _attach_code_health(store_health, code_health):
     """Keep source-structure results alongside the final database health check."""
     store_health.setdefault("checks", {})["source_structure"] = code_health
@@ -167,6 +190,7 @@ def run_scheduled(s, store, data):
             print("ladders failed:", e)
     if keep and burst > 0:
         from .live.runner import run as run_live
+        burst = aligned_burst_minutes(time.time(), burst)
         print("live burst:", json.dumps(run_live(s, store, burst, sports=False), default=str))
     # Combo discovery is read-only and cheap enough to run on every scheduled
     # cycle, independent of the less-frequent full sports scan. The Kalshi client

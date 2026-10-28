@@ -3,7 +3,8 @@ name: kalshi-bot
 # PAPER-ONLY LOCK: scheduled and manual runs stay in paper mode.
 # The owner must deliberately edit the workflow and central config to authorize live trading.
 # Every 12 minutes (scheduled fallback):
-#   crypto  - an 8-minute LIVE streaming burst (BURST_MINUTES) on the 15-minute markets
+#   crypto  - a LIVE streaming burst on the 15-minute markets, timed to end 4 minutes into a window so every
+#             window is read from 20 s before its start to the 90 s bet (BURST_MINUTES is the fallback length)
 #   sports  - full scan every 5.5 hours (SPORTS_EVERY_HOURS)
 #   always  - grading, learning, AI briefing, gated model retraining
 # Unlimited free minutes on a PUBLIC repo.
