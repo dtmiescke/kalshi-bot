@@ -1183,6 +1183,7 @@ class LiveRunner:
         handoff_every = float(os.environ.get("HANDOFF_EVERY_SECONDS", 120))
         last_grade = last_handoff = last_periodic = time.time()
         handed_off = save_failed = False
+        save_fails = 0
         bg = {}
 
         def spawn(name, job, *args):
@@ -1213,14 +1214,21 @@ class LiveRunner:
         def save_job():
             # Treat SAVE_CMD as an argument vector, not shell source.
             # This avoids shell injection and reports failed persistence attempts.
-            nonlocal save_failed
+            nonlocal save_failed, save_fails
             try:
                 subprocess.run(shlex.split(save_cmd), check=True, capture_output=True, text=True)
-                save_failed = False
+                if save_fails:
+                    log.info("mid-session memory save recovered after %d failed attempts", save_fails)
+                save_failed, save_fails = False, 0
             except Exception as exc:
-                log.error("mid-session memory save failed: %s", exc)
-                if not save_failed:          # one alert per outage, not one per attempt
-                    alerts.send("Memory save failed", str(exc)[:500], priority="high", tags=["warning"])
+                # say WHY: on 2026-10-28 sixteen failed saves in a row logged only "exit status 1"
+                why = " | ".join(x.strip()[-300:] for x in (getattr(exc, "stderr", None), getattr(exc, "stdout", None))
+                                 if isinstance(x, str) and x.strip()) or str(exc)
+                save_fails += 1
+                log.error("mid-session memory save failed (%d in a row): %s", save_fails, why[-600:])
+                if save_fails in (1, 3):     # at the start of an outage and again if it persists, not every attempt
+                    alerts.send("Memory save failing" if save_fails == 1 else "Memory has not been saved for 3 tries",
+                                why[-500:], priority="high", tags=["warning"])
                 save_failed = True
 
         def handoff_job():
