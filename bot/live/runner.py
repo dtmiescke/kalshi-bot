@@ -548,7 +548,8 @@ class LiveRunner:
                 if model_prob is not None:
                     model_prob = brain.calibrate(model_prob, self.store, domain="crypto")
                     # every coin's line on the app's chart, not only coins that reach a trade plan
-                    self.last_prob[ticker] = {"prob": round(model_prob, 4),
+                    shown = brain.shrink_to_market(model_prob, self.books[ticker].mid(), self.store, series=info["series"])
+                    self.last_prob[ticker] = {"prob": round(shown, 4),
                                               "conf": round(model_conf or 0, 3), "ts": round(now)}
                     yes_bid = ctx.get("kalshi_yes_bid")
                     yes_ask = ctx.get("kalshi_yes_ask")
@@ -655,6 +656,7 @@ class LiveRunner:
         info = self.markets[ticker]
         if prob is not None:
             prob = brain.calibrate(prob, self.store, domain=brain.domain_of(info["series"]))
+            prob = brain.shrink_to_market(prob, self.books[ticker].mid(), self.store, series=info["series"])
             self.last_prob[ticker] = {"prob": round(prob, 4), "conf": round(conf or 0, 3), "ts": round(time.time())}
         snap = {"ticker": ticker, "event_ticker": info["event"], "series": info["series"],
                 "team": "UP"}

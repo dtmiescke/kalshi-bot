@@ -77,10 +77,47 @@ def coin_of(ticker):
 
 
 # --- dataset --------------------------------------------------------------------------
+TRUST_MIN_ROWS = 300
+TRUST_MAX_GAP = 0.04      # a source whose Brier is this much worse than Kalshi's own price is broken data
+
+
+def untrusted_sources(store, ttl=600, now=None):
+    """{(source, coin)} whose pricing disagrees with what happened far more than Kalshi's price does.
+    The same code scores the live rows and the replayed history rows, so a gap that big means the
+    inputs are wrong (a misaligned or illiquid price history), not that the model is unlucky. Such
+    rows must not teach the model, the signal weights or the playbook."""
+    now = time.time() if now is None else now
+    cache = store.__dict__.get("_untrusted")
+    if cache and now - cache[0] < ttl:
+        return cache[1]
+    ensure_table(store)
+    stats = {}
+    for r in store.q("SELECT coin, source, features, y FROM ml_rows WHERE y IN (0,1) AND version=?",
+                     (features.FEATURE_VERSION,)):
+        try:
+            f = json.loads(r["features"])
+            p, kl, left = f.get("model_prob"), f.get("kalshi_logit"), f.get("min_left")
+            if p is None or kl is None or (left is not None and left < 1.5):
+                continue
+            k = 1 / (1 + math.exp(-kl))
+        except (ValueError, TypeError, OverflowError):
+            continue
+        s = stats.setdefault((r["source"], r["coin"]), [0, 0.0, 0.0])
+        s[0] += 1
+        s[1] += (p - r["y"]) ** 2
+        s[2] += (k - r["y"]) ** 2
+    bad = {key for key, (n, bm, bk) in stats.items() if n >= TRUST_MIN_ROWS and (bm - bk) / n > TRUST_MAX_GAP}
+    store._untrusted = (now, bad)
+    return bad
+
+
 def load_dataset(store):
     ensure_table(store)
-    rows = store.q("""SELECT ticker, ts, coin, features, y FROM ml_rows
+    rows = store.q("""SELECT ticker, ts, coin, features, y, source FROM ml_rows
                       WHERE y IS NOT NULL AND version=? ORDER BY ts""", (features.FEATURE_VERSION,))
+    bad = untrusted_sources(store)
+    if bad:
+        rows = [r for r in rows if (r["source"], r["coin"]) not in bad]
     names = features.names()
     X, y, groups, ts, coins = [], [], [], [], []
     for r in rows:

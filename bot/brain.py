@@ -234,6 +234,76 @@ def calibration_table(store, buckets=10, domain=None, as_of_ts=None):
             for b, (n, w) in sorted(table.items())}
 
 
+# --- shrink toward the market -----------------------------------------------------------
+# On graded 15-minute windows the blended forecast differs from Kalshi's own price by far more
+# than it is worth: regressing outcome-minus-price on forecast-minus-price gives a slope near
+# 0.2, not 1. Betting on the whole gap counts noise as edge, so the probability used for edge
+# and sizing is the market price plus that learned share of the gap.
+SHRINK_PRIOR = (0.35, 0.30)          # crypto: what the first 260 settled windows suggested (0.24 +/- 0.47)
+SHRINK_PRIOR_OTHER = (1.0, 0.30)     # other domains: trust the forecast unless the data says otherwise
+SHRINK_RANGE = (0.10, 1.0)
+
+
+def shrink_group(series):
+    """15-minute coin markets are shrunk on their own record; ladders and sports keep theirs."""
+    t = (series or "").upper()
+    return "15m" if t.endswith("15M") else domain_of(t)
+
+
+def shrink_weight(store, series=None, ttl=600, now=None):
+    """Share of (forecast - price) that has been real, learned from settled audit rows where the
+    market was still a bet (10-90 cents), on the UNSHRUNK forecast the audit stores.
+
+    Each settled window counts once, and the estimate is blended with a prior by its own
+    uncertainty: with a few hundred windows the data alone says 0.2 plus or minus 0.5, so it must
+    not be allowed to swing the bot's bets. As windows accumulate the data takes over."""
+    import os
+    import time
+    if os.environ.get("SHRINK_TO_MARKET", "yes") != "yes":
+        return 1.0
+    now = time.time() if now is None else now
+    cache = store.__dict__.setdefault("_shrink_cache", {})      # per store, so tests and runs never share it
+    group = shrink_group(series)
+    hit = cache.get(group)
+    if hit and now - hit[0] < ttl:
+        return hit[1]
+    mean, sd = SHRINK_PRIOR if group == "15m" else SHRINK_PRIOR_OTHER
+    lam = mean
+    try:
+        rows = store.q("""SELECT ticker, model_prob, market_price, outcome, series FROM decision_audit
+                          WHERE brier IS NOT NULL AND outcome IN (0,1) AND model_prob IS NOT NULL
+                          AND market_price BETWEEN ? AND ?""", LEARN_BAND)
+        per = {}
+        for r in rows:
+            if shrink_group(r["series"]) != group:
+                continue
+            p, k, y = float(r["model_prob"]), float(r["market_price"]), int(r["outcome"])
+            w = per.setdefault(r["ticker"], [0.0, 0.0, 0])
+            w[0] += (p - k) * (y - k)
+            w[1] += (p - k) ** 2
+            w[2] += 1
+        wins = [(a / n, d / n) for a, d, n in per.values()]         # one observation per window
+        den = sum(d for _, d in wins)
+        if len(wins) >= 30 and den > 0:
+            est = sum(a for a, _ in wins) / den
+            var = sum((a - est * d) ** 2 for a, d in wins) / den ** 2     # sandwich variance across windows
+            if var > 0:
+                lam = (est / var + mean / sd ** 2) / (1 / var + 1 / sd ** 2)
+    except Exception:
+        lam = mean
+    lam = clamp(lam, *SHRINK_RANGE)
+    cache[group] = (now, lam)
+    return lam
+
+
+def shrink_to_market(prob, market_mid, store, series=None):
+    """The probability to bet on: Kalshi's price moved toward the forecast by the learned share."""
+    if prob is None or market_mid is None:
+        return prob
+    lam = shrink_weight(store, series)
+    return clamp(float(market_mid) + lam * (float(prob) - float(market_mid)))
+
+
 def calibrate(prob, store, domain=None, as_of_ts=None):
     """Shrink or stretch a probability using only prior settled forecasts."""
     return calibrate_with_table(prob, calibration_table(store, domain=domain, as_of_ts=as_of_ts))

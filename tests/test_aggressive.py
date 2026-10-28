@@ -4,6 +4,7 @@ import os
 import tempfile
 import time
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 
 from bot import brain, risk
@@ -65,6 +66,7 @@ class TestAggressive(unittest.TestCase):
         del os.environ["BOT_DB"]
         self.d.cleanup()
 
+    @mock.patch.dict(os.environ, {"SHRINK_TO_MARKET": "no"})     # these test placement, not the shrink
     def test_ladders_trade_best_strike_once(self):
         now = time.time()
         e = Engine(self.s, self.st, data_client=FakeLadderKalshi(),

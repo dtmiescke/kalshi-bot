@@ -188,6 +188,7 @@ class TestRunner(unittest.TestCase):
             self.assertEqual(health["series"]["KXETH15M"]["events"], 0)
             del os.environ["BOT_DB"]
 
+    @mock.patch.dict(os.environ, {"SHRINK_TO_MARKET": "no"})     # these test placement, not the shrink
     def test_tick_shortlists_then_council_and_recheck_place(self):
         from bot.live.runner import LiveRunner
         with tempfile.TemporaryDirectory() as d:
@@ -206,7 +207,8 @@ class TestRunner(unittest.TestCase):
             # background refresh, as the live loop does, but offline: real
             # marketdata calls made this test depend on network speed (a slow
             # fetch aged the book past the 5 s recheck and no bet was placed)
-            with mock.patch("bot.live.runner.marketdata.context", return_value={}):
+            with mock.patch("bot.live.runner.marketdata.context", return_value={}), \
+                    mock.patch("bot.live.runner.token_data.coin_snapshot", return_value={}):
                 r.refresh_context()
             got = list(r.tick(now))
             self.assertEqual(len(got), 1)
@@ -249,7 +251,8 @@ class TestRunnerModelLineForEveryCoin(unittest.TestCase):
                     a.mids.append((now - i, 100300 + (i % 7) * 3 - 9))
                 r.discover()
                 r.poll_books()
-                with mock.patch("bot.live.runner.marketdata.context", return_value={}):
+                with mock.patch("bot.live.runner.marketdata.context", return_value={}), \
+                        mock.patch("bot.live.runner.token_data.coin_snapshot", return_value={}):
                     r.refresh_context()
                 with mock.patch.object(LiveRunner, "plan_for", return_value=None):
                     list(r.tick(now))

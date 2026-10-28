@@ -188,7 +188,7 @@ def replay_market(m, candles, spot, fee_rate, min_left=2, max_left=13.5, spot_li
         z5 = (math.log(s / past) / (vol * math.sqrt(5))) if past else 0.0
         rows.append({"ts": ts, "secs": secs, "model": p, "bid": bid, "ask": ask,
                      "mid": (bid + ask) / 2, "y": y, "z5": z5})
-        if spot_list and store is not None:
+        if spot_list and store is not None and ("history", ml.coin_of(m["ticker"])) not in ml.untrusted_sources(store):
             keys = spot_keys or [x["ts"] for x in spot_list]
             i = bisect.bisect_right(keys, known)
             window = spot_list[max(0, i - 300):i]
@@ -249,6 +249,8 @@ def seed_learning(store, records_by_market):
     for ticker, rs in records_by_market.items():
         if not rs or store.q("SELECT 1 FROM graded_markets WHERE ticker=?", (ticker,)):
             continue
+        if ("history", ml.coin_of(ticker)) in ml.untrusted_sources(store):
+            continue          # replayed prices that disagree with outcomes must not move the signal weights
         r = rs[len(rs) // 2]
         store.add_signal(r["ts"], ticker, "kalshi_market", r["mid"], 0.9,
                          {"mid": r["mid"], "spread": r["ask"] - r["bid"], "source": "history"})
