@@ -115,6 +115,11 @@ def get_weights(store, domain=None):
     return w
 
 
+# Readings that are the Kalshi price (or a small nudge of it), not an
+# independent forecast.
+MARKET_ANCHORED = ("kalshi_market", "trade_flow", "crypto_kalshi_orderbook")
+
+
 def blend(readings, weights):
     """Return (prob, external_confidence) from a list of Readings."""
     num = den = 0.0
@@ -131,10 +136,11 @@ def blend(readings, weights):
     ext_conf = ext_conf_num / ext_conf_den if ext_conf_den else 0.0
     blended = num / den
     # when the independent outside signals argue with each other, trust the
-    # blend less. trade_flow is built around the Kalshi price itself, so its
-    # gap from a model is the edge being measured, not disagreement.
+    # blend less. trade_flow and crypto_kalshi_orderbook are built around the
+    # Kalshi price itself, so their gap from a model is the edge being
+    # measured, not disagreement.
     ext = [(weights.get(r.name, 0.3) * r.confidence, logit(r.prob)) for r in readings
-           if r.name not in ("kalshi_market", "trade_flow")]
+           if r.name not in MARKET_ANCHORED]
     wsum = sum(w for w, _ in ext)
     if len(ext) >= 2 and wsum > 0:
         mean = sum(w * x for w, x in ext) / wsum
