@@ -125,11 +125,13 @@ class TestAppSummary(unittest.TestCase):
         self.assertIn("playbook=s.playbook&&s.playbook.min_windows?s.playbook:null", html)
         self.assertIn("function playbookCard()", html)
         self.assertIn("function edgeCard()", html)
+        self.assertIn("function timingCard()", html)
+        self.assertIn("timingRep=s.entry_timing&&s.entry_timing.buckets?s.entry_timing:null", html)
         self.assertIn("edgeRep=s.edge&&s.edge.windows!=null?s.edge:null", html)
         self.assertIn("r.closing_text", html)                                          # last-20-seconds review shown
         self.assertIn("r.hindsight", html)                                             # what would have worked
         self.assertIn("Chart reads", html)
-        self.assertIn("readsCard(sym)+(sym?\"\":edgeCard()+playbookCard()+reportCard())", html)                # on the overall and per-coin pages
+        self.assertIn("readsCard(sym)+(sym?\"\":edgeCard()+timingCard()+playbookCard()+reportCard())", html)                # on the overall and per-coin pages
 
     def test_bets_csv_carries_compact_signals_for_bet_details(self):
         self.st.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,stake,fee,

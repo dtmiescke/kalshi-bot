@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from . import brain, guard
-from . import hindsight, window_review
+from . import entry_timing, hindsight, window_review
 from .storage import stats_since
 
 E = html.escape
@@ -450,6 +450,7 @@ def summary(store):
         "windows": _safe(window_review.report, store),
         "playbook": _safe(hindsight.playbook_summary, store),
         "edge": _safe(edge_report, store),
+        "entry_timing": _safe(entry_timing.summary, store),
         "account": account,
     }
 
