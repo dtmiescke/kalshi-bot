@@ -116,6 +116,10 @@ jobs:
             .filter(m => typeof m.ticker === "string" && /^KX[A-Z0-9_-]{2,100}$/.test(m.ticker))
             .sort((a, b) => Number(b.volume_24h ?? b.volume ?? 0) - Number(a.volume_24h ?? a.volume ?? 0))[0];
           if (!market) throw new Error("No open KX market ticker found for live feed smoke test");
+          const ladder = await fetch(base + "/api/ladder?series_ticker=KXBTCD");
+          const ladderBody = ladder.ok ? await ladder.json() : null;
+          if (!ladderBody || !Array.isArray(ladderBody.closes)) throw new Error("Ladder endpoint failed: HTTP " + ladder.status);
+          console.log("Ladder endpoint returned", ladderBody.closes.length, "close times.");
           console.log("Testing read-only ticker subscription for an open market.");
           const ws = new WebSocket(base.replace(/^https:/, "wss:") + "/ws");
           let finished = false;
