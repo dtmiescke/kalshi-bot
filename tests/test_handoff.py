@@ -63,6 +63,41 @@ class TestRestartReason(unittest.TestCase):
         self.assertIsNone(handoff.restart_reason("aaa", "o/r", None, get=fake(ref_sha="zzz")))   # no token
 
 
+    def test_slow_background_work_never_stops_the_loop(self):
+        import asyncio
+        import os
+        import tempfile
+        import time
+        from unittest import mock
+
+        from bot.config import Settings
+        from bot.live import runner as rn
+        from bot.storage import Store
+        from tests.test_live import FakeRest
+
+        async def idle_feed(*a, **k):
+            await asyncio.sleep(3600)
+
+        env = {"GRADE_EVERY_SECONDS": "1", "SAVE_CMD": "sleep 4", "SAVE_EVERY_SECONDS": "1", "STREAM_DRAIN_SECONDS": "10"}
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {**env, "BOT_DB": os.path.join(d, "b.db")}):
+            s = Settings()
+            r = rn.LiveRunner(s, Store(s.db_path), rest=FakeRest(time.time() + 600), llm=None,
+                              seed=False, with_context=False)
+            ticks = []
+            slow = []
+
+            def slow_grade(*a):
+                slow.append(1)
+                time.sleep(4)                      # a four-second grading pass
+            with mock.patch.object(rn.feeds, "run_feed", idle_feed), \
+                 mock.patch.object(rn, "grade", slow_grade), \
+                 mock.patch.object(r, "tick", lambda now: ticks.append(now) or []), \
+                 mock.patch.object(rn.alerts, "send", lambda *a, **k: None):
+                asyncio.run(r.main(0.1, periodic=lambda: time.sleep(4), periodic_every=1))     # six seconds of streaming
+            self.assertGreaterEqual(len(ticks), 5)     # it kept ticking while grading, saving and the periodic job ran
+            self.assertGreaterEqual(len(slow), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
 

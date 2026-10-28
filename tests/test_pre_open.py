@@ -45,7 +45,8 @@ class TestFastDiscovery(Base):
         r = self.r
         self.assertTrue(r.new_window_missing(T + 5, T + 1))                  # nothing found yet
         self.assertFalse(r.new_window_missing(T + 5, T + 3))                 # looked 2 s ago
-        self.assertFalse(r.new_window_missing(T + 50, T))                    # past the first 45 s: the 60 s sweep covers it
+        self.assertTrue(r.new_window_missing(T + 100, T + 90))               # Kalshi activates some windows 30-100 s after the mark
+        self.assertFalse(r.new_window_missing(T + 200, T + 190))             # past two and a half minutes: the 60 s sweep covers it
         self.assertFalse(r.new_window_missing(T - 100, T - 110))             # long before a mark
         r.markets = {f"{s}-X": {"series": s, "terms": {"close_ts": T + 900}} for s in r.coins}
         self.assertFalse(r.new_window_missing(T + 5, T))                     # all four found
