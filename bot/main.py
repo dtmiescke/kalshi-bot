@@ -59,6 +59,63 @@ def aligned_burst_minutes(now, default, env=None):
     return (handoff.stop_point(now, target, phase, lo) - now) / 60.0
 
 
+def run_ladders(s, store, data):
+    """Hourly/daily ladders + cross-market arbitrage."""
+    if os.environ.get("LADDERS_ENABLED", "yes") != "yes":
+        return
+    try:
+        eng = Engine(s, store, data_client=data)
+        eng.betting_ok, _ = __import__("bot.guard", fromlist=["status"]).status(store, s.bankroll)
+        print("ladders:", eng.run_ladders({"bets": 0, "skipped": {}}))
+    except Exception as e:
+        print("ladders failed:", e)
+
+
+def run_combos(s, store, data):
+    """Combo discovery (read-only) and the synthetic paper parlays."""
+    # Combo discovery is read-only and cheap enough to run on every scheduled
+    # cycle, independent of the less-frequent full sports scan. The Kalshi client
+    # briefly caches paginated event responses, so a full-scan cycle reuses them.
+    if getattr(s, "combo_research_enabled", True):
+        try:
+            from . import combo_research
+            combo_result = combo_research.scan(data, store, settings=s)
+            print("combo research:", json.dumps({
+                "ok": combo_result.get("ok"),
+                "scanned_markets": combo_result.get("scanned_markets"),
+                "ranked_count": combo_result.get("ranked_count"),
+                "skipped": combo_result.get("skipped", {}),
+                "execution_enabled": False,
+            }, default=str))
+        except Exception as e:
+            logging.warning("combo research scan failed: %s", e)
+    # Synthetic BTC/ETH/SOL parlay simulations are paper-only and use the
+    # existing crypto forecasts/market snapshots. They never submit exchange orders.
+    try:
+        from . import crypto_combo
+        crypto_combo_result = crypto_combo.scan(data, store, settings=s)
+        print("crypto combo paper:", json.dumps({
+            "ok": crypto_combo_result.get("ok"),
+            "created": crypto_combo_result.get("created", 0),
+            "skipped": crypto_combo_result.get("skipped"),
+            "execution": crypto_combo_result.get("execution", "none"),
+        }, default=str))
+    except Exception as e:
+        logging.warning("crypto combo paper scan failed: %s", e)
+
+
+def periodic_cycle(s, store, data):
+    """What every short run used to do between streams, now every PERIODIC_EVERY_SECONDS
+    inside a long stream: ladders, combo research, paper parlays and their grading."""
+    run_ladders(s, store, data)
+    run_combos(s, store, data)
+    try:
+        from . import crypto_combo
+        crypto_combo.grade(store)
+    except Exception as e:
+        logging.warning("crypto combo grading failed: %s", e)
+
+
 def _attach_code_health(store_health, code_health):
     """Keep source-structure results alongside the final database health check."""
     store_health.setdefault("checks", {})["source_structure"] = code_health
@@ -176,46 +233,17 @@ def run_scheduled(s, store, data):
                 store.set_kv("last_sports_scan", time.time())
     finally:
         s.crypto_enabled = keep
-    if keep and os.environ.get("LADDERS_ENABLED", "yes") == "yes":
-        try:   # hourly/daily ladders + cross-market arbitrage, every run
-            eng = Engine(s, store, data_client=data)
-            eng.betting_ok, _ = __import__("bot.guard", fromlist=["status"]).status(store, s.bankroll)
-            print("ladders:", eng.run_ladders({"bets": 0, "skipped": {}}))
-        except Exception as e:
-            print("ladders failed:", e)
+    if keep:
+        run_ladders(s, store, data)
     if keep and burst > 0:
         from .live.runner import run as run_live
         burst = aligned_burst_minutes(time.time(), burst)
-        print("live burst:", json.dumps(run_live(s, store, burst, sports=False), default=str))
-    # Combo discovery is read-only and cheap enough to run on every scheduled
-    # cycle, independent of the less-frequent full sports scan. The Kalshi client
-    # briefly caches paginated event responses, so a full-scan cycle reuses them.
-    if getattr(s, "combo_research_enabled", True):
-        try:
-            from . import combo_research
-            combo_result = combo_research.scan(data, store, settings=s)
-            print("combo research:", json.dumps({
-                "ok": combo_result.get("ok"),
-                "scanned_markets": combo_result.get("scanned_markets"),
-                "ranked_count": combo_result.get("ranked_count"),
-                "skipped": combo_result.get("skipped", {}),
-                "execution_enabled": False,
-            }, default=str))
-        except Exception as e:
-            logging.warning("combo research scan failed: %s", e)
-    # Synthetic BTC/ETH/SOL parlay simulations are paper-only and use the
-    # existing crypto forecasts/market snapshots. They never submit exchange orders.
-    try:
-        from . import crypto_combo
-        crypto_combo_result = crypto_combo.scan(data, store, settings=s)
-        print("crypto combo paper:", json.dumps({
-            "ok": crypto_combo_result.get("ok"),
-            "created": crypto_combo_result.get("created", 0),
-            "skipped": crypto_combo_result.get("skipped"),
-            "execution": crypto_combo_result.get("execution", "none"),
-        }, default=str))
-    except Exception as e:
-        logging.warning("crypto combo paper scan failed: %s", e)
+        every = float(os.environ.get("PERIODIC_EVERY_SECONDS", 0))
+        print("live burst:", json.dumps(run_live(
+            s, store, burst, sports=False,
+            periodic=(lambda: periodic_cycle(s, store, data)) if every > 0 else None,
+            periodic_every=every), default=str))
+    run_combos(s, store, data)
     grade(store, data)
     try:
         from . import crypto_combo

@@ -171,6 +171,7 @@ jobs:
           # deploy or another run is waiting (bot/handoff.py).
           BURST_TARGET_MINUTES: '180'
           GRADE_EVERY_SECONDS: '300'
+          PERIODIC_EVERY_SECONDS: '600'
           HANDOFF_CHECK: 'yes'
           SAVE_CMD: bash .github/save.sh
           SAVE_EVERY_SECONDS: '600'
