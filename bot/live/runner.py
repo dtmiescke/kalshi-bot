@@ -19,7 +19,7 @@ import subprocess
 import shlex
 import time
 
-from .. import alerts, brain, briefing, council, crypto_brain, fees, guard, handoff, hindsight, ml, risk, token_data, window_review
+from .. import alerts, brain, briefing, council, crypto_brain, entry_timing, fees, guard, handoff, hindsight, ml, risk, token_data, window_review
 from .. import features, marketdata, vol as volmod
 from ..engine import Engine
 from ..grader import grade
@@ -85,6 +85,7 @@ class LiveRunner:
         self.tape = {}            # ticker -> {"close_ts", "strike", "pts"}: the last seconds of the chart
         self.pre_open = {}        # series -> {window start: [chart reads taken before the market opened]}
         self._pb = (0.0, None)    # (time, playbook table), refreshed every few minutes
+        self._et = (0.0, None)    # (time, entry-timing table), refreshed every 10 minutes
         # A prior process may have died after Kalshi accepted a resting order.
         # Do not resume trading until that exchange state is reconciled manually.
         prior_maker = self.store.get_kv("maker_recovery")
@@ -387,6 +388,16 @@ class LiveRunner:
                 self._pb = (now, self._pb[1] or {"rules": {}, "windows": 0})
         return self._pb[1]
 
+    def entry_table(self, now):
+        """When in the window entries have paid (bot/entry_timing.py), recomputed every 10 minutes."""
+        if self._et[1] is None or now - self._et[0] >= 600:
+            try:
+                self._et = (now, entry_timing.table(self.store, now))
+            except Exception as exc:
+                log.warning("entry timing refresh failed: %s", exc)
+                self._et = (now, self._et[1])
+        return self._et[1]
+
     def read_due(self, close_ts, now):
         """True from CRYPTO_READ_SECONDS (-20: before the window starts) until the bet is allowed (CRYPTO_ENTRY_DELAY_SECONDS)."""
         elapsed = 900 - (close_ts - now)
@@ -598,6 +609,10 @@ class LiveRunner:
             if not (self.s.crypto_min_minutes <= mins_left <= self.s.crypto_max_minutes):
                 continue
             if not self.betting_ok or guard.league_benched(self.store, info["series"], mode=self.s.mode):
+                continue
+            if os.environ.get("ENTRY_TIMING_GATE", "yes") == "yes" and \
+                    not entry_timing.allowed(self.entry_table(now), mins_left):
+                self._skip("entry timing: entries at this point of the window have lost money")
                 continue
             lock_key = self._window_lock_key(info["series"], close_ts)
             if self.store.get_kv(lock_key):
