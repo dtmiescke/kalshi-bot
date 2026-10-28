@@ -1,5 +1,6 @@
 """Self-queued bot cycles: GitHub's cron skips most runs, so each saved cycle
-queues the next one on main without starving the trainer or overriding a pause."""
+queues the next one on main without overriding a pause. The trainer no longer
+shares the bot's lock (bot/train_delta.py), so the bot never steps aside for it."""
 import os
 import stat
 import subprocess
@@ -50,15 +51,11 @@ class TestChainScript(unittest.TestCase):
         self.assertEqual(self.dispatched(calls), [])
         self.assertIn("disabled_manually", out)
 
-    def test_waiting_trainer_goes_first(self):
+    def test_a_running_trainer_never_stops_the_chain(self):
         out, calls = self.run_script("active", "1")
-        self.assertEqual(self.dispatched(calls), [])
-        self.assertIn("Trainer is waiting", out)
-
-    def test_trainer_restarts_chain_even_if_another_is_queued(self):
-        _, calls = self.run_script("active", "1", "after-training")
         self.assertEqual(len(self.dispatched(calls)), 1)
-        self.assertFalse(any(c.startswith("run list") for c in calls))
+        self.assertNotIn("Trainer is waiting", out)
+        self.assertFalse(any("train.yml" in c for c in calls))
 
     def test_failed_run_still_queues_the_next(self):
         out, calls = self.run_script("active", "0", "after-failure", recent="success,failure")
@@ -70,14 +67,8 @@ class TestChainScript(unittest.TestCase):
         self.assertEqual(self.dispatched(calls), [])
         self.assertIn("Third failed bot run in a row", out)
 
-    def test_failed_run_respects_pause_and_waiting_trainer(self):
+    def test_failed_run_respects_pause(self):
         _, calls = self.run_script("disabled_manually", "0", "after-failure", recent="success")
-        self.assertEqual(self.dispatched(calls), [])
-        _, calls = self.run_script("active", "1", "after-failure", recent="success")
-        self.assertEqual(self.dispatched(calls), [])
-
-    def test_after_training_still_respects_pause(self):
-        _, calls = self.run_script("disabled_manually", "0", "after-training")
         self.assertEqual(self.dispatched(calls), [])
 
 
@@ -105,21 +96,31 @@ class TestWorkflowWiring(unittest.TestCase):
                      "bash .github/chain_next.sh after-failure"):
             self.assertIn(part, chain)
         self.assertTrue(wf.rstrip().endswith("fi"))  # the chain step is the last step
-        # the cron fallback and the shared concurrency group stay in place
+        # the cron fallback and the bot's lock stay in place; the trainer is outside it
         self.assertIn('cron: "*/12 * * * *"', wf)
         self.assertIn("group: kalshi-bot", wf)
-        self.assertIn("group: kalshi-bot", self.load("train.yml"))
+        self.assertNotIn("group: kalshi-bot", self.load("train.yml"))
+        self.assertIn("group: kalshi-train", self.load("train.yml"))
 
-    def test_trainer_restarts_chain_when_done(self):
+    def test_trainer_never_writes_bot_memory_and_the_bot_imports_its_delta(self):
         wf = self.load("train.yml")
-        self.assertIn("  actions: write", wf)
-        step = _step(wf, "Restart the bot's run chain")
-        self.assertIn("if: always()", step)
-        self.assertIn("run: bash .github/chain_next.sh after-training", step)
+        self.assertNotIn("save.sh", wf)                      # bot-data is the bot's alone
+        self.assertNotIn("chain_next.sh", wf)                # nothing to restart: the bot never stopped
+        self.assertLess(wf.index("train-mark"), wf.index("bot.main history"))
+        publish = _step(wf, "Publish the training delta")
+        self.assertIn("train-export", publish)
+        self.assertIn("train-delta", publish)
+        self.assertNotIn("bot-data", publish)
+        bot = self.load("bot.yml")
+        imp = _step(bot, "Import background training results")
+        self.assertIn("continue-on-error: true", imp)        # a bad delta can't stop trading
+        self.assertLess(bot.index("Load memory"), bot.index("Import background training results"))
+        self.assertLess(bot.index("Import background training results"), bot.index("Save memory"))
+        self.assertIn("TRAIN_IN_RUN: 'no'", bot)             # no in-run training delay either
 
-    def test_trainer_runs_daily_and_audits_without_blocking_save(self):
+    def test_trainer_runs_twice_daily_and_audits_after_publishing(self):
         wf = self.load("train.yml")
-        self.assertIn('cron: "7 9 * * *"', wf)
+        self.assertIn('cron: "7 9,21 * * *"', wf)
         self.assertIn("cancel-in-progress: false", wf)
         steps = (
             ("Backtest (read-only audit)", "bot.main backtest"),
@@ -130,10 +131,10 @@ class TestWorkflowWiring(unittest.TestCase):
         for name, command in steps:
             step = _step(wf, name)
             self.assertIn("continue-on-error: true", step)
-            self.assertIn("timeout-minutes:", step)       # a slow audit can't hold the lock
+            self.assertIn("timeout-minutes:", step)       # a slow audit can't stall the trainer
             self.assertIn(command, step)
-            # memory (incl. the trained model) is saved before any read-only audit
-            self.assertGreater(wf.index(name), wf.index("Save memory"))
+            # the delta (incl. the trained model) is published before any read-only audit
+            self.assertGreater(wf.index(name), wf.index("Publish the training delta"))
         # Keep all audits independent: one failure must not skip later checks or persistence.
         positions = [wf.index(name) for name, _ in steps]
         self.assertEqual(positions, sorted(positions))

@@ -92,7 +92,7 @@ class TestWorkflowsAgree(unittest.TestCase):
     def test_every_memory_saving_workflow_uses_the_same_reset_and_bankroll(self):
         from pathlib import Path
         root = Path(__file__).resolve().parents[1] / ".github" / "workflows"
-        for name in ("bot.yml", "train.yml", "clear-pause.yml"):
+        for name in ("bot.yml", "clear-pause.yml"):      # train.yml no longer saves memory
             text = (root / name).read_text()
             self.assertIn("STATS_SINCE: ${{ vars.APP_STATS_SINCE || '%s' }}" % RESET, text, name)
             self.assertIn("BANKROLL: ${{ vars.APP_BANKROLL || '500' }}", text, name)

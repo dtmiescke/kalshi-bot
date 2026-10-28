@@ -46,7 +46,7 @@ jobs:
       # repository variables; the values after || are the defaults. STATS_SINCE
       # restarts P/L, balance, win rate and the loss limits from that moment
       # ("Restart stats" in the app); older bets stay in memory and keep teaching
-      # the bot. Keep these two lines identical in bot.yml, train.yml, clear-pause.yml.
+      # the bot. Keep these two lines identical in bot.yml and clear-pause.yml.
       STATS_SINCE: ${{ vars.APP_STATS_SINCE || '2026-10-28T11:45:00Z' }}
       BANKROLL: ${{ vars.APP_BANKROLL || '500' }}
     steps:
@@ -61,6 +61,12 @@ jobs:
       - name: Load memory
         id: load-memory
         run: bash .github/load.sh
+      - name: Import background training results
+        # bot/train_delta.py: rows and models kalshi-train produced without
+        # pausing the bot. One transaction; a failure leaves memory untouched.
+        if: steps.load-memory.outcome == 'success'
+        continue-on-error: true
+        run: bash .github/import_training.sh
       # The hourly ceiling is a rolling limit, never a quota. All existing price, edge,
       # settlement, account, and risk checks remain active.
       - name: Set crypto hourly ceiling
@@ -132,6 +138,7 @@ jobs:
           # failed or unpromoted candidates after 3 hours. Existing out-of-sample
           # promotion gates stay in force; this does not force bets or promotions.
           TRAIN_EVERY_HOURS: ${{ vars.TRAIN_EVERY_HOURS || '12' }}
+          TRAIN_IN_RUN: 'no'   # kalshi-train trains in the background instead
           TRAIN_RETRY_HOURS: ${{ vars.TRAIN_RETRY_HOURS || '3' }}
           LLM_DAILY_LIMIT: ${{ vars.LLM_DAILY_LIMIT || '45' }}
           # Protect eight shared daily calls for the two-review AI council.
