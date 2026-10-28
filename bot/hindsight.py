@@ -32,6 +32,10 @@ LABELS = {
     "strike_side": "Side of target", "strike_far": "Far from target", "back_favorite": "Back the favorite",
     "book_pressure": "Exchange book pressure", "kalshi_book_pressure": "Kalshi book pressure",
     "funding_fade": "Funding fade",
+    # a chart trader's reads (bot/expert.py)
+    "structure_follow": "Market structure", "liquidity_sweep": "Liquidity sweep",
+    "squeeze_breakout": "Squeeze breakout", "rsi_divergence": "RSI divergence",
+    "absorption": "Volume absorption", "us_open_momentum": "US-open momentum", "range_fade": "Range-edge fade",
 }
 
 
@@ -72,6 +76,16 @@ RULES = {
     "book_pressure": lambda f: _sgn(f.get("tk_ex_depth_imbalance"), 0.15),
     "kalshi_book_pressure": lambda f: _sgn(f.get("tk_k_depth_imbalance"), 0.3),
     "funding_fade": lambda f: -_sgn(f.get("tk_funding"), 2e-4),
+    # what a discretionary crypto trader would read off the same chart; each must earn its place in the playbook
+    "structure_follow": lambda f: _sgn(f.get("ex_structure"), 0.5),
+    "liquidity_sweep": lambda f: _sgn(f.get("ex_sweep"), 0.5),
+    "squeeze_breakout": lambda f: (_sgn(f.get("ret_5m"), 0.5)
+                                   if _g(f, "ex_squeeze_pct", 1) <= 0.2 and _g(f, "vol_spike_5m", 1) >= 1.3 else 0),
+    "rsi_divergence": lambda f: _sgn(f.get("ex_rsi_div"), 0.5),
+    "absorption": lambda f: _sgn(f.get("ex_absorption"), 0.5),
+    "us_open_momentum": lambda f: _sgn(f.get("ret_15m"), 0.5) if _g(f, "ex_us_open", 0) >= 1 else 0,
+    "range_fade": lambda f: (-1 if _g(f, "ex_range_pos", .5) >= .9 and _g(f, "ex_res_sigma", 9) <= .5 else
+                             1 if _g(f, "ex_range_pos", .5) <= .1 and _g(f, "ex_sup_sigma", 9) <= .5 else 0),
 }
 
 

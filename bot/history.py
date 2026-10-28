@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from . import brain, features, hindsight, ml, vol as volmod
+from . import brain, expert, features, hindsight, ml, vol as volmod
 from .live.settlement import contract_terms, prob_above
 from .risk import taker_fee
 from .metrics import binary_contract_roi
@@ -195,6 +195,7 @@ def replay_market(m, candles, spot, fee_rate, min_left=2, max_left=13.5, spot_li
             feats = features.build(window, terms["strike"], secs, bid, ask, now_ts=known + 60,
                                    avg_seconds=terms["avg_seconds"])
             if feats:
+                feats.update(expert.build(window, terms["strike"], secs, now_ts=known + 60))
                 ml.add_row(store, m["ticker"], ts, ml.coin_of(m["ticker"]), feats, y, "history")
                 if not scored:
                     scored = True
