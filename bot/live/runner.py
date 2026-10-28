@@ -19,7 +19,7 @@ import subprocess
 import shlex
 import time
 
-from .. import alerts, brain, briefing, council, crypto_brain, fees, guard, hindsight, ml, risk, token_data, window_review
+from .. import alerts, brain, briefing, council, crypto_brain, fees, guard, handoff, hindsight, ml, risk, token_data, window_review
 from .. import marketdata, vol as volmod
 from ..engine import Engine
 from ..grader import grade
@@ -1102,6 +1102,12 @@ class LiveRunner:
         last_sports, last_save = 0.0, time.time()
         sports_every = float(os.environ.get("SPORTS_EVERY_MINUTES", 12)) * 60
         save_cmd = os.environ.get("SAVE_CMD")
+        save_every = float(os.environ.get("SAVE_EVERY_SECONDS", 1800))
+        grade_every = float(os.environ.get("GRADE_EVERY_SECONDS", 0))
+        handoff_check = os.environ.get("HANDOFF_CHECK", "no") == "yes"
+        handoff_every = float(os.environ.get("HANDOFF_EVERY_SECONDS", 120))
+        last_grade = last_handoff = time.time()
+        handed_off = save_failed = False
         while time.time() < end:
             now = time.time()
             if now - last_discover >= 60:
@@ -1144,7 +1150,23 @@ class LiveRunner:
                 # the full sports scan + grading + learning, every 12 minutes
                 await asyncio.to_thread(self.sports_cycle)
                 last_sports = now
-            if save_cmd and now - last_save >= 1800:
+            if grade_every and now - last_grade >= grade_every:
+                # settle and learn while streaming: a long run must not wait for its end to do this
+                last_grade = now
+                try:
+                    await asyncio.to_thread(grade, self.store, self.rest)
+                except Exception as exc:
+                    log.error("mid-session grading failed: %s", exc)
+            if handoff_check and now - last_handoff >= handoff_every and not handed_off:
+                last_handoff = now
+                reason = await asyncio.to_thread(
+                    handoff.restart_reason, os.environ.get("GITHUB_SHA"),
+                    os.environ.get("GITHUB_REPOSITORY"), os.environ.get("GITHUB_TOKEN"))
+                if reason:
+                    handed_off = True
+                    end = min(end, handoff.next_stop(now, float(os.environ.get("BURST_END_PHASE_SECONDS", 240))))
+                    log.info("handing over at %s: %s", time.strftime("%H:%M:%S", time.gmtime(end)), reason)
+            if save_cmd and now - last_save >= save_every:
                 # Treat SAVE_CMD as an argument vector, not shell source.
                 # This avoids shell injection and reports failed persistence attempts.
                 try:
@@ -1152,11 +1174,14 @@ class LiveRunner:
                         subprocess.run, shlex.split(save_cmd), check=True,
                         capture_output=True, text=True
                     )
-                    last_save = now
+                    save_failed = False
                 except Exception as exc:
                     log.error("mid-session memory save failed: %s", exc)
-                    alerts.send("Memory save failed", str(exc)[:500],
-                                priority="high", tags=["warning"])
+                    if not save_failed:          # one alert per outage, not one per attempt
+                        alerts.send("Memory save failed", str(exc)[:500],
+                                    priority="high", tags=["warning"])
+                    save_failed = True
+                last_save = now                  # retry after the usual interval either way
             await asyncio.sleep(max(0.0, 1.0 - (time.time() - now)))
         stop.set()
         for t in tasks + ([kalshi_task] if kalshi_task else []):
