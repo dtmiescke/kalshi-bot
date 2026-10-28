@@ -452,16 +452,18 @@ function detailHeader(title,right=""){return`<div class="head"><div class="t"><b
 function botStatus(){const on=wfState==="active";return`<div style="display:flex;gap:8px;align-items:center"><span class="status"><span class="dot ${wfState&&!on?"off":""}"></span>${wfState?(on?"Bot running":"Bot paused"):"Look-around"}</span><span class="pill">${esc((vars.BOT_MODE||"paper").toUpperCase())}</span></div>`}
 function countdown(sym){const L=live[sym];if(!L.close)return"–";const s=Math.max(0,Math.round((L.close-Date.now())/1000));return Math.floor(s/60)+":"+String(s%60).padStart(2,"0")}
 function liveCard(sym,opts={}){
-  const c=COINS.find(x=>x.sym===sym),L=live[sym],q=L.market?`${c.name} above ${L.strike!=null?"$"+(+L.strike).toLocaleString(undefined,{maximumFractionDigits:c.dp}):"target"} at ${hm(L.close)}?`:(L.err||"Loading the live market…");
+  const q=questionOf(sym);
   const chips=opts.chips?`<div class="chips" role="group" aria-label="Coin">${COINS.map(x=>`<button class="chip" data-act="feat" data-v="${x.sym}" aria-pressed="${x.sym===sym}">${x.sym}</button>`).join("")}</div>`:"";
   return`<section class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="livebadge"><span class="dot live"></span>LIVE · closes in <span data-live="cd:${sym}" class="num">${countdown(sym)}</span></span>${chips}</div>
-    <span class="q">${esc(q)}</span>
+    <span class="q" data-live="q:${sym}">${esc(q)}</span>
     <div class="chance" data-live="ch:${sym}">${chanceLine(sym)}</div>
     <div id="chart-${opts.key||sym}" data-live="chart:${sym}" data-h="${opts.h||150}" style="min-height:${opts.h||150}px"></div>
     <div class="legend"><div class="keys"><span><i class="sw"></i>Market</span><span><i class="sw dash"></i>Bot</span></div>${opts.open?`<button class="link" data-act="coin" data-v="${sym}">Open market ›</button>`:`<span class="note" data-live="model:${sym}">${modelNote(sym)}</span>`}</div>
   </section>`;
 }
+function questionOf(sym){const c=COINS.find(x=>x.sym===sym),L=live[sym];
+  return L.market?`${c.name} above ${L.strike!=null?"$"+(+L.strike).toLocaleString(undefined,{maximumFractionDigits:c.dp}):"target"} at ${hm(L.close)}?`:(L.err||"Loading the live market…")}
 function chanceLine(sym){const L=live[sym],pts=L.pts;if(!pts.length)return`<b class="num">–</b><span>chance</span>`;
   const now=pts[pts.length-1].p,mv=Math.round((now-pts[0].p)*100);
   return`<b class="num">${Math.round(now*100)}%</b><span>chance</span>${pts.length>1?`<i class="${mv>=0?"up":"down"} num">${mv>=0?"▲":"▼"} ${Math.abs(mv)}</i>`:""}`}
@@ -503,7 +505,7 @@ function screenCrypto(){
     const edge=m&&now!=null?Math.round((m.p-now)*100):null;
     return`<button class="card" data-act="coin" data-v="${c.sym}" data-sub="overview" style="text-align:left">
       <span style="display:flex;justify-content:space-between;width:100%;font-size:12px" class="muted"><span><b style="color:var(--text)">${c.sym}</b> · 15-minute · closes in <span data-live="cd:${c.sym}" class="num">${countdown(c.sym)}</span></span><span class="num ${cls(s.total)}" style="font-weight:600">${smoney(s.total)} total</span></span>
-      <span class="q">${L.market?esc(c.name+" above $"+(+L.strike).toLocaleString(undefined,{maximumFractionDigits:c.dp})+" at "+hm(L.close)+"?"):esc(L.err||"Loading…")}</span>
+      <span class="q" data-live="q:${c.sym}">${esc(questionOf(c.sym))}</span>
       <span style="display:flex;justify-content:space-between;align-items:center;width:100%"><span class="chance" data-live="ch:${c.sym}">${chanceLine(c.sym)}</span><small class="muted">${m?"Bot "+Math.round(m.p*100)+"% · edge <b class='"+(edge>=0?"up":"down")+"'>"+(edge>=0?"+":"−")+Math.abs(edge)+"</b>":""}</small></span>
       <span id="mini-${c.sym}" data-live="mini:${c.sym}" style="display:block;width:100%;height:44px"></span></button>`}).join("");
 }
@@ -628,6 +630,7 @@ function drawCharts(withStatic=true){
 function updateLive(){
   document.querySelectorAll('[data-live^="cd:"]').forEach(el=>el.textContent=countdown(el.dataset.live.slice(3)));
   document.querySelectorAll('[data-live^="ch:"]').forEach(el=>el.innerHTML=chanceLine(el.dataset.live.slice(3)));
+  document.querySelectorAll('[data-live^="q:"]').forEach(el=>el.textContent=questionOf(el.dataset.live.slice(2)));
   document.querySelectorAll('[data-live^="model:"]').forEach(el=>el.textContent=modelNote(el.dataset.live.slice(6)));
   document.querySelectorAll('[data-live^="spot:"]').forEach(el=>{const sym=el.dataset.live.slice(5),c=COINS.find(x=>x.sym===sym),L=live[sym],f=v=>v==null?"–":"$"+(+v).toLocaleString(undefined,{minimumFractionDigits:c.dp,maximumFractionDigits:c.dp});el.textContent=f(L.spot)+" / "+f(L.strike)});
   drawCharts(false);
