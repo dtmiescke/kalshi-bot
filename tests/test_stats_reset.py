@@ -94,8 +94,8 @@ class TestWorkflowsAgree(unittest.TestCase):
         root = Path(__file__).resolve().parents[1] / ".github" / "workflows"
         for name in ("bot.yml", "train.yml", "clear-pause.yml"):
             text = (root / name).read_text()
-            self.assertIn(f"STATS_SINCE: '{RESET}'", text, name)
-            self.assertIn("BANKROLL: '500'", text, name)
+            self.assertIn("STATS_SINCE: ${{ vars.APP_STATS_SINCE || '%s' }}" % RESET, text, name)
+            self.assertIn("BANKROLL: ${{ vars.APP_BANKROLL || '500' }}", text, name)
 
 
 if __name__ == "__main__":
