@@ -49,8 +49,11 @@ def _p(obj, *names):
     return None
 
 
-def settled_markets(client, series, start_ts, end_ts, limit=300):
-    out, seen = [], set()
+def settled_markets(client, series, start_ts, end_ts, limit=300, skip=()):
+    """Newest settled markets in [start_ts, end_ts], up to limit, leaving out
+    tickers in skip BEFORE the limit applies, so each run reaches further back
+    instead of re-listing the same newest windows it already replayed."""
+    out, seen = [], set(skip)
     for path in ("/markets", "/historical/markets"):
         params = {"series_ticker": series, "limit": 200}
         if path == "/markets":
@@ -270,15 +273,22 @@ def run(store, client, days=3, series=None, fee_rate=0.07, max_markets=300, spot
     start = end - days * 86400
     out = {"days": days, "by_series": {}}
     have = _have_history(store)
+    todo = list(series or SERIES_PAIR)
+    series_deadline = None
 
     def late():
-        return deadline_ts is not None and time.time() > float(deadline_ts)
-    for ser in series or SERIES_PAIR:
-        if late():
+        if deadline_ts is not None and time.time() > float(deadline_ts):
+            return True
+        return series_deadline is not None and time.time() > series_deadline
+    for i, ser in enumerate(todo):
+        if deadline_ts is not None and time.time() > float(deadline_ts):
             out["stopped"] = "time limit"
             break
-        markets = [m for m in settled_markets(client, ser, start, end, limit=max_markets)
-                   if m["ticker"] not in have]
+        # Each coin gets a fair share of the time left, so one slow series
+        # can't starve the others; time a coin doesn't use rolls forward.
+        series_deadline = (None if deadline_ts is None else
+                           time.time() + (float(deadline_ts) - time.time()) / (len(todo) - i))
+        markets = settled_markets(client, ser, start, end, limit=max_markets, skip=have)
         if not markets:
             out["by_series"][ser] = {"markets": 0}
             continue
@@ -290,7 +300,7 @@ def run(store, client, days=3, series=None, fee_rate=0.07, max_markets=300, spot
         recs = {}
         for m in markets:
             if late():
-                out["stopped"] = "time limit"
+                out["stopped"] = "time limit"   # the rest is picked up next run
                 break
             ct = contract_terms(m)["close_ts"]
             recs[m["ticker"]] = replay_market(m, market_candles(client, ser, m["ticker"], ct - 1200, ct),
