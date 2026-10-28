@@ -165,6 +165,20 @@ nav#tabs button svg{transition:transform .15s} nav#tabs button[aria-current="pag
 .card.list .navrow:first-of-type{border-top:0}
 .navicon{width:34px;height:34px;border-radius:9px;background:var(--chipBg);color:var(--yesText);display:flex;align-items:center;justify-content:center;flex:0 0 auto}
 svg text{font-family:Inter,system-ui,sans-serif}
+/* press-and-hold chart reading */
+.scrubbable{position:relative;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.scrub{position:absolute;inset:0;pointer-events:none}
+.scrub .sl{position:absolute;left:var(--x);top:0;bottom:16px;width:1px;background:var(--text);opacity:.35}
+.scrub .sd{position:absolute;left:calc(var(--x) - 5px);top:calc(var(--y) - 5px);width:10px;height:10px;border-radius:50%;background:var(--blue);box-shadow:0 0 0 3px var(--card)}
+.scrub .st{position:absolute;top:-6px;left:clamp(0px,calc(var(--x) - 70px),calc(100% - 140px));width:140px;text-align:center;font-size:12px;font-weight:600;background:var(--text);color:var(--card);border-radius:7px;padding:4px 6px;white-space:nowrap}
+.cal{display:grid;grid-template-columns:72px minmax(0,1fr) 92px;align-items:center;gap:10px;font-size:13px;min-height:34px}
+.cal .track{position:relative;height:8px;background:var(--line);border-radius:4px}
+.cal .track i{position:absolute;left:0;top:0;bottom:0;background:var(--blue);border-radius:4px}
+.cal .track u{position:absolute;top:-4px;width:2px;height:16px;background:var(--text);border-radius:1px}
+.cal b{text-align:right;font-weight:600}
+.hours{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:4px}
+.hours .bar{height:80px} .hours .bar .u,.hours .bar .d{height:40px}
+.hourlab{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:4px;font-size:9px;color:var(--muted);text-align:center}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -480,6 +494,7 @@ function chanceSVG(pts,w,h,o={}){
   const x=t=>((t-t0)/(t1-t0))*plotW,y=v=>top+(1-(v*100-lo)/(hi-lo))*(bot-top);
   const line=pts.map(p=>x(p.t).toFixed(1)+","+y(p.p).toFixed(1)).join(" ");
   const last=pts[pts.length-1],lx=x(last.t),ly=y(last.p);
+  chanceSVG.geo={pts,plotW,x:p=>x(p.t),y:p=>y(p.p),label:p=>Math.round(p.p*100)+"% · "+new Date(p.t).toLocaleTimeString([],{hour:"numeric",minute:"2-digit",second:"2-digit"})};
   const grid=[0,1,2,3].map(i=>{const gy=top+i*(bot-top)/3,lab=Math.round(hi-i*(hi-lo)/3);return`<line x1="0" y1="${gy.toFixed(1)}" x2="${plotW}" y2="${gy.toFixed(1)}" stroke="var(--line2)"/><text x="${plotW+6}" y="${(gy+4).toFixed(1)}" font-size="11" fill="var(--muted2)">${lab}%</text>`}).join("");
   const times=[t0,(t0+t1)/2,t1].map((t,i)=>`<text x="${i===0?0:i===1?plotW/2:plotW}" y="${h-4}" font-size="11" fill="var(--muted2)" text-anchor="${i===0?"start":i===1?"middle":"end"}">${i===2&&!o.to?"Now":hm(t)}</text>`).join("");
   const model=o.model!=null?`<line x1="0" y1="${y(o.model).toFixed(1)}" x2="${plotW}" y2="${y(o.model).toFixed(1)}" stroke="var(--text)" stroke-width="1.4" stroke-dasharray="4 3"/>`:"";
@@ -494,6 +509,7 @@ function lineSVG(vals,w,h,color="var(--blue)",zero=false){ // zero: true = dashe
   w=Math.max(60,Math.round(w));if(vals.length<2)return zero?`<p class="empty" style="padding:28px 0">No settled bets in this range.</p>`:`<svg width="${w}" height="${h}" aria-hidden="true"></svg>`;
   const lo=Math.min(...vals,zero?base:Infinity),hi=Math.max(...vals,zero?base:-Infinity),span=(hi-lo)||1;
   const y=v=>2+(1-(v-lo)/span)*(h-4),pts=vals.map((v,i)=>((i/(vals.length-1))*w).toFixed(1)+","+y(v).toFixed(1)).join(" ");
+  lineSVG.geo={pts:vals,plotW:w,x:(v,i)=>(i/(vals.length-1))*w,y};
   return`<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">${zero?`<line x1="0" x2="${w}" y1="${y(base).toFixed(1)}" y2="${y(base).toFixed(1)}" stroke="var(--line)" stroke-dasharray="3 4"/>`:""}
     ${zero?`<path d="M0,${h} L${pts.replace(/ /g," L")} L${w},${h} Z" fill="${color}" fill-opacity="0.07"/>`:""}<polyline fill="none" stroke="${color}" stroke-width="${zero?2:1.6}" stroke-linejoin="round" points="${pts}"/></svg>`;
 }
@@ -529,7 +545,7 @@ function liveCard(sym,opts={}){
       <span class="slidetag"><b>${lad?"Ladder · "+closeLabel(L):"15-minute"}</b>closes in <span data-live="cd:${k}" class="num">${countdown(k)}</span></span>
       <span class="q" data-live="q:${k}">${qHTML(k)}</span>
       <div class="chance" data-live="ch:${k}">${chanceLine(k)}</div>
-      <div data-live="chart:${k}" data-h="${h}" style="min-height:${h}px"></div>
+      <div class="scrubbable" data-live="chart:${k}" data-h="${h}" style="min-height:${h}px"></div>
       <div class="legend"><div class="keys"><span><i class="sw"></i>Market</span>${lad?"":`<span><i class="sw dash"></i>Bot</span>`}${hb?`<span><i class="sw entry"></i>Your entry</span>`:""}</div>${opts.open?`<button class="link" data-act="coin" data-v="${sym}">Open market ›</button>`:`<span class="note" data-live="model:${k}">${modelNote(k)}</span>`}</div></div>`}).join("");
   const dots=ks.length>1?`<div class="dots" role="group" aria-label="Markets">${ks.map((k,i)=>`<button data-act="slide" data-v="${sym}" data-i="${i}" data-l="${i?"Ladder":"Swipe for ladders"}" aria-label="${i?"Ladder "+closeLabel(live[k]):"15-minute"}" aria-current="${i===at}"></button>`).join("")}<small>${at?"Ladder":"Swipe for ladders"}</small></div>`:"";
   return`<section class="card livecard">
@@ -572,10 +588,45 @@ function pnlCard(){ // swipe: profit/loss, then bankroll
       <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:8px"><div><small class="muted" style="font-size:13px">${title} · ${span}</small><div style="font-size:26px;font-weight:700" class="num ${bigCls}">${big}</div></div><small class="muted" style="text-align:right">${right}</small></div>${chart}</div>`;
   const dots=`<div class="dots" role="group" aria-label="View">${["Profit / loss","Bankroll"].map((l,i)=>`<button data-act="slide" data-v="pnl" data-i="${i}" data-l="${i?"Bankroll":"Swipe for bankroll"}" aria-label="${l}" aria-current="${i===at}"></button>`).join("")}<small>${at?"Bankroll":"Swipe for bankroll"}</small></div>`;
   return`<section class="card livecard"><div class="slides" data-sym="pnl">
-      ${slide("Profit / loss",smoney(run),cls(run),g.length+" settled",`<div id="pnlchart" data-vals="${vals.join(",")}" style="min-height:90px"></div>`)}
-      ${slide("Bankroll",money(bal),"",`Started ${cash(br)}<br>${money(open)} in open bets`,`<div id="bankchart" data-vals="${bvals.join(",")}" data-base="${br}" style="min-height:90px"></div>`)}
+      ${slide("Profit / loss",smoney(run),cls(run),g.length+" settled",`<div id="pnlchart" class="scrubbable" data-vals="${vals.join(",")}" data-times="${g.map(b=>b.exitTs||b.ts).join(",")}" style="min-height:90px"></div>`)}
+      ${slide("Bankroll",money(bal),"",`Started ${cash(br)}<br>${money(open)} in open bets`,`<div id="bankchart" class="scrubbable" data-vals="${bvals.join(",")}" data-times="${g.map(b=>b.exitTs||b.ts).join(",")}" data-base="${br}" style="min-height:90px"></div>`)}
     </div>${dots}
     <div class="seg" role="group" aria-label="Range">${Object.entries(R).map(([k,v])=>`<button data-act="pnlRange" data-v="${k}" aria-pressed="${k===ui.pnlRange}">${v[0]}</button>`).join("")}</div></section>`}
+function insights(list){ // deeper numbers from settled bets (oldest first)
+  const g=graded(list).sort((a,b)=>(a.exitTs||a.ts)-(b.exitTs||b.ts)),wins=g.filter(b=>b.pnl>0),losses=g.filter(b=>b.pnl<0);
+  const gw=wins.reduce((a,b)=>a+b.pnl,0),gl=-losses.reduce((a,b)=>a+b.pnl,0);
+  let run=0,peak=0,dd=0,streak=0,best=0,cur=0;
+  for(const b of g){run+=b.pnl;peak=Math.max(peak,run);dd=Math.max(dd,peak-run);
+    const w=b.pnl>0;cur=w?(cur>0?cur+1:1):(cur<0?cur-1:-1);if(cur>best)best=cur}
+  const cal=[[0,.5,"Under 50%"],[.5,.55,"50–55%"],[.55,.6,"55–60%"],[.6,.7,"60–70%"],[.7,.8,"70–80%"],[.8,1.01,"80%+"]].map(([a,z,l])=>{
+    const xs=g.filter(b=>b.prob!=null&&(b.side==="YES"||b.side==="NO")).map(b=>({p:b.side==="NO"?1-b.prob:b.prob,w:b.pnl>0})).filter(x=>x.p>=a&&x.p<z);
+    return{l,n:xs.length,said:xs.length?xs.reduce((s,x)=>s+x.p,0)/xs.length:null,won:xs.length?xs.filter(x=>x.w).length/xs.length:null}}).filter(c=>c.n);
+  const hours=Array.from({length:12},(_,i)=>g.filter(b=>Math.floor(new Date(b.exitTs||b.ts).getHours()/2)===i).reduce((a,b)=>a+b.pnl,0));
+  const avgEdge=xs=>{const e=xs.filter(b=>b.edge!=null);return e.length?e.reduce((a,b)=>a+b.edge,0)/e.length:null};
+  return{n:g.length,pf:gl?gw/gl:(gw?Infinity:null),exp:g.length?run/g.length:null,avgW:wins.length?gw/wins.length:null,avgL:losses.length?-gl/losses.length:null,
+    dd,best,cur,cal,hours,edgeW:avgEdge(wins),edgeL:avgEdge(losses)};
+}
+function screenInsights(){
+  const sym=route.sym,list=sym?bets.filter(b=>b.coin===sym):bets,I=insights(list),c=sym&&COINS.find(x=>x.sym===sym);
+  if(!I.n)return detailHeader(c?c.name+" insights":"Insights")+`<p class="empty">Insights appear once bets settle.</p>`;
+  const pts=v=>v==null?"–":(v>=0?"+":"−")+Math.abs(v*100).toFixed(1)+" pts";
+  const streak=I.cur>0?I.cur+" win"+(I.cur>1?"s":""):I.cur<0?(-I.cur)+" loss"+(I.cur<-1?"es":""):"–";
+  const tiles=[["Profit factor",I.pf==null?"–":I.pf===Infinity?"∞":I.pf.toFixed(2),I.pf!=null&&I.pf>=1?"up":"down","Won $ per lost $"],
+    ["Per bet",I.exp==null?"–":smoney(I.exp),cls(I.exp||0),"Average result"],["Max drawdown",money(-I.dd),I.dd?"down":"","Worst dip from a peak"],
+    ["Avg win",I.avgW==null?"–":smoney(I.avgW),"up",""],["Avg loss",I.avgL==null?"–":smoney(I.avgL),"down",""],["Streak",streak,I.cur>0?"up":I.cur<0?"down":"","Best: "+(I.best||0)+" wins"]];
+  const mx=Math.max(...I.hours.map(Math.abs))||1;
+  return detailHeader(c?c.name+" insights":"Insights",`<span class="pill">${plural(I.n,"settled bet")}</span>`)+
+    `<section class="grid3">${tiles.map(t=>`<div class="tile"><small>${t[0]}</small><b class="num ${t[2]}">${t[1]}</b>${t[3]?`<em>${t[3]}</em>`:""}</div>`).join("")}</section>`+
+    `<section class="card"><div class="cardhead"><h2>Is the bot well calibrated?</h2></div>
+      <small class="muted" style="margin-top:-6px">Bar = how often bets won. Tick = what the bot said. Close together means its odds can be trusted.</small>
+      ${I.cal.map(r=>`<div class="cal"><span class="muted">${r.l}</span><span class="track"><i style="width:${Math.round(r.won*100)}%"></i><u style="left:calc(${Math.round(r.said*100)}% - 1px)"></u></span><b class="num">${Math.round(r.won*100)}% <span class="muted" style="font-weight:500">of ${r.n}</span></b></div>`).join("")}</section>`+
+    `<section class="card"><h2>P/L by time of day</h2><div class="bars hours">${I.hours.map(v=>`<div class="bar"><div class="u"><i style="height:${v>0?Math.round(v/mx*38):0}px"></i></div><div class="d"><i style="height:${v<0?Math.round(-v/mx*38):0}px"></i></div></div>`).join("")}</div>
+      <div class="hourlab">${["12a","2a","4a","6a","8a","10a","12p","2p","4p","6p","8p","10p"].map(h=>`<span>${h}</span>`).join("")}</div></section>`+
+    `<section class="card" style="gap:0"><div class="cardhead"><h2>Edge check</h2></div>
+      <div class="kv"><span>Avg edge on winners</span><b class="num">${pts(I.edgeW)}</b></div>
+      <div class="kv"><span>Avg edge on losers</span><b class="num">${pts(I.edgeL)}</b></div>
+      <div class="kv"><span>Read</span><b>${I.edgeW!=null&&I.edgeL!=null?(I.edgeW-I.edgeL>=0.01?"Bigger edges win more often":"Edge size isn’t predicting wins yet"):"Not enough data"}</b></div></section>`;
+}
 function coinRows(sub){return`<section class="card list"><div class="cardhead"><h2>Performance by coin</h2><small class="muted">Tap for details</small></div>
   ${COINS.map(c=>{const list=bets.filter(b=>b.coin===c.sym),s=statsOf(list);
     return`<button class="row" data-act="coin" data-v="${c.sym}" data-sub="${sub||"stats"}"><span class="badge">${c.sym}</span><span class="rowmain"><b>${c.name}</b><small>${plural(s.count,"bet")} · ${pct(s.win)} won</small></span><span id="spark-${c.sym}" data-live="spark:${c.sym}" style="width:64px;height:26px"></span><span class="rowend num ${cls(s.total)}">${smoney(s.total)}</span>${CHEV}</button>`}).join("")}</section>`}
@@ -590,7 +641,9 @@ function health(){
 
 function screenDash(){
   const sp=bets.filter(b=>!b.coin),ss=statsOf(sp);
-  return header("Dashboard",botStatus())+liveCard(ui.feat,{chips:true,open:true})+kpis()+pnlCard()+coinRows()+
+  const I=insights(bets);
+  return header("Dashboard",botStatus())+liveCard(ui.feat,{chips:true,open:true})+kpis()+pnlCard()+
+    `<section class="card list"><button class="navrow" data-act="insights"><span class="navicon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg></span><span class="rowmain"><b>Insights</b><small>${I.n?"Profit factor "+(I.pf==null?"–":I.pf===Infinity?"∞":I.pf.toFixed(2))+" · drawdown "+money(-I.dd)+" · calibration":"Calibration, drawdown, best hours"}</small></span>${CHEV}</button></section>`+coinRows()+
    (sp.length?`<button class="card" data-act="tab" data-v="sports" style="flex-direction:row;justify-content:space-between;align-items:center;text-align:left"><span class="rowmain"><b>Sports</b><small>${plural(sp.length,"bet")} placed · ${plural(sp.filter(b=>b.prop).length,"player prop")}</small></span><span class="rowend num ${cls(ss.total)}">${smoney(ss.total)} ›</span></button>`:"")+health();
 }
 function screenCrypto(){
@@ -620,6 +673,7 @@ function screenCoin(){
       .map(t=>`<div class="tile"><small>${t[0]}</small><b class="num ${t[2]}">${t[1]}</b></div>`).join("")}</section>
       <section class="card"><h2>Daily P/L · last 7 days</h2><div class="bars">${days.map(d=>`<div class="bar"><div class="u"><i style="height:${d.v>0?Math.round(d.v/mx*44):0}px"></i></div><div class="d"><i style="height:${d.v<0?Math.round(-d.v/mx*44):0}px"></i></div></div>`).join("")}</div>
       <div class="barlab">${days.map(d=>`<span>${d.label}</span>`).join("")}</div></section>
+      <button class="btn" data-act="insights" data-v="${sym}">Deeper insights for ${sym} ›</button>
       <section class="card"><h2>Win rate by side</h2>${[["YES",s.yes],["NO",s.no]].map(x=>`<div class="meter"><span>${x[0]}</span><span class="track"><i style="width:${x[1]==null?0:Math.round(x[1]*100)}%;${x[0]==="NO"?"background:var(--orange)":""}"></i></span><b class="num">${pct(x[1])}</b></div>`).join("")}</section>`;
   }else{
     body=list.length?`<section class="card list">${list.map(betRow).join("")}</section>`:`<p class="empty">No ${sym} bets yet.</p>`;
@@ -663,7 +717,7 @@ function screenBet(){
   return detailHeader("Bet details",`<span class="pill" style="${st==="Lost"?"background:var(--sportBg);color:var(--noText)":""}">${st}</span>`)+
     `<section class="card"><small class="muted">${b.coin?(/15M/.test(b.series)?"15-minute market":"Ladder market"):esc(b.league||"Sports")+(b.prop?" · Player prop":"")} · placed ${when(b.ts)}</small><span class="q" style="font-size:17px">${esc(betTitle(b))}</span>
       <b style="font-size:28px" class="num ${b.pnl==null?"":cls(b.pnl)}">${b.pnl==null?"Open":smoney(b.pnl)}</b>
-      <div id="betchart" style="min-height:140px"></div>
+      <div id="betchart" class="scrubbable" style="min-height:140px"></div>
       <div class="legend"><div class="keys"><span><i class="sw"></i>YES price</span>${entryYes!=null?`<span><i class="sw entry"></i>Your entry (YES ${Math.round(entryYes*100)}¢)</span>`:""}</div></div></section>`+
     `<section class="grid3">${facts.map(f=>`<div class="tile"><small>${f[0]}</small><b class="num">${esc(f[1])}</b></div>`).join("")}</section>`+
     `<section class="card"><h2>Why the bot took it</h2>
@@ -764,7 +818,7 @@ function customizeSheet(){
 let sheetOpen=false;
 function render(scrollTop){
   const s=$("screen");
-  const map={main:{dash:screenDash,crypto:screenCrypto,sports:screenSports,activity:screenActivity,settings:screenSettings}[route.tab],coin:screenCoin,bet:screenBet,set:screenSet};
+  const map={main:{dash:screenDash,crypto:screenCrypto,sports:screenSports,activity:screenActivity,settings:screenSettings}[route.tab],coin:screenCoin,bet:screenBet,set:screenSet,insights:screenInsights};
   s.innerHTML=(map[route.page]||screenDash)();
   document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-current",b.dataset.tab===route.tab?"page":"false"));
   $("sheetRoot").innerHTML=sheetOpen?customizeSheet():"";
@@ -783,16 +837,19 @@ function drawCharts(withStatic=true){
   const tick=Math.floor(Date.now()/5000); // the time axis creeps forward: redraw at most every 5 s without new prices
   document.querySelectorAll('[data-live^="chart:"]').forEach(el=>{const k=el.dataset.live.slice(6),L=live[k];if(!L)return;const m=botModel(k),hb=heldBet(k);
     if(!L.pts.length&&!L.err){setHTML(el,`<span class="sk skblock" style="height:${+el.dataset.h||150}px"></span>`);return}
+    if(el._scrubbing)return;   // keep the chart still while it's being read
     const w=el.clientWidth||326,sig=[L.v,w,tick,m&&m.p,hb&&hb.id,L.err].join("|");if(el._sig===sig)return;el._sig=sig;
     const from=L.kind==="ladder"?Math.max(L.open||0,Date.now()-6*3600e3):L.open;
-    el.innerHTML=chanceSVG(L.pts,w,+el.dataset.h||150,{from,to:null,model:L.kind==="ladder"||!m?null:m.p,
-      entry:hb&&hb.price!=null?(hb.side==="NO"?1-hb.price:hb.price):null,entryT:hb?hb.ts:null})});
+    el._geo=null;el.innerHTML=chanceSVG(L.pts,w,+el.dataset.h||150,{from,to:null,model:L.kind==="ladder"||!m?null:m.p,
+      entry:hb&&hb.price!=null?(hb.side==="NO"?1-hb.price:hb.price):null,entryT:hb?hb.ts:null});el._geo=chanceSVG.geo});
   document.querySelectorAll('[data-live^="mini:"]').forEach(el=>{const L=live[el.dataset.live.slice(5)];if(!L)return;if(!L.pts.length){setHTML(el,`<span class="sk skblock" style="height:44px"></span>`);return}
     const w=el.clientWidth||326,sig=L.v+"|"+w;if(el._sig!==sig){el._sig=sig;el.innerHTML=lineSVG(L.pts.map(p=>p.p),w,44)}});
   document.querySelectorAll('[data-live^="spark:"]').forEach(el=>{const L=live[el.dataset.live.slice(6)];if(!L||el._sig===L.v)return;el._sig=L.v;el.innerHTML=lineSVG(L.pts.map(p=>p.p),64,26)});
   if(!withStatic)return;
-  const pc=$("pnlchart");if(pc){const v=pc.dataset.vals.split(",").map(Number);pc.innerHTML=lineSVG(v,pc.clientWidth||326,90,"var(--blue)",true)}
-  const bk=$("bankchart");if(bk){const v=bk.dataset.vals.split(",").map(Number),b0=+bk.dataset.base;bk.innerHTML=lineSVG(v,bk.clientWidth||326,90,v[v.length-1]>=b0?"var(--blue)":"var(--down)",b0)}
+  const lineGeo=(el,fmt)=>{const g=lineSVG.geo,ts=(el.dataset.times||"").split(",").map(Number);
+    el._geo=g&&{...g,label:(v,i)=>fmt(v)+" · "+(i&&ts[i-1]?when(ts[i-1]):"Start")}};
+  const pc=$("pnlchart");if(pc){const v=pc.dataset.vals.split(",").map(Number);lineSVG.geo=null;pc.innerHTML=lineSVG(v,pc.clientWidth||326,90,"var(--blue)",true);lineGeo(pc,smoney)}
+  const bk=$("bankchart");if(bk){const v=bk.dataset.vals.split(",").map(Number),b0=+bk.dataset.base;lineSVG.geo=null;bk.innerHTML=lineSVG(v,bk.clientWidth||326,90,v[v.length-1]>=b0?"var(--blue)":"var(--down)",b0);lineGeo(bk,money)}
   const bc=$("betchart");if(bc)drawBetChart(bc);
 }
 function updateLive(){
@@ -805,8 +862,30 @@ function updateLive(){
   document.querySelectorAll('[data-live^="yn:"]').forEach(el=>setHTML(el,ynTiles(el.dataset.live.slice(3))));
   drawCharts(false);
 }
+/* press and hold a chart (or hover with a mouse) to read the value and time at any point */
+let scrub=null;
+function scrubAt(el,clientX){const g=el._geo;if(!g||!g.pts||!g.pts.length)return;
+  const r=el.getBoundingClientRect(),px=Math.max(0,Math.min(g.plotW,clientX-r.left));let best=0,bd=Infinity;
+  g.pts.forEach((p,i)=>{const d=Math.abs(g.x(p,i)-px);if(d<bd){bd=d;best=i}});
+  const p=g.pts[best];let o=el.querySelector(":scope>.scrub");
+  if(!o){o=document.createElement("div");o.className="scrub";o.innerHTML='<i class="sl"></i><i class="sd"></i><b class="st num"></b>';el.appendChild(o)}
+  o.style.setProperty("--x",g.x(p,best).toFixed(1)+"px");o.style.setProperty("--y",g.y(p).toFixed(1)+"px");o.querySelector(".st").textContent=g.label(p,best);
+  if(navigator.vibrate&&scrub&&scrub.idx!==best&&scrub.idx!=null)navigator.vibrate(1);if(scrub)scrub.idx=best}
+function scrubEnd(){if(!scrub)return;const el=scrub.el;clearTimeout(scrub.timer);el._scrubbing=false;el.removeEventListener("touchmove",scrubMove);const o=el.querySelector(":scope>.scrub");if(o)o.remove();scrub=null}
+document.addEventListener("touchstart",e=>{const el=e.target.closest(".scrubbable");if(!el||!el._geo||e.touches.length>1)return;scrubEnd();
+  const t=e.touches[0];scrub={el,x0:t.clientX,y0:t.clientY,on:false,timer:setTimeout(()=>{if(!scrub)return;scrub.on=true;el._scrubbing=true;scrubAt(el,scrub.x0)},230)};
+  el.addEventListener("touchmove",scrubMove,{passive:false})},{passive:true});
+// Blocking (non-passive) only on the chart being held, so page scrolling never waits on it.
+function scrubMove(e){if(!scrub)return;const t=e.touches[0];
+  if(scrub.on){e.preventDefault();scrubAt(scrub.el,t.clientX);return}
+  if(Math.hypot(t.clientX-scrub.x0,t.clientY-scrub.y0)>8)scrubEnd()} // moved first: it's a swipe or scroll, not a read
+document.addEventListener("touchend",scrubEnd);document.addEventListener("touchcancel",scrubEnd);
+document.addEventListener("pointermove",e=>{if(e.pointerType!=="mouse")return;const el=e.target.closest(".scrubbable");
+  if(!el||!el._geo){if(scrub&&scrub.mouse)scrubEnd();return}
+  if(!scrub||scrub.el!==el){scrubEnd();scrub={el,mouse:true};el._scrubbing=true}scrubAt(el,e.clientX)});
+document.addEventListener("pointerout",e=>{if(scrub&&scrub.mouse&&!e.relatedTarget)scrubEnd()}); // mouse left the window
 const betCandles={};
-async function drawBetChart(el){
+async function drawBetChart(el){ // (geometry for press-and-hold is attached below)
   const b=bets.find(x=>String(x.id)===String(route.id));if(!b)return;
   const entry=b.price==null?null:(b.side==="NO"?1-b.price:b.price),end=b.exitTs||((b.coin&&/15M/.test(b.series))?b.ts+16*60000:Date.now());
   const key=b.ticker;
@@ -818,7 +897,8 @@ async function drawBetChart(el){
   }
   let pts=betCandles[key]||[];
   if(sample&&!pts.length){let v=entry??.5;pts=[];for(let i=0;i<30;i++){v=Math.max(.03,Math.min(.97,v+(Math.random()-.5)*.06));pts.push({t:b.ts+i*30000,p:v})}}
-  el.innerHTML=pts.length?chanceSVG(pts,el.clientWidth||326,140,{from:b.ts-300000,to:Math.min(end,Date.now()),entry,entryT:b.ts}):(betCandles[key]===null?'<p class="empty">Loading the price history…</p>':'<p class="empty">No price history for this market.</p>');
+  el._geo=null;el.innerHTML=pts.length?chanceSVG(pts,el.clientWidth||326,140,{from:b.ts-300000,to:Math.min(end,Date.now()),entry,entryT:b.ts}):(betCandles[key]===null?'<p class="empty">Loading the price history…</p>':'<p class="empty">No price history for this market.</p>');
+  if(pts.length)el._geo=chanceSVG.geo;
 }
 
 /* ================= actions ================= */
@@ -833,6 +913,7 @@ document.addEventListener("click",async e=>{
   if(a==="coin"){ui.coinTab=t.dataset.sub||"overview";const c=COINS.find(x=>x.sym===v);if(c)spot(c).then(updateLive);return go({page:"coin",sym:v})}
   if(a==="bet")return go({page:"bet",id:v});
   if(a==="set")return go({page:"set",sec:v});
+  if(a==="insights")return go({page:"insights",sym:v||null});
   if(["coinTab","pnlRange","sportsType","league","actView"].includes(a)){ui[a]=v;return render()}
   if(a==="customize"){sheetOpen=true;return render()}
   if(a==="closeSheet"){sheetOpen=false;return render()}
