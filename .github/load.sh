@@ -53,6 +53,9 @@ if git fetch -q origin bot-data; then
   [ ! -d /tmp/bd/models ] || cp -r /tmp/bd/models/. data/models/
   git worktree remove --force /tmp/bd
 
+  # The saved copy has its indexes stripped (bot/snapshot.py); put them back before anything reads it.
+  python -m bot.snapshot restore data/bot.sqlite
+
   # Validate the restored database before allowing it to be saved.
   python -c 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); result=c.execute("PRAGMA quick_check").fetchone()[0]; print("SQLite quick_check:", result); sys.exit(result != "ok")' data/bot.sqlite
   touch data/.memory_restored
