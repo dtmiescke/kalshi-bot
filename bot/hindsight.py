@@ -31,7 +31,7 @@ LABELS = {
     "vwap_side": "VWAP side", "volume_confirms": "Volume confirms", "obv_flow": "Volume flow (OBV)",
     "strike_side": "Side of target", "strike_far": "Far from target", "back_favorite": "Back the favorite",
     "book_pressure": "Exchange book pressure", "kalshi_book_pressure": "Kalshi book pressure",
-    "funding_fade": "Funding fade",
+    "funding_fade": "Funding fade", "yes_premium": "Fade the YES premium",
     # a chart trader's reads (bot/expert.py)
     "structure_follow": "Market structure", "liquidity_sweep": "Liquidity sweep",
     "squeeze_breakout": "Squeeze breakout", "rsi_divergence": "RSI divergence",
@@ -76,6 +76,10 @@ RULES = {
     "book_pressure": lambda f: _sgn(f.get("tk_ex_depth_imbalance"), 0.15),
     "kalshi_book_pressure": lambda f: _sgn(f.get("tk_k_depth_imbalance"), 0.3),
     "funding_fade": lambda f: -_sgn(f.get("tk_funding"), 2e-4),
+    # On 1,041 settled windows Kalshi's YES price in the 30-80 cent range was 8 points too high (YES won
+    # less often than priced), +4.9 cents per contract after fees buying NO, z = 2.4. Found by looking,
+    # so it is a candidate: the playbook treats it like any other rule and only trusts it once it holds up.
+    "yes_premium": lambda f: -1 if f.get("kalshi_logit") is not None and 0.30 <= _mid(f) <= 0.80 else 0,
     # what a discretionary crypto trader would read off the same chart; each must earn its place in the playbook
     "structure_follow": lambda f: _sgn(f.get("ex_structure"), 0.5),
     "liquidity_sweep": lambda f: _sgn(f.get("ex_sweep"), 0.5),
@@ -186,18 +190,29 @@ MIN_WINDOWS = 50       # per rule and condition
 Z = 2.33               # 99% one-sided: with ~180 rule x condition tests, a loose bar would validate luck
 
 
-def playbook(store, min_n=MIN_WINDOWS, z=Z):
+def family_z(tests, alpha=0.05):
+    """One-sided z that keeps the chance of ANY false validation in a family of `tests` at alpha."""
+    from statistics import NormalDist
+    return NormalDist().inv_cdf(1 - alpha / max(int(tests), 1))
+
+
+def playbook(store, min_n=MIN_WINDOWS, z=None):
     """{"rules": {"regime|rule": {n, hit, mean, lcb, validated}}, "windows": N, "ts": t}.
-    Conditions are the market regimes plus "all"."""
+    Conditions are the market regimes plus "all". With dozens of rules and conditions tested, a fixed
+    bar would validate luck, so the bar rises with the number of tests (z=None); pass z to fix it."""
     ensure_table(store)
     rows = store.q("""SELECT regime, rule, COUNT(*) n, AVG(pnl) mean, AVG(pnl * pnl) m2, AVG(correct) hit
                       FROM hindsight_rules GROUP BY regime, rule""")
     pooled = {}
     out = {}
 
+    zs = {"all": z if z is not None else max(Z, family_z(len(RULES))),
+          "regime": z if z is not None else max(Z, family_z(len(rows)))}
+
     def add(key, n, mean, m2, hit):
         var = max(m2 - mean * mean, 0.0)
-        lcb = mean - z * math.sqrt(var / n) if n else None
+        zz = zs["all"] if key.startswith("all|") else zs["regime"]
+        lcb = mean - zz * math.sqrt(var / n) if n else None
         out[key] = {"n": n, "hit": round(hit, 4), "mean": round(mean, 4), "lcb": round(lcb, 4),
                     "validated": bool(n >= min_n and lcb > 0)}
     for r in rows:
@@ -208,6 +223,44 @@ def playbook(store, min_n=MIN_WINDOWS, z=Z):
         add(f"all|{rule}", n, s1 / n, s2 / n, sh / n)
     windows = store.q("SELECT COUNT(DISTINCT ticker) c FROM hindsight_rules")[0]["c"]
     return {"rules": out, "windows": windows, "ts": int(time.time())}
+
+
+def backfill(store, max_windows=5000):
+    """Score the toolbox on settled windows that were stored as training rows but never reviewed
+    (replayed history, and live windows from before the review existed), at the earliest allowed
+    decision of each window, like the 90-second bet. Returns how many windows were added."""
+    from . import ml
+    ensure_table(store)
+    ml.ensure_table(store)
+    bad = ml.untrusted_sources(store)
+    done = {r["ticker"] for r in store.q("SELECT DISTINCT ticker FROM hindsight_rules")}
+    best = {}
+    for r in store.q("SELECT ticker, ts, coin, features, y, source FROM ml_rows WHERE y IN (0,1)"):
+        if r["ticker"] in done or (r["source"], r["coin"]) in bad:
+            continue
+        try:
+            f = json.loads(r["features"])
+        except ValueError:
+            continue
+        left = f.get("min_left")
+        if left is None or f.get("kalshi_logit") is None or not 2 <= left <= 13.55:
+            continue
+        if r["ticker"] not in best or left > best[r["ticker"]][0]:
+            best[r["ticker"]] = (left, r["ts"], r["coin"], f, r["y"])
+    added = 0
+    for ticker, (_, ts, coin, f, y) in list(best.items())[:max_windows]:
+        if record(store, ticker, coin, ts, f, y):
+            added += 1
+    return added
+
+
+def split_playbook(readings):
+    """(readings the forecast is blended from, the playbook's proven shift or 0.0). A validated rule's
+    lower bound is already net of fees on settled windows, so it is added AFTER the forecast is shrunk
+    toward Kalshi's price, not blended in as one more opinion."""
+    pb = next((r for r in readings if r.name == "crypto_playbook"), None)
+    rest = [r for r in readings if r.name != "crypto_playbook"]
+    return rest, float((pb.detail or {}).get("shift", 0.0)) if pb else 0.0
 
 
 def playbook_reading(table, feats):
