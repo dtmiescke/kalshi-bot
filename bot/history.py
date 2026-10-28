@@ -29,7 +29,11 @@ from .metrics import binary_contract_roi
 
 log = logging.getLogger("bot")
 COINBASE_CANDLES = "https://api.exchange.coinbase.com/products/{pair}/candles"
-SERIES_PAIR = {"KXBTC15M": "BTC-USD", "KXETH15M": "ETH-USD", "KXSOL15M": "SOL-USD"}
+# BNB has no Coinbase product; OKX history-candles has it with real volume and,
+# unlike Binance (HTTP 451 from US hosts), is reachable from GitHub runners.
+OKX_CANDLES = "https://www.okx.com/api/v5/market/history-candles"
+SERIES_PAIR = {"KXBTC15M": "BTC-USD", "KXETH15M": "ETH-USD", "KXSOL15M": "SOL-USD",
+               "KXBNB15M": "OKX:BNB-USDT"}
 THRESHOLDS = (0.02, 0.03, 0.05, 0.08)
 
 
@@ -88,8 +92,39 @@ def spot_minutes(pair, start_ts, end_ts, get=requests.get):
     return {k: c["close"] for k, c in spot_candles(pair, start_ts, end_ts, get).items()}
 
 
+def okx_candles(inst, start_ts, end_ts, get=requests.get):
+    """{minute_ts: full 1-minute candle} from OKX, 100 per request, newest first,
+    paging backwards with `after` (returns candles older than that time)."""
+    out, after, start = {}, int(end_ts) * 1000 + 60_000, int(start_ts)
+    for _ in range(2000):                      # hard stop: ~138 days of minutes
+        try:
+            r = get(OKX_CANDLES, timeout=15, params={"instId": inst, "bar": "1m",
+                                                     "limit": 100, "after": after})
+            r.raise_for_status()
+            rows = (r.json() or {}).get("data") or []
+        except Exception as e:
+            log.info("okx %s: %s", inst, e)
+            break
+        if not rows:
+            break
+        for c in rows:
+            ts = int(c[0]) // 1000
+            if start <= ts <= int(end_ts):
+                out[ts] = {"ts": ts, "open": float(c[1]), "high": float(c[2]),
+                           "low": float(c[3]), "close": float(c[4]), "volume": float(c[5])}
+        oldest = min(int(c[0]) for c in rows)
+        if oldest // 1000 <= start or oldest >= after:
+            break
+        after = oldest
+        time.sleep(0.12)                       # OKX allows 20 requests / 2 s
+    return out
+
+
 def spot_candles(pair, start_ts, end_ts, get=requests.get):
-    """{minute_ts: full 1-minute candle} from Coinbase, 300 candles per request."""
+    """{minute_ts: full 1-minute candle} from Coinbase, 300 candles per request
+    (pairs written "OKX:<instId>" come from OKX instead)."""
+    if str(pair).startswith("OKX:"):
+        return okx_candles(pair[4:], start_ts, end_ts, get)
     # Whole seconds on both ends: with a fractional end_ts, t stopped at
     # int(end_ts) < end_ts and this loop never ended (the trainer's 45-minute hang).
     out, t, end = {}, int(start_ts), int(end_ts)
