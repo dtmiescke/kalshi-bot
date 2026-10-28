@@ -680,11 +680,15 @@ class TestCryptoFourCoinConfiguration(unittest.TestCase):
     def test_requested_stake_limits_are_enforced_by_workflow_configuration(self):
         from pathlib import Path
         workflow = Path(".github/workflows/bot.yml").read_text()
-        self.assertIn("MIN_PER_BET: '25'", workflow)
-        self.assertIn("MAX_PER_BET: '100'", workflow)
-        self.assertIn("CRYPTO_MIN_BET: '25'", workflow)
-        self.assertIn("CRYPTO_MAX_PER_BET: '100'", workflow)
-        self.assertIn("CRYPTO_MAX_PER_WINDOW: '100'", workflow)
+        # $500 bankroll, $5-$20 bets, all four coins every 15-minute window
+        self.assertIn("BANKROLL: '500'", workflow)
+        self.assertIn("MIN_PER_BET: '5'", workflow)
+        self.assertIn("MAX_PER_BET: '20'", workflow)
+        self.assertIn("CRYPTO_MIN_BET: '5'", workflow)
+        self.assertIn("CRYPTO_MAX_PER_BET: '20'", workflow)
+        self.assertIn("CRYPTO_MAX_PER_WINDOW: '80'", workflow)      # 4 coins x $20
+        self.assertIn('echo "crypto_cap=16"', workflow)               # 4 coins x 4 windows an hour
+        self.assertIn("MAX_TOTAL_LOSS: '500'", workflow)
         self.assertIn("BOT_MODE: paper", workflow)
         self.assertIn('LIVE_TRADING_CONFIRMED: "no"', workflow)
         self.assertIn("PAPER-ONLY LOCK", workflow)

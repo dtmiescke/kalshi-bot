@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from . import brain, guard
+from .storage import stats_since
 
 E = html.escape
 
@@ -60,12 +61,13 @@ def _signals_compact(raw):
 
 
 def export_csv(store, mode=None):
-    """Export the full trade lifecycle, optionally scoped to one account mode."""
+    """Export the trade lifecycle since the last stats reset (STATS_SINCE),
+    optionally scoped to one account mode."""
     rows = store.q("""SELECT id, ts, exit_ts, mode, ticker, event_ticker, series, team,
                       side, price, contracts, stake, fee, model_prob, edge, confidence,
                       style, order_id, status, result, closing_price, exit_price,
                       pnl, clv, graded_ts, signals_json FROM bets
-                      WHERE (? IS NULL OR mode=?) ORDER BY ts, id""", (mode, mode))
+                      WHERE (? IS NULL OR mode=?) AND ts>=? ORDER BY ts, id""", (mode, mode, stats_since()))
     buf = io.StringIO()
     w = csv.writer(buf)
     cols = [c for c in rows[0].keys() if c != "signals_json"] if rows else [
@@ -96,8 +98,9 @@ def build(store, settings, live_path="data/live_summary.json", briefing_path="da
                 live = json.load(f)
         except (OSError, ValueError):
             pass
-    graded = store.q("SELECT pnl, clv, result, side, graded_ts FROM bets WHERE status='graded' AND mode=?",
-                      (settings.mode,))
+    since = stats_since()
+    graded = store.q("SELECT pnl, clv, result, side, graded_ts FROM bets WHERE status='graded' AND mode=? AND ts>=?",
+                      (settings.mode, since))
     # Win percentage is settled pick accuracy, not profitability: compare the
     # chosen side with Kalshi's actual YES/NO settlement. Sold-early positions
     # have no settlement outcome and are excluded. Open bets are never counted.
@@ -117,9 +120,9 @@ def build(store, settings, live_path="data/live_summary.json", briefing_path="da
     today_wins = sum(1 for b in today_settled if b["result"] == b["side"])
     today_win_pct = 100.0 * today_wins / len(today_settled) if today_settled else None
     today_win_pct_text = f"{today_win_pct:.1f}%" if today_win_pct is not None else "—"
-    open_bets = store.q("SELECT * FROM bets WHERE status='open' AND mode=? ORDER BY ts DESC", (settings.mode,))
-    completed_bets = store.q("SELECT * FROM bets WHERE status IN ('graded','sold') AND mode=? ORDER BY COALESCE(exit_ts, graded_ts, ts) DESC", (settings.mode,))
-    recent = store.q("SELECT * FROM bets WHERE status='graded' AND mode=? ORDER BY graded_ts DESC LIMIT 15", (settings.mode,))
+    open_bets = store.q("SELECT * FROM bets WHERE status='open' AND mode=? AND ts>=? ORDER BY ts DESC", (settings.mode, since))
+    completed_bets = store.q("SELECT * FROM bets WHERE status IN ('graded','sold') AND mode=? AND ts>=? ORDER BY COALESCE(exit_ts, graded_ts, ts) DESC", (settings.mode, since))
+    recent = store.q("SELECT * FROM bets WHERE status='graded' AND mode=? AND ts>=? ORDER BY graded_ts DESC LIMIT 15", (settings.mode, since))
 
     def last_quote(ticker):
         r = store.q("""SELECT ts, yes_bid, yes_ask FROM market_snapshots WHERE ticker=?
@@ -324,9 +327,20 @@ def summary(store):
     try:
         from .config import Settings
         from .council import standings
-        members = standings(store, Settings())
+        s = Settings()
+        members = standings(store, s)
     except Exception:
-        members = {}
+        s, members = None, {}
+    # The pinned risk limits the bot runs with (the phone app shows these
+    # read-only) and when the account's stats last restarted.
+    account = {"bankroll": s.bankroll, "stats_since": stats_since(),
+               "min_per_bet": max(s.min_per_bet, s.crypto_min_bet),
+               "max_per_bet": min(s.max_per_bet, s.crypto_max_per_bet),
+               "crypto_max_trades_per_hour": s.crypto_max_trades_per_hour,
+               "crypto_max_per_window": s.crypto_max_per_window,
+               "max_open_positions": s.max_open_positions, "max_open_cost": s.max_open_cost,
+               "max_per_day": s.max_per_day, "max_total_loss": s.max_total_loss,
+               "aggression_level": s.aggression_level} if s else None
     kv = {k: store.get_kv(k) for k in SUMMARY_KV}
     kv.update({k: store.get_kv(k) for k in (f"tail_model_{c}" for c in ("BTC", "ETH", "SOL"))})
     return {
@@ -342,6 +356,7 @@ def summary(store):
                        GROUP BY leg_count ORDER BY leg_count"""),
         "kv": {k: v for k, v in kv.items() if v is not None},
         "storage": storage_report(store),
+        "account": account,
     }
 
 

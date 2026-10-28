@@ -16,6 +16,7 @@ import os
 import time
 
 from .risk import asks_from_book, taker_fee
+from .storage import stats_since
 
 # Only these series have been explicitly allowlisted for two-team locked-profit
 # arbitrage. Unknown/future sports fail closed until their settlement rules are checked.
@@ -56,8 +57,8 @@ def drawdown_tripped(store, bankroll, mode=None):
     limit = (pct / 100 if pct > 1 else pct) * bankroll
     since = int(time.time()) - 7 * 86400
     r = store.q("""SELECT COALESCE(SUM(pnl),0) p FROM bets
-                   WHERE status='graded' AND graded_ts>=? AND (? IS NULL OR mode=?)""",
-                (since, mode, mode))
+                   WHERE status='graded' AND graded_ts>=? AND ts>=? AND (? IS NULL OR mode=?)""",
+                (since, stats_since(), mode, mode))
     return r[0]["p"] < -limit
 
 
@@ -125,8 +126,8 @@ def total_loss_tripped(store, limit=None, mode=None):
         return True
     mode = mode or os.environ.get("BOT_MODE", "paper")
     rows = store.q(
-        "SELECT COALESCE(SUM(pnl),0) p FROM bets WHERE status='graded' AND mode=?",
-        (mode,),
+        "SELECT COALESCE(SUM(pnl),0) p FROM bets WHERE status='graded' AND mode=? AND ts>=?",
+        (mode, stats_since()),
     )
     pnl = float(rows[0]["p"] if rows else 0.0)
     return pnl <= -limit

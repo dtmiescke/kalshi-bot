@@ -7,6 +7,7 @@ import os
 import sqlite3
 import threading
 import time
+from datetime import datetime, timezone
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS market_snapshots (
@@ -167,6 +168,26 @@ def trim_raw(db, now, retention=None):
                              (SELECT rowid FROM {table} ORDER BY {column} DESC LIMIT ?)""", (keep,))
         deleted[table] = deleted.get(table, 0) + max(0, cur.rowcount)
     return deleted
+
+
+def stats_since(raw=None):
+    """STATS_SINCE: when the account's P/L, balance and loss limits restart
+    (UTC ISO time like 2026-10-28T11:15:00Z, or epoch seconds; unset = all time).
+    Older bets stay in the database and keep feeding learning; they only stop
+    counting as account history. A bad value fails safe to all history."""
+    raw = os.environ.get("STATS_SINCE", "") if raw is None else raw
+    raw = str(raw or "").strip()
+    if not raw:
+        return 0
+    try:
+        return max(0, int(float(raw)))
+    except ValueError:
+        pass
+    try:
+        return max(0, int(datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                          .astimezone(timezone.utc).timestamp()))
+    except ValueError:
+        return 0
 
 
 class Store:
@@ -548,7 +569,7 @@ class Store:
 
     def staked_since(self, ts, mode=None):
         r = self.q("""SELECT COALESCE(SUM(stake + fee),0) s FROM bets
-                      WHERE ts>=? AND (? IS NULL OR mode=?)""", (ts, mode, mode))
+                      WHERE ts>=? AND (? IS NULL OR mode=?)""", (max(ts, stats_since()), mode, mode))
         return r[0]["s"]
 
     def staked_on_event(self, event_ticker, mode=None):
@@ -558,12 +579,13 @@ class Store:
         return r[0]["s"]
 
     def account(self, bankroll, mode=None):
-        """Return account cash/exposure, optionally isolated to one mode."""
+        """Return account cash/exposure, optionally isolated to one mode.
+        Counts only bets placed since STATS_SINCE (the last stats reset)."""
         r = self.q("""SELECT
             COALESCE(SUM(CASE WHEN status='graded' THEN pnl END), 0) realized,
             COALESCE(SUM(CASE WHEN status='open' THEN stake + fee END), 0) open_cost,
             COALESCE(SUM(CASE WHEN status='open' THEN 1 END), 0) open_n
-            FROM bets WHERE (? IS NULL OR mode=?)""", (mode, mode))[0]
+            FROM bets WHERE (? IS NULL OR mode=?) AND ts>=?""", (mode, mode, stats_since()))[0]
         return {"cash": round(bankroll + r["realized"] - r["open_cost"], 2),
                 "realized": round(r["realized"], 2), "open_cost": round(r["open_cost"], 2),
                 "open_positions": int(r["open_n"]), "equity_at_cost": round(bankroll + r["realized"], 2)}
@@ -571,8 +593,8 @@ class Store:
     def realized_today(self, day_start, mode=None):
         """Settled/closed P&L for the selected account mode, never paper+live mixed."""
         r = self.q("""SELECT COALESCE(SUM(pnl),0) p FROM bets
-                      WHERE status='graded' AND graded_ts>=?
-                        AND (? IS NULL OR mode=?)""", (day_start, mode, mode))
+                      WHERE status='graded' AND graded_ts>=? AND ts>=?
+                        AND (? IS NULL OR mode=?)""", (day_start, stats_since(), mode, mode))
         return r[0]["p"]
 
     def has_open_event_bet(self, event_ticker, mode=None):

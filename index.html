@@ -181,12 +181,6 @@ const LADDER={BTC:"KXBTCD",ETH:"KXETHD",SOL:"KXSOLD",BNB:"KXBNBD"};
 const SETTINGS=[
   {name:"AGGRESSION_LEVEL",label:"Paper trading aggression",type:"select",opts:["off","conservative","balanced","aggressive","adaptive"],def:"aggressive"},
   {name:"FIXED_BET",label:"Fixed bet ($, blank = auto sizing)",type:"number"},
-  {name:"MAX_PER_BET",label:"Max per bet ($)",type:"number",def:"25"},
-  {name:"MAX_PER_DAY",label:"Max per day ($)",type:"number",def:"150"},
-  {name:"DAILY_LOSS_LIMIT",label:"Stop for the day after losing ($)",type:"number",def:"30"},
-  {name:"BANKROLL",label:"Bankroll ($)",type:"number",def:"1000"},
-  {name:"MAX_OPEN_POSITIONS",label:"Max open positions",type:"number",def:"5"},
-  {name:"MAX_OPEN_COST",label:"Max money in open bets ($)",type:"number",def:"200"},
   {name:"MIN_EDGE",label:"Minimum edge on sports (%)",type:"number",def:"3",pct:true},
   {name:"CRYPTO_MIN_EDGE",label:"Minimum edge on 15-min crypto (%)",type:"number",def:"5",pct:true},
   {name:"LADDERS_ENABLED",label:"Hourly and daily crypto ladders",type:"select",opts:["yes","no"],def:"yes"},
@@ -201,7 +195,7 @@ const $=id=>document.getElementById(id);
 const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
 let cfg=null;try{cfg=JSON.parse(localStorage.getItem("kbot")||"null")}catch(e){}
 let demo=false, vars={}, wfState=null, runsCache=[], bets=[], sample=false, briefing="", report="";
-let council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
+let account=null, council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
 
 function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),2800)}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
@@ -323,7 +317,7 @@ async function loadDB(){
     if(sf.sha===loadDB.sha)return;
     try{const s=JSON.parse(await file("summary.json"));
       council=s.council||[];model=s.model||null;lessons=s.lessons||[];audit=s.audit||[];combos=s.combos||[];storage=s.storage||null;
-      summaryKV=s.kv||{};members=s.members||{};loadDB.sha=sf.sha;dbNote="";return}
+      summaryKV=s.kv||{};members=s.members||{};account=s.account||null;loadDB.sha=sf.sha;dbNote="";return}
     catch(e){/* fall back to the full database below */}
   }
   const f=(list||[]).find(x=>x.name==="bot.sqlite.gz")||(list||[]).find(x=>x.name==="bot.sqlite");
@@ -527,7 +521,7 @@ function ynTiles(sym){const L=live[activeKey(sym)]||{},yes=L.market?dollars(L.ma
 function spotLine(sym){const c=COINS.find(x=>x.sym===sym),f=v=>v==null?"–":"$"+(+v).toLocaleString(undefined,{minimumFractionDigits:c.dp,maximumFractionDigits:c.dp});
   return f(live[sym].spot)+" / "+f(strikeOf(activeKey(sym)))}
 function settleLine(sym){const L=live[activeKey(sym)];return L&&L.close?closeLabel(L)+" · in "+countdown(activeKey(sym)):"–"}
-function kpis(){const s=statsOf(bets),br=+(vars.BANKROLL||1000),open=s.open.reduce((a,b)=>a+(b.stake||0),0);
+function kpis(){const s=statsOf(bets),br=account&&account.bankroll?+account.bankroll:500,open=s.open.reduce((a,b)=>a+(b.stake||0),0);
   const today=graded(bets).filter(b=>(b.exitTs||b.ts)>=new Date().setHours(0,0,0,0)).reduce((a,b)=>a+b.pnl,0);
   return`<section class="grid2">
     <div class="tile"><small>Total P/L</small><b class="num ${cls(s.total)}">${smoney(s.total)}</b><em>Today ${smoney(today)}</em></div>
@@ -648,6 +642,7 @@ function screenSettings(){
     `<div style="display:flex;gap:8px"><button class="btn primary" style="flex:1" data-act="run">Run now</button><button class="btn" style="flex:1" data-act="train">Retrain model</button></div>`+
     `<section class="card list"><div class="cardhead"><h2>Recent runs</h2></div>${runsCache.map(r=>{const lv=r.status!=="completed",word=lv?(r.status==="queued"?"Queued":"Running"):({success:"Done",failure:"Failed",cancelled:"Stopped"}[r.conclusion]||r.conclusion);
       return`<div class="row" style="min-height:52px"><span class="dot ${!lv&&r.conclusion==="failure"?"off":""}"></span><span class="rowmain"><b><a href="${esc(r.html_url)}" target="_blank" rel="noopener" style="color:inherit">${esc(r.name)} #${r.run_number}</a></b><small>${word} · ${ago(Date.parse(r.created_at))}</small></span>${lv?`<button class="btn small" data-act="stop" data-v="${r.id}">Stop</button>`:""}</div>`}).join("")||`<p class="empty">${demo?"Connect a token to see runs.":"No runs yet."}</p>`}</section>`+
+    accountCard()+
     `<section class="card"><h2>Trading settings</h2>${SETTINGS.map(s=>{let val=vars[s.name]??"";if(s.pct&&val!==""&&+val<=1)val=String(+(+val*100).toFixed(4));
       if(s.type==="select"){const cur=val||s.def;return`<label class="field">${s.label}<select data-var="${s.name}">${s.opts.map(o=>`<option${o===cur?" selected":""}>${o}</option>`).join("")}</select></label>`}
       return`<label class="field">${s.label}<input data-var="${s.name}" ${s.type==="text"?'type="text" autocapitalize="off"':'type="number" inputmode="decimal" step="any"'} value="${esc(val)}" placeholder="${s.def?"Default "+s.def:"Off"}"></label>`}).join("")}
@@ -657,6 +652,14 @@ function screenSettings(){
     (dbNote?`<p class="note">${esc(dbNote)}</p>`:"")+
     `<button class="btn" data-act="logout">${demo?"Connect a token":"Disconnect this phone"}</button>`;
 }
+function accountCard(){ // pinned in the bot's workflow; shown here, not edited
+  const a=account;if(!a)return"";
+  const rows=[["Bankroll",money(a.bankroll)],["Bet size",money(a.min_per_bet)+" – "+money(a.max_per_bet)],
+    ["Crypto bets",`Up to ${a.crypto_max_trades_per_hour} an hour`],
+    ["Max money in open bets",money(a.max_open_cost)],["Stops after losing",money(a.max_total_loss)],
+    ["Style",String(a.aggression_level||"–").replace(/^./,c=>c.toUpperCase())],
+    ["Stats since",a.stats_since?when(a.stats_since*1000):"The start"]];
+  return`<section class="card" style="gap:0"><div class="cardhead"><h2>Account limits</h2><span class="pill">Set by the bot</span></div>${rows.map(r=>`<div class="kv"><span>${r[0]}</span><b class="num">${esc(r[1])}</b></div>`).join("")}</section>`}
 function customizeSheet(){
   const leagues=[...new Set(bets.filter(b=>!b.coin).map(b=>b.league))].sort();
   return`<div class="sheetbg" data-act="closeSheet"><div class="sheet" role="dialog" aria-label="Customize sports" data-stop="1">

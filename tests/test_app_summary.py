@@ -79,6 +79,13 @@ class TestAppSummary(unittest.TestCase):
         self.assertIn('data-live="yn:', html)                    # Yes/No prices follow the shown slide
         self.assertIn("Swipe for ladders", html)
 
+    def test_pinned_risk_limits_are_shown_not_edited(self):
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        for pinned in ("BANKROLL", "MAX_PER_BET", "MAX_OPEN_COST", "DAILY_LOSS_LIMIT"):
+            self.assertNotIn(f'{{name:"{pinned}"', html)       # the bot ignores repo variables for these
+        self.assertIn("account=s.account||null", html)           # read from summary.json
+        self.assertIn("function accountCard()", html)
+
     def test_bets_csv_carries_compact_signals_for_bet_details(self):
         self.st.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,stake,fee,
                      status,signals_json) VALUES(1,'paper','KXBTC15M-X','E','KXBTC15M','yes',0.5,1,0.5,0,'open',?)""",
