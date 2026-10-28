@@ -236,7 +236,7 @@ const $=id=>document.getElementById(id);
 const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
 let cfg=null;try{cfg=JSON.parse(localStorage.getItem("kbot")||"null")}catch(e){}
 let demo=false, vars={}, wfState=null, runsCache=[], bets=[], sample=false, briefing="", report="";
-let account=null, winReport=null, playbook=null, edgeRep=null, timingRep=null, lagRep=null, sigReport=[], council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
+let account=null, winReport=null, playbook=null, edgeRep=null, timingRep=null, lagRep=null, onlineRep=null, sigReport=[], council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
 
 function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),2800)}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
@@ -363,7 +363,7 @@ async function loadDB(){
     if(sf.sha===loadDB.sha)return;
     try{const s=JSON.parse(await file("summary.json"));
       council=s.council||[];model=s.model||null;lessons=s.lessons||[];audit=s.audit||[];combos=s.combos||[];storage=s.storage||null;
-      summaryKV=s.kv||{};members=s.members||{};account=s.account||null;sigReport=s.signals||[];winReport=s.windows&&s.windows.stats?s.windows:null;playbook=s.playbook&&s.playbook.min_windows?s.playbook:null;edgeRep=s.edge&&s.edge.windows!=null?s.edge:null;timingRep=s.entry_timing&&s.entry_timing.buckets?s.entry_timing:null;lagRep=s.lead_lag&&s.lead_lag.events!=null?s.lead_lag:null;loadDB.sha=sf.sha;dbNote="";return}
+      summaryKV=s.kv||{};members=s.members||{};account=s.account||null;sigReport=s.signals||[];winReport=s.windows&&s.windows.stats?s.windows:null;playbook=s.playbook&&s.playbook.min_windows?s.playbook:null;edgeRep=s.edge&&s.edge.windows!=null?s.edge:null;timingRep=s.entry_timing&&s.entry_timing.buckets?s.entry_timing:null;lagRep=s.lead_lag&&s.lead_lag.events!=null?s.lead_lag:null;onlineRep=s.online&&s.online.online?s.online:null;loadDB.sha=sf.sha;dbNote="";return}
     catch(e){/* fall back to the full database below */}
   }
   const f=(list||[]).find(x=>x.name==="bot.sqlite.gz")||(list||[]).find(x=>x.name==="bot.sqlite");
@@ -627,7 +627,7 @@ function screenInsights(){
       ${I.cal.map(r=>`<div class="cal"><span class="muted">${r.l}</span><span class="track"><i style="width:${Math.round(r.won*100)}%"></i><u style="left:calc(${Math.round(r.said*100)}% - 1px)"></u></span><b class="num">${Math.round(r.won*100)}% <span class="muted" style="font-weight:500">of ${r.n}</span></b></div>`).join("")}</section>`+
     `<section class="card"><h2>P/L by time of day</h2><div class="bars hours">${I.hours.map(v=>`<div class="bar"><div class="u"><i style="height:${v>0?Math.round(v/mx*38):0}px"></i></div><div class="d"><i style="height:${v<0?Math.round(-v/mx*38):0}px"></i></div></div>`).join("")}</div>
       <div class="hourlab">${["12a","2a","4a","6a","8a","10a","12p","2p","4p","6p","8p","10p"].map(h=>`<span>${h}</span>`).join("")}</div></section>`+
-    readsCard(sym)+(sym?"":edgeCard()+lagCard()+timingCard()+playbookCard()+reportCard())+
+    readsCard(sym)+(sym?"":edgeCard()+scoreCard()+lagCard()+timingCard()+playbookCard()+reportCard())+
     `<section class="card" style="gap:0"><div class="cardhead"><h2>Edge check</h2></div>
       <div class="kv"><span>Avg edge on winners</span><b class="num">${pts(I.edgeW)}</b></div>
       <div class="kv"><span>Avg edge on losers</span><b class="num">${pts(I.edgeL)}</b></div>
@@ -658,6 +658,15 @@ function edgeCard(){ // does the bot's forecast beat Kalshi's price, and how muc
     <div class="kv"><span>Share of its disagreement it bets on</span><b class="num">${e.on?Math.round(e.share*100)+"%":"All (calibration off)"}</b></div>
     <div class="kv"><span>Read</span><b>${better?"Beating Kalshi’s price":worse?"Behind Kalshi’s price":"Level with Kalshi’s price"}</b></div>
     <small class="note" style="margin-top:8px">Lower error is better. Until the bot clearly beats Kalshi’s own price it bets only on the part of its disagreement that has held up, so it bets less often. That share grows as it proves itself.</small></section>`}
+function scoreCard(){ // running out-of-sample scoreboard: each window predicted before it is learned from (summary.json "online")
+  const o=sample?{min_windows:30,online:{windows:1041,mine_logloss:.6264,kalshi_logloss:.6262,z:-.04,drift:{alarm:true,gain_per_window:-.031,vs_before_z:-2.76}},bot:{windows:266,mine_logloss:.5806,kalshi_logloss:.5768,z:-.61,drift:{alarm:false,gain_per_window:.0008,vs_before_z:.9}}}:onlineRep;
+  if(!o)return"";
+  const row=(label,r)=>!r||!r.kalshi_logloss?`<div class="kv"><span>${label}</span><b class="num">${r&&r.windows?plural(r.windows,"window")+" · learning":"–"}</b></div>`
+    :`<div class="kv"><span>${label} <small class="muted">· ${plural(r.windows,"window")}</small></span><b class="num ${r.z>=2?"up":r.z<=-2?"down":""}">${r.mine_logloss.toFixed(3)} vs ${r.kalshi_logloss.toFixed(3)} · ${r.z==null?"–":(r.z>=0?"+":"−")+Math.abs(r.z).toFixed(1)+" se"}</b></div>`
+    +(r.drift&&r.drift.alarm?`<div class="kv"><span>Recent ${r.drift.windows} windows</span><b class="down">Doing worse than before</b></div>`:"");
+  return`<section class="card" style="gap:0"><div class="cardhead"><h2>Running scoreboard</h2><small class="muted">predicted before it learns</small></div>
+    ${row("Learning model vs Kalshi",o.online)}${row("Bot’s forecast vs Kalshi",o.bot)}
+    <small class="note" style="margin-top:8px">Lower error is better, and the last number is how many standard errors apart they are; beyond ±2 is a real difference. Each settled window is scored first and learned from after, so there is no look-back flattery. A warning means the last 100 windows are doing worse than the ones before: the market may have shifted.</small></section>`}
 function lagCard(){ // does Kalshi lag a jump in the spot price, and did buying into it pay? (summary.json "lead_lag")
   const l=sample?{events:84,settled:61,mean_pnl:.012,z:.6,follow:{"2":{slope:.31,n:84},"5":{slope:.52,n:84},"10":{slope:.71,n:84},"30":{slope:.93,n:80}}}:lagRep;
   if(!l)return"";
