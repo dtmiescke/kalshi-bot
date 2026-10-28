@@ -12,7 +12,7 @@ For one contract at one moment it produces:
 import math
 import time
 
-from . import features, marketdata, ml, vol as volmod
+from . import features, marketdata, ml, token_data, vol as volmod
 from .live import settlement
 from .signals import implied_vol as iv
 from .signals.base import Reading, clamp
@@ -177,7 +177,8 @@ def coin_from_series(series):
 
 
 def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=None,
-             spot=None, dvol_fetch=None, with_context=True, log_row=True, context=None):
+             spot=None, dvol_fetch=None, with_context=True, log_row=True, context=None,
+             kalshi_stats=None):
     """Returns (readings, info). candles: 1-minute OHLCV, oldest first."""
     now = now or time.time()
     coin = COIN_OF_SERIES.get(series) or coin_from_series(series)
@@ -288,6 +289,8 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
 
     feats = features.build(candles[-300:], terms["strike"], secs, kalshi_bid, kalshi_ask,
                            vol_per_min=None, now_ts=int(now), avg_seconds=terms["avg_seconds"])
+    if feats:   # token, liquidity and volume facts join the chart indicators as model inputs
+        feats.update(token_data.token_features(ctx, candles, kalshi_stats))
     # the trained model only knows 15-minute windows: never let it price an
     # hourly or daily contract it has never seen, and don't mix those rows in
     if feats and is_15m:
@@ -296,8 +299,11 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
             gain = max(0.0, 1 - meta["test_logloss_model"] / meta["test_logloss_kalshi"])
             readings.append(Reading("ml_model", clamp(pm, 0.02, 0.98), clamp(0.5 + gain * 20, 0.5, 0.95),
                                     {"trained": meta.get("trained"), "test_gain": round(gain, 4)}))
-        if log_row and 2 * 60 <= secs <= 13 * 60:
-            # one row per contract per minute; context saved for future model versions
+        if log_row and 2 * 60 <= secs <= 15 * 60:
+            # one row per contract per minute across the whole window, so a chart's
+            # first minutes teach the model too (live trading still starts at 13 min
+            # left, and sim_trades ignores rows from before that);
+            # context saved for future model versions
             row = dict(feats)
             row.update({f"ctx_{k}": v for k, v in info["context"].items()
                         if isinstance(v, (int, float)) and v is not None})

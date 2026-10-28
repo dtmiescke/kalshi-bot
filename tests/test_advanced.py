@@ -35,7 +35,9 @@ class TestFeatures(unittest.TestCase):
         scaled = [{k: (v * 0.5 if k in ("open", "high", "low", "close") else v)
                    for k, v in x.items()} for x in c]
         f2 = features.build(scaled, c[-1]["close"] * 0.5005, 400, 0.4, 0.42)
-        self.assertEqual(sorted(f1), features.names())
+        from bot import token_data
+        # chart indicators from build(), then the token/liquidity/volume inputs added at research time
+        self.assertEqual(sorted(f1) + list(token_data.FEATURE_NAMES), features.names())
         for k in ("dist_sigma", "rsi_1m", "macd_hist", "bb_pctb", "ret_5m"):
             self.assertAlmostEqual(f1[k], f2[k], places=4)   # same meaning at any price
         self.assertTrue(all(math.isfinite(v) for v in f1.values()))

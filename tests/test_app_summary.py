@@ -118,6 +118,13 @@ class TestAppSummary(unittest.TestCase):
         self.assertNotIn('document.addEventListener("touchmove"', html)  # page scrolling never waits on JS
         self.assertIn("if(el._scrubbing)return;", html)                # the chart holds still while being read
 
+    def test_insights_shows_each_window_read_and_its_result(self):
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("function readsCard(sym)", html)
+        self.assertIn("winReport=s.windows&&s.windows.stats?s.windows:null", html)    # from summary.json
+        self.assertIn("Chart reads", html)
+        self.assertIn("readsCard(sym)+(sym?\"\":reportCard())", html)                # on the overall and per-coin pages
+
     def test_bets_csv_carries_compact_signals_for_bet_details(self):
         self.st.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,stake,fee,
                      status,signals_json) VALUES(1,'paper','KXBTC15M-X','E','KXBTC15M','yes',0.5,1,0.5,0,'open',?)""",

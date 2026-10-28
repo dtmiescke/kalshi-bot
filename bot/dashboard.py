@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from . import brain, guard
+from . import window_review
 from .storage import stats_since
 
 E = html.escape
@@ -429,6 +430,7 @@ def summary(store):
         "kv": {k: v for k, v in kv.items() if v is not None},
         "storage": storage_report(store),
         "signals": _safe(signal_report, store),
+        "windows": _safe(window_review.report, store),
         "account": account,
     }
 

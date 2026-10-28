@@ -19,7 +19,7 @@ import subprocess
 import shlex
 import time
 
-from .. import alerts, brain, briefing, council, crypto_brain, fees, guard, ml, risk
+from .. import alerts, brain, briefing, council, crypto_brain, fees, guard, ml, risk, token_data, window_review
 from .. import marketdata, vol as volmod
 from ..engine import Engine
 from ..grader import grade
@@ -81,6 +81,7 @@ class LiveRunner:
         self.seed_candles = {}    # series -> Coinbase 1-minute candles (OHLCV)
         self.makers = {}          # ticker -> resting maker order
         self.last_prob = {}       # ticker -> latest blended model probability (for the app)
+        self.window_read = set()  # tickers whose opening read is already recorded
         # A prior process may have died after Kalshi accepted a resting order.
         # Do not resume trading until that exchange state is reconciled manually.
         prior_maker = self.store.get_kv("maker_recovery")
@@ -329,7 +330,8 @@ class LiveRunner:
             self.store, ticker, info["series"], terms, candles, best_yes_bid, best_yes_ask,
             now=now, spot=spot, dvol_fetch=lambda c: None,   # cache only; refreshed in background
             with_context=False, log_row=True,
-            context=self.ctx_cache.get(info["series"], {}) if self.with_context else {})
+            context=self.ctx_cache.get(info["series"], {}) if self.with_context else {},
+            kalshi_stats=token_data.kalshi_liquidity(info.get("raw"), book))
         if not readings:
             return None, None
         # Kalshi's public trade tape is anonymous, but reveals which outcome
@@ -360,7 +362,7 @@ class LiveRunner:
                    "kalshi_yes_bid": best_yes_bid, "kalshi_yes_ask": best_yes_ask,
                    "kalshi_book_age_s": round(book.age() if book.age() is not None else 99, 2),
                    "spot": spot_summary, "chart_setups": chart_setups, "multi_timeframe": multi_timeframe, "price_discovery": price_discovery, "market_context": rinfo.get("context", {}),
-                   "vol_forecast_per_min": rinfo.get("sigma"),
+                   "vol_forecast_per_min": rinfo.get("sigma"), "features": feats,
                    "indicators": {k: round(v, 3) for k, v in feats.items()
                                   if k in ("rsi_1m", "rsi_5m", "rsi_15m", "macd_hist", "bb_pctb",
                                            "adx_1m", "vwap_dist", "ret_5m", "ret_15m",
@@ -432,6 +434,16 @@ class LiveRunner:
                 continue
             self.store.set_kv(f"start_{ticker}", close_ts)
             self.store.set_kv(f"settle_after_{ticker}", close_ts + 300)
+            # The first read of a new chart: everything the bot can see, written down once
+            # and later matched with what really happened (bot/window_review.py).
+            if ticker not in self.window_read and 11.0 <= (close_ts - now) / 60 <= 15.1:
+                try:
+                    if window_review.record_open(self.store, ticker, info, terms, now, readings, ctx, weights):
+                        log.info("window read %s", ticker)
+                    self.window_read.add(ticker)
+                except Exception as exc:
+                    log.warning("window read %s failed: %s", ticker, exc)
+                    self.window_read.add(ticker)
             # Keep one research snapshot every 30s. The grader scores only the
             # canonical pre-close decision cutoff, preventing per-second samples
             # from inflating the learning set. Research rows never place orders.
@@ -960,6 +972,8 @@ class LiveRunner:
                     a = self.coins[series]
                     cbp = a.other_prices.get("coinbase", (0, None))[1]
                     self.ctx_cache[series] = marketdata.context(self.store, coin, coinbase_price=cbp, include_spot_15m=True)
+                    # token facts: market cap, volume, day range, stablecoin supply (cached, failure-tolerant)
+                    self.ctx_cache[series]["token"] = token_data.coin_snapshot(self.store, coin)
                 if cur:
                     iv.cached_dvol(self.store, cur, fetch=self.dvol_fetch)
             except Exception as e:
