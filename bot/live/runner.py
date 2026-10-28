@@ -975,6 +975,12 @@ class LiveRunner:
         await asyncio.to_thread(self.refresh_context)
         by_kraken = {kr: self.coins[s] for s, (kr, _, _) in COINS.items()}
         by_cb = {cb: self.coins[s] for s, (_, cb, _) in COINS.items() if cb}
+        # More CF Benchmarks constituent venues for the composite (BNB isn't listed on either).
+        extra = os.environ.get("EXTRA_SPOT_FEEDS", "yes") == "yes"
+        by_bitstamp = {cb.split("-")[0].lower() + "usd": self.coins[s]
+                       for s, (_, cb, _) in COINS.items() if cb and extra}
+        by_gemini = {cb.replace("-", ""): self.coins[s] for s, (_, cb, _) in COINS.items() if cb and extra}
+        gemini_books = feeds.GeminiBooks()
         tasks = [
             asyncio.create_task(feeds.run_feed(
                 "kraken", feeds.KRAKEN_WS, lambda: feeds.kraken_subs(list(by_kraken)),
@@ -984,6 +990,16 @@ class LiveRunner:
                 "coinbase", feeds.COINBASE_WS, lambda: feeds.coinbase_subs(list(by_cb)),
                 lambda m: feeds.handle_coinbase(m, by_cb), lambda: None, stop)),
         ]
+        if by_bitstamp:
+            tasks.append(asyncio.create_task(feeds.run_feed(
+                "bitstamp", feeds.BITSTAMP_WS, lambda: feeds.bitstamp_subs(list(by_bitstamp)),
+                lambda m: feeds.handle_bitstamp(m, by_bitstamp), lambda: None, stop)))
+        if by_gemini:
+            def gemini_gap():
+                gemini_books.books.clear()   # a reconnect resends the full book
+            tasks.append(asyncio.create_task(feeds.run_feed(
+                "gemini", feeds.GEMINI_WS, lambda: feeds.gemini_subs(list(by_gemini)),
+                lambda m: feeds.handle_gemini(m, by_gemini, gemini_books), gemini_gap, stop)))
         data_kid, data_pem = self.s.data_key()
         use_ws = bool(data_kid and data_pem)
         kalshi_task = None

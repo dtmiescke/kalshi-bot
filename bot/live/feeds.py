@@ -2,6 +2,10 @@
 
 - Kraken (public): Level-2 book (100 levels) + every executed trade
 - Coinbase (public): ticker, used for the multi-exchange composite price
+- Bitstamp, Gemini (public): top of book, also in the composite. Kalshi settles
+  15-minute markets on CF Benchmarks' Real-Time Indices, built from several
+  constituent exchanges (these four among them), so a median across them
+  tracks the settlement price better than any one venue.
 - Kalshi (needs your free API key): contract order-book changes
 
 Parsing is kept in small pure functions (handle_*) so it can be tested
@@ -18,6 +22,8 @@ log = logging.getLogger("bot.live")
 
 KRAKEN_WS = "wss://ws.kraken.com/v2"
 COINBASE_WS = "wss://ws-feed.exchange.coinbase.com"
+BITSTAMP_WS = "wss://ws.bitstamp.net"
+GEMINI_WS = "wss://api.gemini.com/v2/marketdata"
 KALSHI_WS = {"demo": "wss://demo-api.kalshi.co/trade-api/ws/v2",
              "production": "wss://api.elections.kalshi.com/trade-api/ws/v2"}
 
@@ -72,6 +78,69 @@ def handle_coinbase(msg, analytics_by_product):
         a.add_reference("coinbase", _ts(msg.get("time")), msg["price"])
     elif msg.get("type") in ("match", "last_match") and msg.get("price"):
         a.add_cb_trade(_ts(msg.get("time")), msg["price"], msg.get("size", 0))
+
+
+def handle_bitstamp(msg, analytics_by_pair):
+    """Bitstamp order_book_<pair> snapshot (top 100 levels) -> mid as a reference price."""
+    ch = str(msg.get("channel") or "")
+    if msg.get("event") != "data" or not ch.startswith("order_book_"):
+        return
+    a = analytics_by_pair.get(ch[len("order_book_"):])
+    d = msg.get("data") or {}
+    try:
+        bid, ask = float(d["bids"][0][0]), float(d["asks"][0][0])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return
+    if a and 0 < bid < ask:
+        ts = int(d.get("microtimestamp") or 0) / 1e6 or time.time()
+        a.add_reference("bitstamp", ts, (bid + ask) / 2)
+
+
+class GeminiBooks:
+    """Gemini's l2 feed sends a full book, then level changes (~50/s for BTC).
+    Keep each side as {price: qty} and track the best level incrementally;
+    rescan a side only when its best level is removed."""
+
+    def __init__(self):
+        self.books = {}      # symbol -> {"buy": {}, "sell": {}, "best": {"buy": p, "sell": p}}
+        self.last_emit = {}
+
+    def apply(self, symbol, changes):
+        b = self.books.setdefault(symbol, {"buy": {}, "sell": {}, "best": {"buy": None, "sell": None}})
+        for side, price, qty in changes:
+            if side not in ("buy", "sell"):
+                continue
+            px, q = float(price), float(qty)
+            levels, best = b[side], b["best"][side]
+            better = (lambda x, y: x > y) if side == "buy" else (lambda x, y: x < y)
+            if q > 0:
+                levels[px] = q
+                if best is None or better(px, best):
+                    b["best"][side] = px
+            else:
+                levels.pop(px, None)
+                if px == best:
+                    b["best"][side] = (max(levels) if side == "buy" else min(levels)) if levels else None
+        bid, ask = b["best"]["buy"], b["best"]["sell"]
+        return (bid + ask) / 2 if bid and ask and bid < ask else None
+
+
+def handle_gemini(msg, analytics_by_symbol, books, now=None, every=0.25):
+    """Gemini v2 l2_updates -> top-of-book mid as a reference price (throttled)."""
+    if msg.get("type") != "l2_updates":
+        return
+    sym = msg.get("symbol")
+    a = analytics_by_symbol.get(sym)
+    if not a:
+        return
+    try:
+        mid = books.apply(sym, msg.get("changes") or [])
+    except (TypeError, ValueError):
+        return
+    now = time.time() if now is None else now
+    if mid and now - books.last_emit.get(sym, 0) >= every:
+        books.last_emit[sym] = now
+        a.add_reference("gemini", now, mid)
 
 
 def handle_kalshi(msg, books, ticker_updates=None, ticker_update_history=None):
@@ -159,6 +228,14 @@ def kraken_subs(symbols, depth=100):
 
 def coinbase_subs(products):
     return [{"type": "subscribe", "product_ids": products, "channels": ["ticker", "matches"]}]
+
+
+def bitstamp_subs(pairs):
+    return [{"event": "bts:subscribe", "data": {"channel": f"order_book_{p}"}} for p in pairs]
+
+
+def gemini_subs(symbols):
+    return [{"type": "subscribe", "subscriptions": [{"name": "l2", "symbols": list(symbols)}]}]
 
 
 def kalshi_subs(tickers):
