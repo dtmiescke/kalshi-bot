@@ -241,6 +241,29 @@ SUMMARY_KV = ("janitors_last_result", "janitors_last_run", "nerd_last_health",
               "members_last_ruling", "don_theo_last", "sunday_sitdown", "odds_quota")
 
 
+def storage_report(store, top=12):
+    """Where the memory file's bytes go: the biggest tables and indexes (from
+    SQLite's dbstat; row counts if dbstat is unavailable) plus free pages a
+    VACUUM would reclaim. Lets a size problem be traced without downloading
+    the database."""
+    db = store.db
+    try:
+        page = db.execute("PRAGMA page_size").fetchone()[0]
+        pages = db.execute("PRAGMA page_count").fetchone()[0]
+        free = db.execute("PRAGMA freelist_count").fetchone()[0]
+    except Exception:
+        return {}
+    out = {"file_mb": round(page * pages / 1e6, 1), "free_mb": round(page * free / 1e6, 1)}
+    try:
+        rows = db.execute("""SELECT name, SUM(pgsize) FROM dbstat GROUP BY name
+                             ORDER BY 2 DESC LIMIT ?""", (top,)).fetchall()
+        out["tables_mb"] = {r[0]: round(r[1] / 1e6, 1) for r in rows}
+    except Exception:
+        names = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+        out["table_rows"] = {n: db.execute(f'SELECT COUNT(*) FROM "{n}"').fetchone()[0] for n in names}
+    return out
+
+
 def summary(store):
     """The small JSON the phone app reads instead of downloading the whole
     database (known problem 11). Same queries the app runs on the database, so
@@ -293,6 +316,7 @@ def summary(store):
                        FROM combo_prediction_audit WHERE outcome IS NOT NULL
                        GROUP BY leg_count ORDER BY leg_count"""),
         "kv": {k: v for k, v in kv.items() if v is not None},
+        "storage": storage_report(store),
     }
 
 
