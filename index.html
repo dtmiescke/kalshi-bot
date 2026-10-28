@@ -61,6 +61,17 @@ h2{margin:0;font-size:14px;font-weight:600}
 .chance span{font-size:14px;font-weight:600;color:var(--blue)}
 .chance i{font-style:normal;font-size:13px;font-weight:600}
 .chips{display:flex;gap:2px}
+.livecard{overflow:hidden}
+.slides{display:flex;gap:16px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;margin:0 -16px;padding:0 16px;scroll-padding:0 16px;overscroll-behavior-x:contain}
+.slides::-webkit-scrollbar{display:none}
+.slide{flex:0 0 100%;min-width:0;scroll-snap-align:start;scroll-snap-stop:always;display:flex;flex-direction:column;gap:8px}
+.slidetag{display:flex;gap:6px;align-items:center;font-size:12px;font-weight:600;color:var(--muted)}
+.slidetag b{font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text)}
+.dots{display:flex;justify-content:center;align-items:center;gap:2px;margin-top:-2px}
+.dots button{border:0;background:none;padding:0;height:24px;min-width:18px;display:flex;align-items:center;justify-content:center}
+.dots button::after{content:"";width:6px;height:6px;border-radius:3px;background:var(--line);transition:width .2s}
+.dots button[aria-current="true"]::after{width:18px;background:var(--text)}
+.dots small{font-size:11px;color:var(--muted2);margin-left:6px}
 .chip{border:0;background:transparent;color:var(--muted);font-size:12px;font-weight:700;height:32px;padding:0 10px;border-radius:7px}
 .chip[aria-pressed="true"]{background:var(--text);color:var(--card)}
 .seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:4px;background:var(--seg);border-radius:10px;padding:3px}
@@ -165,6 +176,8 @@ const COINS=[
   {sym:"SOL",name:"Solana",series:"KXSOL15M",cb:"SOL-USD",dp:2},
   {sym:"BNB",name:"BNB",series:"KXBNB15M",kraken:"BNBUSD",dp:2},
 ];
+// Each coin's ladder series ("price on <date>?"): swiped to after the 15-minute chart.
+const LADDER={BTC:"KXBTCD",ETH:"KXETHD",SOL:"KXSOLD",BNB:"KXBNBD"};
 const SETTINGS=[
   {name:"AGGRESSION_LEVEL",label:"Paper trading aggression",type:"select",opts:["off","conservative","balanced","aggressive","adaptive"],def:"aggressive"},
   {name:"FIXED_BET",label:"Fixed bet ($, blank = auto sizing)",type:"number"},
@@ -335,8 +348,14 @@ async function loadDB(){
 
 /* ================= live Kalshi markets (relay) + spot prices ================= */
 const feedBase=()=>(vars.APP_FEED_URL||FEED_DEFAULT).replace(/\/$/,"");
-const live={}; // sym -> {market, ticker, strike, close, open, pts:[{t,p}], spot, spotTs, err}
-COINS.forEach(c=>live[c.sym]={pts:[]});
+// key -> {market, ticker, strike, close, open, pts:[{t,p}], spot, spotTs, err}. The 15-minute
+// market's key is the coin ("BTC"); ladder markets are "BTC:<ticker>", listed in ladders[sym].
+const live={},ladders={},ladderAt={},slideAt={};
+COINS.forEach(c=>live[c.sym]={pts:[],series:c.series,kind:"15m"});
+const coinFor=k=>COINS.find(c=>c.sym===k.split(":")[0]);
+const slideKeys=sym=>[sym,...(ladders[sym]||[]).filter(k=>live[k])];
+const activeKey=sym=>{const ks=slideKeys(sym);return ks[Math.min(slideAt[sym]||0,ks.length-1)]};
+const heldBet=k=>live[k]&&live[k].ticker&&bets.find(b=>b.status==="open"&&b.ticker===live[k].ticker);
 function dollars(v){const n=parseFloat(v);return isFinite(n)?n:null}
 function midOf(m){const b=dollars(m.yes_bid_dollars),a=dollars(m.yes_ask_dollars),l=dollars(m.last_price_dollars);
   if(b!=null&&a!=null&&a>0)return (b+a)/2;return l}
@@ -350,41 +369,59 @@ async function discover(c){
     const changed=L.ticker!==m.ticker;
     Object.assign(L,{market:m,ticker:m.ticker,strike:m.floor_strike??m.cap_strike,close:Date.parse(m.close_time),open:Date.parse(m.open_time),err:null});
     const mid=midOf(m);
-    if(changed){L.pts=[];L.histTries=0;await loadHistory(c)}
+    if(changed){L.pts=[];L.histTries=0;await loadHistory(c.sym)}
     if(mid!=null)push(c.sym,mid);
     if(changed)subscribe();
   }catch(e){L.err="Live market data unavailable ("+e.message+")"}
 }
-async function loadHistory(c){
-  const L=live[c.sym];if(!L.ticker)return;
-  const end=Math.floor(Date.now()/1000),start=Math.floor((L.open||Date.now()-900000)/1000)-60;
-  try{const d=await feedJSON("/api/candles?series_ticker="+c.series+"&ticker="+encodeURIComponent(L.ticker)+"&start_ts="+start+"&end_ts="+end+"&period_interval=1");
+async function discoverLadder(c){ // next two ladder closes; per close the strike the bot holds, else the closest to 50%
+  const series=LADDER[c.sym];if(!series)return;ladderAt[c.sym]=Date.now();
+  try{
+    const d=await feedJSON("/api/ladder?series_ticker="+series),old=ladders[c.sym]||[],keys=[],dist=m=>Math.abs((midOf(m)??.5)-.5);
+    for(const g of (d.closes||[]).filter(g=>Date.parse(g.close_time)>Date.now()).slice(0,2)){
+      const ms=g.markets||[];if(!ms.length)continue;
+      const prev=old.map(k=>live[k]).find(L=>L&&L.market&&L.market.close_time===g.close_time);
+      const m=ms.find(m=>bets.some(b=>b.status==="open"&&b.ticker===m.ticker))||ms.find(m=>prev&&m.ticker===prev.ticker&&dist(m)<.35)||ms.slice().sort((a,b)=>dist(a)-dist(b))[0];
+      const key=c.sym+":"+m.ticker,L=live[key]||(live[key]={pts:[],series,kind:"ladder"});keys.push(key);
+      Object.assign(L,{market:m,ticker:m.ticker,strike:m.floor_strike??m.cap_strike,strikeType:m.strike_type,close:Date.parse(m.close_time),open:Date.parse(m.open_time),err:null});
+      if(!L.pts.length){L.histTries=0;await loadHistory(key)}
+      push(key,midOf(m));
+    }
+    old.filter(k=>!keys.includes(k)).forEach(k=>delete live[k]);
+    ladders[c.sym]=keys;
+    if(keys.join()!==old.join()){subscribe();if((route.page==="coin"&&route.sym===c.sym)||(route.page==="main"&&route.tab==="dash"&&ui.feat===c.sym))render()}
+  }catch(e){}
+}
+async function loadHistory(key){
+  const L=live[key];if(!L||!L.ticker)return;
+  const end=Math.floor(Date.now()/1000),start=Math.max(Math.floor((L.open||Date.now()-900000)/1000)-60,end-6*3600);
+  try{const d=await feedJSON("/api/candles?series_ticker="+L.series+"&ticker="+encodeURIComponent(L.ticker)+"&start_ts="+start+"&end_ts="+end+"&period_interval=1");
     const live=L.pts.filter(p=>p.t>end*1000-5000);
     L.pts=(d.candlesticks||[]).map(k=>{const p=k.price||{},yb=k.yes_bid||{},ya=k.yes_ask||{};
       const v=dollars(p.close_dollars)??((dollars(yb.close_dollars)!=null&&dollars(ya.close_dollars)!=null)?(dollars(yb.close_dollars)+dollars(ya.close_dollars))/2:null);
       return v==null?null:{t:k.end_period_ts*1000,p:v}}).filter(Boolean).concat(live);
   }catch(e){ // chart starts from live ticks; try the history again shortly
-    L.histTries=(L.histTries||0)+1;if(L.histTries<4)setTimeout(()=>loadHistory(c).then(scheduleLive),3000*L.histTries);
+    L.histTries=(L.histTries||0)+1;if(L.histTries<4)setTimeout(()=>loadHistory(key).then(scheduleLive),3000*L.histTries);
   }
 }
-function push(sym,p,t=Date.now()){const pts=live[sym].pts;if(p==null||!isFinite(p))return;
+function push(k,p,t=Date.now()){if(!live[k])return;const pts=live[k].pts;if(p==null||!isFinite(p))return;
   if(pts.length&&t-pts[pts.length-1].t<2000)pts[pts.length-1]={t,p};else pts.push({t,p});if(pts.length>600)pts.shift()}
 let ws=null,wsTimer=null,wsOK=false;
 function connectWS(){
   try{ws=new WebSocket(feedBase().replace(/^http/,"ws")+"/ws")}catch(e){return}
   ws.onopen=()=>{wsOK=true;subscribe()};
   ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}
-    if(m.type!=="ticker"||!m.msg)return;const t=m.msg.market_ticker;const c=COINS.find(c=>live[c.sym].ticker===t);if(!c)return;
+    if(m.type!=="ticker"||!m.msg)return;const t=m.msg.market_ticker;const k=Object.keys(live).find(k=>live[k].ticker===t);if(!k)return;const L=live[k];
     const b=m.msg.yes_bid_dollars!=null?dollars(m.msg.yes_bid_dollars):(m.msg.yes_bid!=null?m.msg.yes_bid/100:null);
     const a=m.msg.yes_ask_dollars!=null?dollars(m.msg.yes_ask_dollars):(m.msg.yes_ask!=null?m.msg.yes_ask/100:null);
     const p=(b!=null&&a!=null&&a>0)?(b+a)/2:(m.msg.price_dollars!=null?dollars(m.msg.price_dollars):(m.msg.price!=null?m.msg.price/100:null));
-    if(b!=null&&live[c.sym].market)live[c.sym].market.yes_bid_dollars=String(b);
-    if(a!=null&&live[c.sym].market)live[c.sym].market.yes_ask_dollars=String(a);
-    push(c.sym,p);scheduleLive()};
+    if(b!=null&&L.market){L.market.yes_bid_dollars=String(b);L.market.no_ask_dollars=String(1-b)}
+    if(a!=null&&L.market)L.market.yes_ask_dollars=String(a);
+    push(k,p);scheduleLive()};
   ws.onclose=()=>{wsOK=false;clearTimeout(wsTimer);wsTimer=setTimeout(connectWS,5000)};
   ws.onerror=()=>{try{ws.close()}catch(e){}};
 }
-function subscribe(){if(!ws||ws.readyState!==1)return;const t=COINS.map(c=>live[c.sym].ticker).filter(Boolean);if(!t.length)return;
+function subscribe(){if(!ws||ws.readyState!==1)return;const t=[...new Set(Object.values(live).map(L=>L.ticker).filter(Boolean))];if(!t.length)return;
   ws.send(JSON.stringify({id:Date.now()%100000,cmd:"subscribe",params:{channels:["ticker"],market_tickers:t}}))}
 async function spot(c){
   try{
@@ -393,8 +430,8 @@ async function spot(c){
     live[c.sym].spotTs=Date.now();
   }catch(e){}
 }
-function botModel(sym){ // the bot's latest blended probability for this coin's current market (LIVE.json)
-  const L=live[sym],d=liveSnap;if(!d||!d.markets)return null;
+function botModel(k){ // the bot's latest blended probability for this market (LIVE.json; 15-minute markets)
+  const L=live[k],d=liveSnap;if(!L||!d||!d.markets)return null;
   const m=L.ticker&&d.markets[L.ticker];const x=m&&m.model;if(!x||x.prob==null)return null;
   return{p:+x.prob,ts:(x.ts||d.ts)*1000};
 }
@@ -405,6 +442,8 @@ async function pollMarkets(){if(document.visibilityState!=="visible")return;
     if(!L.ticker||!L.close||Date.now()>L.close-1000)await discover(c);
     else if(!wsOK)await feedJSON("/api/market?ticker="+encodeURIComponent(L.ticker)).then(d=>{if(d.market){L.market=d.market;push(c.sym,midOf(d.market))}}).catch(()=>{});
   }
+  for(const c of COINS){const ks=ladders[c.sym]||[]; // ladders: every 5 min, at a close, or every 30 s while the stream is down
+    if(!ladderAt[c.sym]||Date.now()-ladderAt[c.sym]>(wsOK?300000:30000)||ks.some(k=>live[k]&&Date.now()>live[k].close-1000))await discoverLadder(c)}
   scheduleLive()}
 
 /* ================= charts (inline SVG) ================= */
@@ -450,24 +489,44 @@ $("tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(b)t
 function header(title,right=""){return`<div class="head"><div class="t"><h1>${title}</h1>${sample?'<span class="samplechip">Sample data</span>':""}</div>${right}</div>`}
 function detailHeader(title,right=""){return`<div class="head"><div class="t"><button class="back" data-act="back" aria-label="Back">${BACK}</button><h1 style="font-size:19px">${esc(title)}</h1></div>${right}</div>`}
 function botStatus(){const on=wfState==="active";return`<div style="display:flex;gap:8px;align-items:center"><span class="status"><span class="dot ${wfState&&!on?"off":""}"></span>${wfState?(on?"Bot running":"Bot paused"):"Look-around"}</span><span class="pill">${esc((vars.BOT_MODE||"paper").toUpperCase())}</span></div>`}
-function countdown(sym){const L=live[sym];if(!L.close)return"–";const s=Math.max(0,Math.round((L.close-Date.now())/1000));return Math.floor(s/60)+":"+String(s%60).padStart(2,"0")}
+function countdown(k){const L=live[k];if(!L||!L.close)return"–";const s=Math.max(0,Math.round((L.close-Date.now())/1000));
+  if(s>=86400)return Math.floor(s/86400)+"d "+Math.floor(s%86400/3600)+"h";
+  const h=Math.floor(s/3600),m=Math.floor(s%3600/60),ss=String(s%60).padStart(2,"0");return h?h+":"+String(m).padStart(2,"0")+":"+ss:m+":"+ss}
+function closeLabel(L){const d=new Date(L.close),today=d.toDateString()===new Date().toDateString();return(today?"":d.toLocaleDateString([],{weekday:"short"})+" ")+hm(L.close)}
+function strikeOf(k){const L=live[k];if(!L||L.strike==null)return null;
+  const f=String(L.strike).split(".")[1]||""; // Kalshi ladder "T83999.99" / "T104.4999" = $84,000 / $104.50 or above
+  return L.kind==="ladder"&&L.strikeType==="greater"&&/^9+$/.test(f)?+(+L.strike+Math.pow(10,-f.length)).toFixed(f.length):+L.strike}
 function liveCard(sym,opts={}){
-  const q=questionOf(sym);
+  const ks=slideKeys(sym),at=Math.min(slideAt[sym]||0,ks.length-1),h=opts.h||150;
   const chips=opts.chips?`<div class="chips" role="group" aria-label="Coin">${COINS.map(x=>`<button class="chip" data-act="feat" data-v="${x.sym}" aria-pressed="${x.sym===sym}">${x.sym}</button>`).join("")}</div>`:"";
-  return`<section class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="livebadge"><span class="dot live"></span>LIVE · closes in <span data-live="cd:${sym}" class="num">${countdown(sym)}</span></span>${chips}</div>
-    <span class="q" data-live="q:${sym}">${esc(q)}</span>
-    <div class="chance" data-live="ch:${sym}">${chanceLine(sym)}</div>
-    <div id="chart-${opts.key||sym}" data-live="chart:${sym}" data-h="${opts.h||150}" style="min-height:${opts.h||150}px"></div>
-    <div class="legend"><div class="keys"><span><i class="sw"></i>Market</span><span><i class="sw dash"></i>Bot</span></div>${opts.open?`<button class="link" data-act="coin" data-v="${sym}">Open market ›</button>`:`<span class="note" data-live="model:${sym}">${modelNote(sym)}</span>`}</div>
+  const slides=ks.map((k,i)=>{const L=live[k],lad=L.kind==="ladder",hb=heldBet(k);
+    return`<div class="slide" role="group" aria-roledescription="slide" aria-label="${lad?"Ladder":"15-minute"} market, ${i+1} of ${ks.length}">
+      <span class="slidetag"><b>${lad?"Ladder · "+closeLabel(L):"15-minute"}</b>closes in <span data-live="cd:${k}" class="num">${countdown(k)}</span></span>
+      <span class="q" data-live="q:${k}">${esc(questionOf(k))}</span>
+      <div class="chance" data-live="ch:${k}">${chanceLine(k)}</div>
+      <div data-live="chart:${k}" data-h="${h}" style="min-height:${h}px"></div>
+      <div class="legend"><div class="keys"><span><i class="sw"></i>Market</span>${lad?"":`<span><i class="sw dash"></i>Bot</span>`}${hb?`<span><i class="sw entry"></i>Your entry</span>`:""}</div>${opts.open?`<button class="link" data-act="coin" data-v="${sym}">Open market ›</button>`:`<span class="note" data-live="model:${k}">${modelNote(k)}</span>`}</div></div>`}).join("");
+  const dots=ks.length>1?`<div class="dots" role="group" aria-label="Markets">${ks.map((k,i)=>`<button data-act="slide" data-v="${sym}" data-i="${i}" aria-label="${i?"Ladder "+closeLabel(live[k]):"15-minute"}" aria-current="${i===at}"></button>`).join("")}<small>${at?"Ladder":"Swipe for ladders"}</small></div>`:"";
+  return`<section class="card livecard">
+    ${chips?`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="livebadge"><span class="dot live"></span>LIVE</span>${chips}</div>`:""}
+    <div class="slides" data-sym="${sym}">${slides}</div>${dots}
   </section>`;
 }
-function questionOf(sym){const c=COINS.find(x=>x.sym===sym),L=live[sym];
-  return L.market?`${c.name} above ${L.strike!=null?"$"+(+L.strike).toLocaleString(undefined,{maximumFractionDigits:c.dp}):"target"} at ${hm(L.close)}?`:(L.err||"Loading the live market…")}
-function chanceLine(sym){const L=live[sym],pts=L.pts;if(!pts.length)return`<b class="num">–</b><span>chance</span>`;
+function questionOf(k){const c=coinFor(k),L=live[k];if(!L)return"";
+  const v=strikeOf(k),money=v!=null?"$"+v.toLocaleString(undefined,{maximumFractionDigits:c.dp}):"target";
+  if(!L.market)return L.err||"Loading the live market…";
+  return L.kind==="ladder"?`${c.name} ${L.strikeType==="less"?money+" or below":money+" or above"} at ${closeLabel(L)}?`:`${c.name} above ${money} at ${hm(L.close)}?`}
+function chanceLine(k){const L=live[k],pts=L?L.pts:[];if(!pts.length)return`<b class="num">–</b><span>chance</span>`;
   const now=pts[pts.length-1].p,mv=Math.round((now-pts[0].p)*100);
   return`<b class="num">${Math.round(now*100)}%</b><span>chance</span>${pts.length>1?`<i class="${mv>=0?"up":"down"} num">${mv>=0?"▲":"▼"} ${Math.abs(mv)}</i>`:""}`}
-function modelNote(sym){const m=botModel(sym);return m?`Bot ${Math.round(m.p*100)}% · ${ago(m.ts)}`:"Bot line appears after its next cycle"}
+function modelNote(k){const L=live[k],hb=heldBet(k);
+  if(L&&L.kind==="ladder")return hb?`Holding ${hb.side} ×${hb.contracts??"?"} @ ${hb.price!=null?Math.round(hb.price*100)+"¢":"?"}`:"Bot forecasts the 15-minute market";
+  const m=botModel(k);return m?`Bot ${Math.round(m.p*100)}% · ${ago(m.ts)}`:"Bot line appears after its next cycle"}
+function ynTiles(sym){const L=live[activeKey(sym)]||{},yes=L.market?dollars(L.market.yes_ask_dollars):null,no=L.market?dollars(L.market.no_ask_dollars):null;
+  return`<div class="y"><span>Yes</span><b class="num">${yes==null?"–":Math.round(yes*100)+"¢"}</b></div><div class="n"><span>No</span><b class="num">${no==null?"–":Math.round(no*100)+"¢"}</b></div>`}
+function spotLine(sym){const c=COINS.find(x=>x.sym===sym),f=v=>v==null?"–":"$"+(+v).toLocaleString(undefined,{minimumFractionDigits:c.dp,maximumFractionDigits:c.dp});
+  return f(live[sym].spot)+" / "+f(strikeOf(activeKey(sym)))}
+function settleLine(sym){const L=live[activeKey(sym)];return L&&L.close?closeLabel(L)+" · in "+countdown(activeKey(sym)):"–"}
 function kpis(){const s=statsOf(bets),br=+(vars.BANKROLL||1000),open=s.open.reduce((a,b)=>a+(b.stake||0),0);
   const today=graded(bets).filter(b=>(b.exitTs||b.ts)>=new Date().setHours(0,0,0,0)).reduce((a,b)=>a+b.pnl,0);
   return`<section class="grid2">
@@ -497,31 +556,30 @@ function health(){
 
 function screenDash(){
   const sp=bets.filter(b=>!b.coin),ss=statsOf(sp);
-  return header("Dashboard",botStatus())+liveCard(ui.feat,{chips:true,open:true,key:"dash"})+kpis()+pnlCard()+coinRows()+
+  return header("Dashboard",botStatus())+liveCard(ui.feat,{chips:true,open:true})+kpis()+pnlCard()+coinRows()+
    (sp.length?`<button class="card" data-act="tab" data-v="sports" style="flex-direction:row;justify-content:space-between;align-items:center;text-align:left"><span class="rowmain"><b>Sports</b><small>${sp.length} bets placed · ${sp.filter(b=>b.prop).length} player props</small></span><span class="rowend num ${cls(ss.total)}">${smoney(ss.total)} ›</span></button>`:"")+health();
 }
 function screenCrypto(){
   return header("Crypto",botStatus())+COINS.map(c=>{const L=live[c.sym],list=bets.filter(b=>b.coin===c.sym),s=statsOf(list),m=botModel(c.sym),now=L.pts.length?L.pts[L.pts.length-1].p:null;
     const edge=m&&now!=null?Math.round((m.p-now)*100):null;
     return`<button class="card" data-act="coin" data-v="${c.sym}" data-sub="overview" style="text-align:left">
-      <span style="display:flex;justify-content:space-between;width:100%;font-size:12px" class="muted"><span><b style="color:var(--text)">${c.sym}</b> · 15-minute · closes in <span data-live="cd:${c.sym}" class="num">${countdown(c.sym)}</span></span><span class="num ${cls(s.total)}" style="font-weight:600">${smoney(s.total)} total</span></span>
+      <span style="display:flex;justify-content:space-between;width:100%;font-size:12px" class="muted"><span><b style="color:var(--text)">${c.sym}</b> · 15-minute · closes in <span data-live="cd:${c.sym}" class="num">${countdown(c.sym)}</span>${(ladders[c.sym]||[]).length?" · +"+ladders[c.sym].length+" ladder"+(ladders[c.sym].length>1?"s":""):""}</span><span class="num ${cls(s.total)}" style="font-weight:600">${smoney(s.total)} total</span></span>
       <span class="q" data-live="q:${c.sym}">${esc(questionOf(c.sym))}</span>
       <span style="display:flex;justify-content:space-between;align-items:center;width:100%"><span class="chance" data-live="ch:${c.sym}">${chanceLine(c.sym)}</span><small class="muted">${m?"Bot "+Math.round(m.p*100)+"% · edge <b class='"+(edge>=0?"up":"down")+"'>"+(edge>=0?"+":"−")+Math.abs(edge)+"</b>":""}</small></span>
       <span id="mini-${c.sym}" data-live="mini:${c.sym}" style="display:block;width:100%;height:44px"></span></button>`}).join("");
 }
 function screenCoin(){
   const sym=route.sym,c=COINS.find(x=>x.sym===sym),L=live[sym],list=bets.filter(b=>b.coin===sym),s=statsOf(list),m=botModel(sym);
-  const now=L.pts.length?L.pts[L.pts.length-1].p:null,yes=L.market?dollars(L.market.yes_ask_dollars):null,no=L.market?dollars(L.market.no_ask_dollars):null;
+  const now=L.pts.length?L.pts[L.pts.length-1].p:null;
   const tabs=[["overview","Overview"],["stats","Stats"],["bets","Bets"]];
   let body="";
   if(ui.coinTab==="overview"){
-    const fmt=v=>v==null?"–":"$"+(+v).toLocaleString(undefined,{minimumFractionDigits:c.dp,maximumFractionDigits:c.dp});
     const openBet=s.open[0];
     body=`<section class="card" style="gap:0"><div class="cardhead"><h2>Bot's view</h2><span class="pill">${openBet?"Holding "+openBet.side+" ×"+(openBet.contracts||""):"Watching"}</span></div>
       <div class="kv"><span>Bot model</span><b class="num" data-live="model:${sym}">${modelNote(sym)}</b></div>
       <div class="kv"><span>Edge vs market</span><b class="num ${m&&now!=null?cls(m.p-now):""}">${m&&now!=null?((m.p-now)>=0?"+":"−")+Math.abs(Math.round((m.p-now)*100))+" pts":"–"}</b></div>
-      <div class="kv"><span>Spot / target</span><b class="num" data-live="spot:${sym}">${fmt(L.spot)} / ${fmt(L.strike)}</b></div>
-      <div class="kv"><span>Settles</span><b class="num">${L.close?hm(L.close)+" · in "+countdown(sym):"–"}</b></div></section>`;
+      <div class="kv"><span>Spot / target</span><b class="num" data-live="spot:${sym}">${spotLine(sym)}</b></div>
+      <div class="kv"><span>Settles</span><b class="num" data-live="settle:${sym}">${settleLine(sym)}</b></div></section>`;
   }else if(ui.coinTab==="stats"){
     const days=dayPnl(list),mx=Math.max(...days.map(d=>Math.abs(d.v)))||1;
     body=`<section class="grid3">${[["P/L",smoney(s.total),cls(s.total)],["Win rate",pct(s.win),""],["Bets",String(s.count),""],["ROI",s.roi==null?"–":(s.roi>=0?"+":"−")+Math.abs(s.roi*100).toFixed(1)+"%",cls(s.roi||0)],["Avg edge",s.avgEdge==null?"–":"+"+(s.avgEdge*100).toFixed(1)+" pts",""],["Best bet",s.best==null?"–":smoney(s.best),cls(s.best||0)]]
@@ -532,8 +590,8 @@ function screenCoin(){
   }else{
     body=list.length?`<section class="card list">${list.map(betRow).join("")}</section>`:`<p class="empty">No ${sym} bets yet.</p>`;
   }
-  return detailHeader(c.name,`<span class="livebadge"><span class="dot live"></span>LIVE</span>`)+liveCard(sym,{key:"coin",h:170})+
-    `<section class="yn"><div class="y"><span>Yes</span><b class="num">${yes==null?"–":Math.round(yes*100)+"¢"}</b></div><div class="n"><span>No</span><b class="num">${no==null?"–":Math.round(no*100)+"¢"}</b></div></section>`+
+  return detailHeader(c.name,`<span class="livebadge"><span class="dot live"></span>LIVE</span>`)+liveCard(sym,{h:170})+
+    `<section class="yn" data-live="yn:${sym}">${ynTiles(sym)}</section>`+
     `<div class="seg" role="group" aria-label="Section">${tabs.map(t=>`<button data-act="coinTab" data-v="${t[0]}" aria-pressed="${t[0]===ui.coinTab}">${t[1]}</button>`).join("")}</div>`+body;
 }
 function betRow(b){const sport=!b.coin;
@@ -616,12 +674,22 @@ function render(scrollTop){
   document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-current",b.dataset.tab===route.tab?"page":"false"));
   $("sheetRoot").innerHTML=sheetOpen?customizeSheet():"";
   if(scrollTop)window.scrollTo(0,0);
+  document.querySelectorAll(".slides").forEach(el=>{const i=Math.min(slideAt[el.dataset.sym]||0,el.children.length-1);if(i>0)el.scrollLeft=i*slidePitch(el)});
   drawCharts();
 }
+const slidePitch=el=>(el.firstElementChild?el.firstElementChild.offsetWidth:el.clientWidth)+16;
+function showSlide(el,i,smooth){el.scrollTo({left:i*slidePitch(el),behavior:smooth&&!REDUCED?"smooth":"auto"})}
+document.addEventListener("scroll",e=>{const el=e.target;if(!el.classList||!el.classList.contains("slides"))return; // swipe between 15-minute and ladder charts
+  const sym=el.dataset.sym,i=Math.max(0,Math.min(el.children.length-1,Math.round(el.scrollLeft/slidePitch(el))));if((slideAt[sym]||0)===i)return;
+  slideAt[sym]=i;const card=el.closest(".livecard");
+  if(card){card.querySelectorAll(".dots button").forEach((b,j)=>b.setAttribute("aria-current",String(j===i)));const sm=card.querySelector(".dots small");if(sm)sm.textContent=i?"Ladder":"Swipe for ladders"}
+  scheduleLive()},true);
 function drawCharts(withStatic=true){
-  document.querySelectorAll('[data-live^="chart:"]').forEach(el=>{const sym=el.dataset.live.slice(6),L=live[sym],m=botModel(sym);
-    el.innerHTML=chanceSVG(L.pts,el.clientWidth||326,+el.dataset.h||150,{from:L.open,to:null,model:m?m.p:null})});
-  document.querySelectorAll('[data-live^="mini:"]').forEach(el=>{const L=live[el.dataset.live.slice(5)];el.innerHTML=lineSVG(L.pts.map(p=>p.p),el.clientWidth||326,44)});
+  document.querySelectorAll('[data-live^="chart:"]').forEach(el=>{const k=el.dataset.live.slice(6),L=live[k];if(!L)return;const m=botModel(k),hb=heldBet(k);
+    const from=L.kind==="ladder"?Math.max(L.open||0,Date.now()-6*3600e3):L.open;
+    el.innerHTML=chanceSVG(L.pts,el.clientWidth||326,+el.dataset.h||150,{from,to:null,model:L.kind==="ladder"||!m?null:m.p,
+      entry:hb&&hb.price!=null?(hb.side==="NO"?1-hb.price:hb.price):null,entryT:hb?hb.ts:null})});
+  document.querySelectorAll('[data-live^="mini:"]').forEach(el=>{const L=live[el.dataset.live.slice(5)];if(!L)return;el.innerHTML=lineSVG(L.pts.map(p=>p.p),el.clientWidth||326,44)});
   document.querySelectorAll('[data-live^="spark:"]').forEach(el=>{const L=live[el.dataset.live.slice(6)];el.innerHTML=lineSVG(L.pts.map(p=>p.p),64,26)});
   if(!withStatic)return;
   const pc=$("pnlchart");if(pc){const v=pc.dataset.vals.split(",").map(Number);pc.innerHTML=lineSVG(v,pc.clientWidth||326,90,"var(--blue)",true)}
@@ -632,7 +700,9 @@ function updateLive(){
   document.querySelectorAll('[data-live^="ch:"]').forEach(el=>el.innerHTML=chanceLine(el.dataset.live.slice(3)));
   document.querySelectorAll('[data-live^="q:"]').forEach(el=>el.textContent=questionOf(el.dataset.live.slice(2)));
   document.querySelectorAll('[data-live^="model:"]').forEach(el=>el.textContent=modelNote(el.dataset.live.slice(6)));
-  document.querySelectorAll('[data-live^="spot:"]').forEach(el=>{const sym=el.dataset.live.slice(5),c=COINS.find(x=>x.sym===sym),L=live[sym],f=v=>v==null?"–":"$"+(+v).toLocaleString(undefined,{minimumFractionDigits:c.dp,maximumFractionDigits:c.dp});el.textContent=f(L.spot)+" / "+f(L.strike)});
+  document.querySelectorAll('[data-live^="spot:"]').forEach(el=>el.textContent=spotLine(el.dataset.live.slice(5)));
+  document.querySelectorAll('[data-live^="settle:"]').forEach(el=>el.textContent=settleLine(el.dataset.live.slice(7)));
+  document.querySelectorAll('[data-live^="yn:"]').forEach(el=>el.innerHTML=ynTiles(el.dataset.live.slice(3)));
   drawCharts(false);
 }
 const betCandles={};
@@ -659,6 +729,7 @@ document.addEventListener("click",async e=>{
   if(a==="back")return back();
   if(a==="tab")return tab(v);
   if(a==="feat"){ui.feat=v;return render()}
+  if(a==="slide"){const el=t.closest(".livecard").querySelector(".slides");return showSlide(el,+t.dataset.i,true)}
   if(a==="coin"){ui.coinTab=t.dataset.sub||"overview";return go({page:"coin",sym:v})}
   if(a==="bet")return go({page:"bet",id:v});
   if(["coinTab","pnlRange","sportsType","league","actView"].includes(a)){ui[a]=v;return render()}
@@ -704,7 +775,9 @@ function start(){
   $("setup").hidden=true;$("screen").hidden=false;$("tabs").hidden=false;
   render(true);refresh();
   COINS.forEach(spot);connectWS();
-  (async()=>{for(const c of [COINS.find(x=>x.sym===ui.feat),...COINS.filter(x=>x.sym!==ui.feat)]){await discover(c);scheduleLive()}})();
+  (async()=>{const order=[COINS.find(x=>x.sym===ui.feat),...COINS.filter(x=>x.sym!==ui.feat)];
+    for(const c of order){await discover(c);scheduleLive()}
+    for(const c of order){await discoverLadder(c);scheduleLive()}})();
   setInterval(pollMarkets,10000);
   setInterval(()=>{if(document.visibilityState==="visible")COINS.forEach(spot)},10000);
   setInterval(()=>{if(document.visibilityState==="visible")updateLive()},1000);

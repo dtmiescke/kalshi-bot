@@ -68,6 +68,17 @@ class TestAppSummary(unittest.TestCase):
         for series in ("KXBTC15M", "KXETH15M", "KXSOL15M", "KXBNB15M"):
             self.assertIn(series, html)
 
+    def test_live_chart_slides_from_15_minute_to_ladders(self):
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        for series in ("KXBTCD", "KXETHD", "KXSOLD", "KXBNBD"):
+            self.assertIn(series, html)
+        self.assertIn("/api/ladder?series_ticker=", html)        # trimmed ladder list from the relay
+        self.assertIn("scroll-snap-type:x mandatory", html)      # one swipeable chart widget
+        self.assertIn('data-act="slide"', html)                  # dots jump between slides
+        self.assertIn("const slideKeys=sym=>[sym,", html)        # slide 1 is always the 15-minute market
+        self.assertIn('data-live="yn:', html)                    # Yes/No prices follow the shown slide
+        self.assertIn("Swipe for ladders", html)
+
     def test_bets_csv_carries_compact_signals_for_bet_details(self):
         self.st.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,stake,fee,
                      status,signals_json) VALUES(1,'paper','KXBTC15M-X','E','KXBTC15M','yes',0.5,1,0.5,0,'open',?)""",
