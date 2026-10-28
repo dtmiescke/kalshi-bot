@@ -252,6 +252,9 @@ def train(store, min_windows=300, fee_rate=0.07, deadline_ts=None):
 
     tails = learn_tails(store)
     X, y, groups, ts, cols = load_dataset(store)
+    stop = out_of_time("loading the dataset")
+    if stop:
+        return stop
     n_windows = len(set(groups.tolist())) if len(groups) else 0
     if n_windows < min_windows:
         return {"status": "not enough data", "windows": n_windows, "needed": min_windows}

@@ -12,7 +12,34 @@ if git fetch -q origin bot-data; then
   # save.sh refuses to overwrite bot-data if it moved after this restore
   git rev-parse origin/bot-data > data/.memory_base
 
-  if [ -s /tmp/bd/bot.sqlite.gz ]; then
+  # Hugging Face memory (bot/hf_memory.py), when HF_TOKEN + HF_MEMORY_REPO are set:
+  # the database lives there (no GitHub file-size limit). An HF repo without
+  # memory yet falls back to bot-data below (one-time migration); any other HF
+  # error stops the run rather than starting from an older copy.
+  hf_loaded=""
+  rm -f data/.memory_base_hf
+  if python -m bot.hf_memory enabled; then
+    mkdir -p /tmp/hfmem
+    if hf_sha=$(python -m bot.hf_memory load /tmp/hfmem/bot.sqlite.gz); then
+      gzip -dc /tmp/hfmem/bot.sqlite.gz > data/bot.sqlite
+      echo "$hf_sha" > data/.memory_base_hf
+      hf_loaded=1
+      echo "Memory restored from Hugging Face (${hf_sha:0:12})."
+    else
+      rc=$?
+      if [ "$rc" -ne 3 ]; then
+        echo "ERROR: Hugging Face memory configured but could not be read (exit $rc); refusing to run." >&2
+        git worktree remove --force /tmp/bd || true
+        exit 1
+      fi
+      echo none > data/.memory_base_hf
+      echo "Hugging Face memory repo is empty; migrating from bot-data."
+    fi
+  fi
+
+  if [ -n "$hf_loaded" ]; then
+    :
+  elif [ -s /tmp/bd/bot.sqlite.gz ]; then
     gzip -dc /tmp/bd/bot.sqlite.gz > data/bot.sqlite
   elif [ -s /tmp/bd/bot.sqlite ]; then
     # Backward-compatible migration from older bot-data snapshots.

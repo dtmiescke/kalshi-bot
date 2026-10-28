@@ -8,6 +8,7 @@ Prices use the recorded Kalshi mid +/- half the spread (what buying would have
 cost), plus fees. It ignores order-book depth, so treat it as an upper bound.
 This is how you tune settings with evidence instead of guesses.
 """
+import bisect
 import json
 
 from . import brain
@@ -31,6 +32,71 @@ def _weights_as_of(store, domain, cutoff_ts):
     weights.update({name[:-len(suffix)]: value for name, value in latest.items()
                     if name.endswith(suffix)})
     return weights
+
+
+class _AsOf:
+    """Walk-forward weights and calibration tables for many cutoffs at once.
+
+    Same results as _weights_as_of / brain.calibration_table per case, but each
+    source table is read once (per-case full scans took 25+ minutes once
+    graded_markets held tens of thousands of ladder strikes)."""
+
+    def __init__(self, store, buckets=10):
+        self.buckets = buckets
+        self.weights = store.q("SELECT ts, signal, weight FROM weight_history ORDER BY ts")
+        self.wts = [r["ts"] for r in self.weights]
+        audit = store.q("""SELECT model_prob, outcome, series, settled_ts FROM decision_audit
+                           WHERE brier IS NOT NULL AND model_prob IS NOT NULL
+                           AND outcome IN (0,1) ORDER BY settled_ts""")
+        bets = store.q("""SELECT model_prob, result, series, graded_ts FROM bets
+                          WHERE status='graded' AND result IN ('yes','no')
+                          AND model_prob IS NOT NULL ORDER BY graded_ts""")
+        self.audit = self._prefix([(r["settled_ts"], r["series"], float(r["model_prob"]),
+                                    int(r["outcome"])) for r in audit])
+        self.bets = self._prefix([(r["graded_ts"], r["series"], float(r["model_prob"]),
+                                   1 if r["result"] == "yes" else 0) for r in bets])
+
+    def _prefix(self, rows):
+        """{domain: (times, cumulative [n, wins] per bucket)} for bisecting by time."""
+        out = {}
+        for ts, series, p, y in rows:
+            if ts is None:                 # unsettled rows never count as of a time
+                continue
+            dom = brain.domain_of(series)
+            times, cum = out.setdefault(dom, ([], []))
+            last = [list(c) for c in cum[-1]] if cum else [[0, 0] for _ in range(self.buckets)]
+            b = min(int(p * self.buckets), self.buckets - 1)
+            last[b][0] += 1
+            last[b][1] += y
+            times.append(ts)
+            cum.append(last)
+        return out
+
+    def _table(self, prefix, domain, as_of):
+        times, cum = prefix.get(domain, ([], []))
+        i = bisect.bisect_right(times, as_of)
+        if i == 0:
+            return {}
+        return {b: {"n": n, "predicted": (b + 0.5) / self.buckets, "actual": w / n}
+                for b, (n, w) in enumerate(cum[i - 1]) if n}
+
+    def calibration_table(self, domain, as_of):
+        return self._table(self.audit, domain, as_of) or self._table(self.bets, domain, as_of)
+
+    def weights_for(self, domain, cutoff_ts):
+        """Call with non-decreasing cutoffs: weight updates are applied incrementally."""
+        i = bisect.bisect_right(self.wts, int(cutoff_ts) * 1_000_000_000)
+        if i < getattr(self, "_applied", 0):
+            self._applied, self._latest = 0, {}
+        latest = self.__dict__.setdefault("_latest", {})
+        for row in self.weights[getattr(self, "_applied", 0):i]:
+            latest[row["signal"]] = row["weight"]
+        self._applied = max(i, getattr(self, "_applied", 0))
+        weights = dict(brain.DEFAULT_WEIGHTS)
+        weights.update({n: v for n, v in latest.items() if "@" not in n})
+        suffix = "@" + domain
+        weights.update({n[:-len(suffix)]: v for n, v in latest.items() if n.endswith(suffix)})
+        return weights
 
 
 def load_cases(store):
@@ -60,8 +126,9 @@ def load_cases(store):
 def run(store, fee_rate=0.07, thresholds=THRESHOLDS):
     cases = load_cases(store)
     out = {"markets": len(cases), "by_domain": {}}
+    asof = _AsOf(store)
     for dom in ("sports", "crypto"):
-        cs = [c for c in cases if c["domain"] == dom]
+        cs = sorted((c for c in cases if c["domain"] == dom), key=lambda c: c["cutoff_ts"])
         if not cs:
             continue
         model_brier = market_brier = 0.0
@@ -69,9 +136,9 @@ def run(store, fee_rate=0.07, thresholds=THRESHOLDS):
         for c in cs:
             # Reconstruct the weights that existed before this market's decision;
             # current learned weights would leak future settlements into the backtest.
-            w = _weights_as_of(store, dom, c["cutoff_ts"])
+            w = asof.weights_for(dom, c["cutoff_ts"])
             p, conf = brain.blend(c["readings"], w)
-            p = brain.calibrate(p, store, domain=dom, as_of_ts=c["cutoff_ts"])
+            p = brain.calibrate_with_table(p, asof.calibration_table(dom, c["cutoff_ts"]))
             model_brier += (p - c["y"]) ** 2
             market_brier += (c["mid"] - c["y"]) ** 2
             for side, pw, ask in (("yes", p, c["mid"] + c["spread"] / 2),

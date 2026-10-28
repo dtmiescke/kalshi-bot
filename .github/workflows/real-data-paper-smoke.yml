@@ -1,6 +1,11 @@
 name: real-data-paper-smoke
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/real_data_paper_smoke.py"
+      - ".github/workflows/real-data-paper-smoke.yml"
   pull_request:
     paths:
       - "scripts/real_data_paper_smoke.py"
@@ -24,8 +29,8 @@ jobs:
       KALSHI_BASE_URL: ""
       KALSHI_DATA_URL: "https://api.elections.kalshi.com/trade-api/v2"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Install read-only smoke dependencies

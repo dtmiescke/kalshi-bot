@@ -60,6 +60,13 @@ CREATE TABLE IF NOT EXISTS lessons (
     ts INTEGER, model TEXT, text TEXT
 );
 
+-- Durable one-per-bet postmortems; unique bet_id makes grading/retries idempotent.
+CREATE TABLE IF NOT EXISTS trade_reviews (
+    bet_id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, ticker TEXT NOT NULL,
+    coin TEXT NOT NULL, outcome TEXT NOT NULL, pnl REAL NOT NULL, review_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_trade_reviews_coin_ts ON trade_reviews(coin, ts);
+
 CREATE TABLE IF NOT EXISTS maker_attempts (
     ts INTEGER, ticker TEXT, filled INTEGER, outcome TEXT, wait_s REAL
 );
@@ -108,15 +115,26 @@ RAW_RETENTION = {
     "flow_trades": ("ts", 2),
     "signal_readings": ("ts", 30),
     "odds_snapshots": ("ts", 30),
-    "sports_intel_items": ("observed_ts", 14),   # readers take the newest few hundred
+    # readers take the newest few hundred items (~6 KB each; 14 days was 300 MB)
+    "sports_intel_items": ("observed_ts", 3),
 }
 
 
 # Narrower windows for parts of a table: (table, time column, row filter, days).
 # Crypto 15-minute markets print ~130k trades an hour, but their readers look
 # back 5 minutes (live runner) or 15 minutes (snapshot runs), so an hour is plenty.
+# Crypto snapshots and readings (15-minute windows and the hourly/daily ladders)
+# arrive every 30 s per market for four coins, ~90k signal rows a day. Their
+# readers (grading, the price-gap check, trade reviews) run within hours of each
+# market settling, so 3 days is plenty; sports keep the longer windows.
+CRYPTO_TICKERS = "(" + " OR ".join(f"ticker LIKE '{p}%'" for p in
+                                   ("KXBTC", "KXETH", "KXSOL", "KXBNB")) + ")"
 RAW_RETENTION_SUBSETS = (
     ("flow_trades", "ts", "ticker LIKE 'KX%15M-%'", 1 / 24),
+    ("signal_readings", "ts", CRYPTO_TICKERS, 3),
+    # hourly/daily ladder strikes: graded within hours of their close
+    ("signal_readings", "ts", CRYPTO_TICKERS + " AND ticker NOT LIKE 'KX%15M-%'", 1),
+    ("market_snapshots", "ts", CRYPTO_TICKERS, 3),
 )
 
 

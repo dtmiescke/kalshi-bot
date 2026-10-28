@@ -80,6 +80,7 @@ class LiveRunner:
         self.with_context = with_context
         self.seed_candles = {}    # series -> Coinbase 1-minute candles (OHLCV)
         self.makers = {}          # ticker -> resting maker order
+        self.last_prob = {}       # ticker -> latest blended model probability (for the app)
         # A prior process may have died after Kalshi accepted a resting order.
         # Do not resume trading until that exchange state is reconciled manually.
         prior_maker = self.store.get_kv("maker_recovery")
@@ -108,14 +109,22 @@ class LiveRunner:
         """Fill the first hour of 1-second mids from Coinbase 1-minute candles so
         volatility and momentum work from the first second, not after an hour."""
         for series, (kr, cb, _) in COINS.items():
-            # Coinbase history is used only when that product actually exists.
-            # BNB has no Coinbase USD product; its analytics safely warm from the
-            # Kraken book/trade stream instead of silently mapping BNB to another coin.
-            candles = (crypto_sig.fetch_candles(cb) if cb else
-                       crypto_sig.fetch_kraken_candles(kr) if series == "KXBNB15M" else [])
+            # Prefer Coinbase history where available, but do not let a transient
+            # Coinbase API/rate-limit failure leave the live model without the
+            # 30 completed 1-minute candles required to produce crypto_model.
+            # Every configured coin has a Kraken USD pair, so use it as a real
+            # historical fallback (including BTC/ETH/SOL), never synthetic bars.
+            candles = crypto_sig.fetch_candles(cb) if cb else []
+            source = "coinbase" if len(candles) >= 30 else "none"
+            if len(candles) < 30:
+                fallback = crypto_sig.fetch_kraken_candles(kr)
+                if len(fallback) > len(candles):
+                    candles, source = fallback, "kraken_fallback"
             self.seed_candles[series] = candles
             for c in candles:
                 self.coins[series].mids.append((c["ts"], c["close"]))
+            log.info("crypto history seed %s: source=%s candles=%d",
+                     COINS_TO_COIN[series], source, len(candles))
 
     def discover(self):
         """Find open 15-minute windows and retain per-series coverage diagnostics."""
@@ -492,7 +501,7 @@ class LiveRunner:
                 "book_imbalance": ctx.get("spot", {}).get("book_imbalance_0.1%", 0),
                 "trend_strength": min(1.0, max(0.0, float(ctx.get("indicators", {}).get("adx_1m", 0) or 0) / 100.0)),
             })
-            adaptive = historical_setup_penalty(self.store, setup_names, regime=regime, report=self.adaptive_report_cache["report"])
+            adaptive = historical_setup_penalty(self.store, setup_names, regime=regime, report=self.adaptive_report_cache["report"], coin=COINS_TO_COIN.get(info["series"]))
             required_after_learning = float(self.s.crypto_min_edge) + adaptive["surcharge"]
             p["adaptive_learning"] = adaptive
             p["adaptive_required_edge"] = round(required_after_learning, 5)
@@ -532,6 +541,7 @@ class LiveRunner:
         info = self.markets[ticker]
         if prob is not None:
             prob = brain.calibrate(prob, self.store, domain=brain.domain_of(info["series"]))
+            self.last_prob[ticker] = {"prob": round(prob, 4), "conf": round(conf or 0, 3), "ts": round(time.time())}
         snap = {"ticker": ticker, "event_ticker": info["event"], "series": info["series"],
                 "team": "UP"}
         if maker is None:
@@ -565,6 +575,8 @@ class LiveRunner:
 
     def finish(self, ticker, readings, ctx, plan, verdict):
         """After the council: recheck with the freshest book, then trade."""
+        initial_plan = plan[1] if isinstance(plan, (tuple, list)) and len(plan) > 1 else {}
+        prior_adaptive = initial_plan.get("adaptive_learning", {}) if isinstance(initial_plan, dict) else {}
         try:
             if verdict["decision"] != "approve":
                 self._skip(f"council {verdict['decision']}")
@@ -581,7 +593,7 @@ class LiveRunner:
                 self.betting_ok, self.betting_why = False, reason
                 self._skip(f"execution guard: {reason}")
                 return
-            fresh, _ = self.readings_for(ticker, time.time())
+            fresh, fresh_ctx = self.readings_for(ticker, time.time())
             book_age = self.books[ticker].age()
             if not fresh or book_age is None or book_age > 5:
                 self._skip("recheck: data stale")
@@ -591,6 +603,15 @@ class LiveRunner:
                 self._skip("recheck: edge gone")
                 return
             snap, p, prob, conf = again
+            if isinstance(p, dict):
+                # Preserve the actual chart/tool snapshot used at the final recheck.
+                p["entry_context"] = {
+                    key: fresh_ctx[key] for key in (
+                        "chart_setups", "multi_timeframe", "indicators", "spot",
+                        "price_discovery", "orderbook", "flow"
+                    ) if isinstance(fresh_ctx, dict) and key in fresh_ctx
+                }
+                p["adaptive_learning"] = prior_adaptive if isinstance(prior_adaptive, dict) else {}
             members = council.convene(self.store, self.s, snap, p, fresh, prob, conf)
             if members.get("binding") and members.get("decision") == "pass":
                 self._skip("council veto")
@@ -927,7 +948,7 @@ class LiveRunner:
                 if self.with_context:
                     a = self.coins[series]
                     cbp = a.other_prices.get("coinbase", (0, None))[1]
-                    self.ctx_cache[series] = marketdata.context(self.store, coin, coinbase_price=cbp)
+                    self.ctx_cache[series] = marketdata.context(self.store, coin, coinbase_price=cbp, include_spot_15m=True)
                 if cur:
                     iv.cached_dvol(self.store, cur, fetch=self.dvol_fetch)
             except Exception as e:
@@ -1106,6 +1127,7 @@ class LiveRunner:
                "coins": {s: a.summary(now) for s, a in self.coins.items()},
                "markets": {t: {"secs_left": round(m["terms"]["close_ts"] - now) if m["terms"]["close_ts"] else None,
                                "strike": m["terms"]["strike"], "kalshi_mid": self.books[t].mid(),
+                               "model": self.last_prob.get(t),
                                "ticker": self.ticker_updates.get(t)}
                            for t, m in self.markets.items() if t in self.books},
                "kalshi_feed": {"channel": "ticker + orderbook_delta",

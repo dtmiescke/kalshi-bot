@@ -109,6 +109,68 @@ def strategy_readings(feats, base_prob, chart_indicators=None):
     return out
 
 
+HL_BASE_FUNDING = 0.0000125   # Hyperliquid's neutral hourly rate (0.01% per 8 hours)
+
+
+def perp_readings(ctx, base_prob):
+    """Two small views from Hyperliquid perps, each learned separately:
+    - crypto_perp_funding: crowded longs (funding well above neutral) lean the
+      price down, crowded shorts lean it up
+    - crypto_perp_premium: perps trading above the oracle price show buyers
+      leading spot, below it sellers
+    Each moves the contract price by at most 1.5 points."""
+    if not isinstance(ctx, dict) or base_prob is None:
+        return []
+    out = []
+    funding = ctx.get("hl_funding")
+    if isinstance(funding, (int, float)) and math.isfinite(funding):
+        excess_bps = (funding - HL_BASE_FUNDING) * 1e4          # per hour
+        crowd = max(-1.0, min(1.0, excess_bps / 2.0))
+        out.append(Reading("crypto_perp_funding",
+                           clamp(base_prob - 0.015 * crowd, 0.02, 0.98),
+                           0.05 + 0.15 * abs(crowd),
+                           {"funding_h": funding, "excess_bps_h": round(excess_bps, 4),
+                            "venue": "hyperliquid"}))
+    premium = ctx.get("hl_premium")
+    if isinstance(premium, (int, float)) and math.isfinite(premium):
+        prem_bps = premium * 1e4
+        lean = max(-1.0, min(1.0, prem_bps / 10.0))
+        out.append(Reading("crypto_perp_premium",
+                           clamp(base_prob + 0.015 * lean, 0.02, 0.98),
+                           0.05 + 0.15 * abs(lean),
+                           {"premium_bps": round(prem_bps, 3), "venue": "hyperliquid"}))
+    return out
+
+
+SPOT_CHECK_MAX_AGE = 120   # seconds; an older reference can't judge a fast market
+
+
+def spot_check(spot, ctx, now, max_bps=None):
+    """Compare our spot price with an independent reference (Hyperliquid's
+    oracle, a median of several exchanges). None when there is no fresh
+    reference; otherwise {gap_bps, ok}. A big gap means our feed is stale or
+    wrong, so the price models built on it should count for less."""
+    import os
+    if max_bps is None:
+        try:
+            max_bps = float(os.environ.get("SPOT_CHECK_MAX_BPS", "40"))
+        except ValueError:
+            max_bps = 40.0
+    if not isinstance(ctx, dict) or not spot:
+        return None
+    ref, ts = ctx.get("ref_spot"), ctx.get("ref_spot_ts")
+    if not (isinstance(ref, (int, float)) and ref > 0 and isinstance(ts, (int, float))):
+        return None
+    if not 0 <= now - ts <= SPOT_CHECK_MAX_AGE:
+        return None
+    gap = (spot / ref - 1) * 1e4
+    return {"gap_bps": round(gap, 2), "ok": abs(gap) <= max_bps, "max_bps": max_bps,
+            "ref": ref, "ref_venue": "hyperliquid_oracle"}
+
+
+SPOT_DEPENDENT = ("crypto_model", "crypto_model_iv")
+
+
 def coin_from_series(series):
     s = (series or "").upper()
     return next((c for c in ("BTC", "ETH", "SOL", "BNB") if s.startswith(f"KX{c}")), "BTC")
@@ -187,6 +249,32 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
             "cross_venue_proxy": True,
         }))
 
+    # Completed 15-minute Coinbase/Kraken spot candles provide a low-weight trend check.
+    # Kalshi remains the pricing baseline; disagreement between venues lowers confidence.
+    spot_returns = []
+    for key in ("coinbase_15m_return_pct", "kraken_15m_return_pct"):
+        value = ctx.get(key) if isinstance(ctx, dict) else None
+        if isinstance(value, (int, float)) and math.isfinite(value):
+            spot_returns.append(float(value))
+    if spot_returns:
+        avg_spot_return = sum(spot_returns) / len(spot_returns)
+        disagreement = abs(spot_returns[0] - spot_returns[1]) if len(spot_returns) > 1 else 0.0
+        shift = max(-0.025, min(0.025, avg_spot_return * 0.015))
+        spot_prob = clamp(p + shift, 0.02, 0.98)
+        spot_conf = 0.20 if len(spot_returns) == 2 and disagreement <= 0.5 else 0.10
+        if len(spot_returns) == 2 and disagreement > 0.5:
+            spot_conf = 0.05
+        readings.append(Reading("crypto_spot_15m_confirmation", spot_prob, spot_conf, {
+            "coinbase_return_pct": ctx.get("coinbase_15m_return_pct"),
+            "kraken_return_pct": ctx.get("kraken_15m_return_pct"),
+            "venue_disagreement_pct": round(disagreement, 4),
+            "cross_venue_basis_bps": ctx.get("spot_15m_basis_bps"),
+            "source_count": len(spot_returns),
+            "timeframe_minutes": 15,
+        }))
+
+    readings.extend(perp_readings(ctx, p))
+
     if dv:
         pi = settlement.prob_above(spot, terms["strike"], iv.dvol_to_per_minute(dv), secs,
                                    terms["avg_seconds"], tail_shrink=shrink,
@@ -226,6 +314,15 @@ def research(store, ticker, series, terms, candles, kalshi_bid, kalshi_ask, now=
     if feats:
         readings.extend(strategy_readings(feats, p, chart_indicators))
     info["indicators"] = indicator_snapshot(feats)
+    check = spot_check(spot, ctx, now)
+    if check:
+        info["spot_check"] = check
+        for r in readings:
+            if r.name in SPOT_DEPENDENT:
+                r.detail["spot_gap_bps"] = check["gap_bps"]
+                if not check["ok"]:
+                    r.confidence = round(r.confidence * 0.5, 4)
+                    r.detail["spot_check_failed"] = True
     if isinstance(book, dict):
         info["orderbook"] = {k: book.get(k) for k in (
             "venue", "spread_bps", "depth_imbalance", "microprice_delta_bps", "levels")}

@@ -11,6 +11,11 @@ from bot.config import Settings
 from bot.engine import Engine
 from bot.storage import Store
 
+# These fixtures use small synthetic stakes; production minimum bets ($25) are
+# asserted with a clean environment in test_total_loss_limit.py (CI sets the same).
+os.environ.setdefault("MIN_PER_BET", "0")
+os.environ.setdefault("CRYPTO_MIN_BET", "0")
+
 
 def iso(dt):
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")

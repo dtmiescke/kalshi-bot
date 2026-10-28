@@ -95,7 +95,11 @@ def review(llm, store, ticker, summary, cooldown_s=180):
             f"LLM budget unavailable (budget_left={budget}); numeric risk gate decides")
 
     text = json.dumps(summary, default=str)[:5000]
-    models = [m for m in llm.models if m not in llm.dead]
+    try:
+        ordered = llm.models_for("council")   # Gemini first when configured
+    except Exception:
+        ordered = llm.models
+    models = [m for m in ordered if m not in llm.dead]
     chair_model = models[0] if models else None
     skeptic_model = models[1] if len(models) > 1 else chair_model
     try:

@@ -14,6 +14,10 @@
     python -m bot.main train    # train + test the model; promoted only if it wins on unseen data
     python -m bot.main history  # download real settled Kalshi 15-min windows and replay them
     python -m bot.main backtest # replay recorded research: what thresholds would have worked
+    python -m bot.main accuracy90 # validate 90% high-confidence predictions and paper bets
+    python -m bot.main coin-report # rank BTC/BNB/SOL/ETH by net paper profit
+    python -m bot.main trade-reviews 20 # inspect recent persisted trade postmortems
+    python -m bot.main trade-learning # rank historical signal associations from reviews
     python -m bot.main brief    # AI briefing on the bot's results now
     python -m bot.main auto     # what the 12-min scheduler calls: spot check
                                 # every run, full scan + grading once an hour
@@ -436,11 +440,35 @@ def main(argv=None):
         # Keep CI history replays bounded. A per-run cap prevents a long-tail
         # market catalog or rate-limit cooldown from monopolizing the runner.
         max_markets = max(1, min(300, int(os.environ.get("HISTORY_MAX_MARKETS", "20"))))
+        limit_min = float(os.environ.get("HISTORY_TIME_LIMIT_MINUTES", 10))
         print(history.text(history.run(store, data, days=days, fee_rate=s.taker_fee_rate,
-                                       max_markets=max_markets)))
+                                       max_markets=max_markets,
+                                       deadline_ts=time.time() + limit_min * 60)))
         return
     if cmd == "backtest":
         print(backtest.text(backtest.run(store, s.taker_fee_rate)))
+        return
+    if cmd in ("accuracy90", "confidence-report"):
+        from . import high_confidence
+        print(high_confidence.format_report(high_confidence.report(store)))
+        return
+    if cmd in ("coin-report", "coin-performance"):
+        from . import coin_learning
+        print(coin_learning.format_coin_report(coin_learning.coin_report(store)))
+        return
+    if cmd == "trade-reviews":
+        from . import coin_learning
+        coin_learning.backfill_trade_reviews(store)
+        limit = int(argv[1]) if len(argv) > 1 else 20
+        print(json.dumps(coin_learning.trade_review_report(store, limit=limit), indent=2, default=str))
+        return
+    if cmd == "trade-learning":
+        from . import coin_learning
+        coin_learning.backfill_trade_reviews(store)
+        print(coin_learning.format_learning_summary(
+            coin_learning.learning_summary(store),
+            setups=coin_learning.setup_performance(store),
+            forecasts=coin_learning.signal_forecast_summary(store)))
         return
     if cmd == "auto":
         last = store.get_kv("last_full_scan", 0)

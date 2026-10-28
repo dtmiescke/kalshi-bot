@@ -63,7 +63,60 @@ def endpoints_from_env(openrouter_key=None):
         eps.append(("litellm", chat_url, os.environ.get("LITELLM_API_KEY", "")))
     if openrouter_key:
         eps.append(("openrouter", URL, openrouter_key))
+    # Free fallbacks, tried after OpenRouter's free models: GitHub Models (the
+    # workflow's own token with `models: read`, no sign-up) and Google Gemini's
+    # OpenAI-compatible endpoint (free key). Both are optional.
+    gh = os.environ.get("GITHUB_MODELS_TOKEN", "")
+    if gh:
+        eps.append(("github", GITHUB_MODELS_URL, gh))
+    gem = os.environ.get("GEMINI_API_KEY", "")
+    if gem:
+        eps.append(("gemini", GEMINI_URL, gem))
     return eps
+
+
+GITHUB_MODELS_URL = "https://models.github.ai/inference/chat/completions"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+
+
+def fallback_models(endpoints):
+    """Labels for the free fallback endpoints that are configured."""
+    out = []
+    if "github" in endpoints:
+        out += [f"github|{m}" for m in _csv("GITHUB_MODELS_MODELS", "openai/gpt-4.1-mini")]
+    if "gemini" in endpoints:
+        # the -latest alias follows Google's current free Flash model
+        out += [f"gemini|{m}" for m in _csv("GEMINI_MODELS", "gemini-flash-latest,gemini-2.5-flash")]
+    return out
+
+
+def _csv(name, default):
+    return [m.strip() for m in (os.environ.get(name) or default).split(",") if m.strip()]
+
+
+# Which free provider each AI job tries first (the others stay as fallbacks), so
+# no single free quota carries everything: the council's careful JSON reviews go
+# to Gemini, the short chatty jobs (Don Theo, briefings) to GitHub Models.
+# Override with LLM_ROUTE_<TASK>=gemini|github|openrouter|omniroute|litellm.
+TASK_ROUTES = {"council": "gemini", "briefing": "github", "don_theo": "github"}
+
+
+def route_of(task):
+    return (os.environ.get(f"LLM_ROUTE_{str(task).upper()}") or TASK_ROUTES.get(task, "")).strip().lower()
+
+
+def _endpoint_of(label):
+    return label.split("|", 1)[0] if "|" in label else "openrouter"
+
+
+def preferred_model(llm, task):
+    """First live model for this task, or None (works with any client double)."""
+    try:
+        models = llm.models_for(task)
+    except Exception:
+        return None
+    dead = getattr(llm, "dead", set())
+    return next((m for m in models if m not in dead), None)
 
 
 def models_from_env():
@@ -85,7 +138,8 @@ class LLM:
             models = (
                 ([f"omniroute|{m}" for m in om] if "omniroute" in self.endpoints else [])
                 + ([f"litellm|{m}" for m in lm] if "litellm" in self.endpoints else [])
-                + models_from_env()
+                + (models_from_env() if "openrouter" in self.endpoints else [])
+                + fallback_models(self.endpoints)
             )
         # labels: "omniroute|<model>", "litellm|<model>", or a plain OpenRouter model name
         self.models = models
@@ -96,6 +150,12 @@ class LLM:
         self.dead = set()       # models that failed this run
         self.web_searches_this_run = 0
         self._lock = threading.Lock()
+
+    def models_for(self, task):
+        """self.models with the task's preferred provider moved to the front."""
+        ep = route_of(task)
+        first = [m for m in self.models if _endpoint_of(m) == ep]
+        return first + [m for m in self.models if _endpoint_of(m) != ep]
 
     def _day_key(self):
         return "llm_calls_" + time.strftime("%Y%m%d", time.gmtime())

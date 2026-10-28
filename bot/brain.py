@@ -36,6 +36,8 @@ DEFAULT_WEIGHTS = {
     "crypto_mean_reversion_strategy": 0.12,
     "crypto_breakout_strategy": 0.10,
     "crypto_multi_timeframe_chart": 0.15,
+    "crypto_perp_funding": 0.10,   # Hyperliquid crowding (contrarian)
+    "crypto_perp_premium": 0.10,   # Hyperliquid perp-vs-oracle flow
 }
 MIN_W, MAX_W = 0.05, 5.0
 ETA = 0.05            # learning rate: small = slow, steady learning
@@ -46,7 +48,7 @@ MIN_LEARN_SAMPLES = 20  # per signal and domain; prevents single-result overfitt
 def domain_of(ticker_or_series):
     """Broad calibration domain: sports vs short-window crypto."""
     t = (ticker_or_series or "").upper()
-    return "crypto" if t.startswith(("KXBTC", "KXETH", "KXSOL")) or "15M" in t else "sports"
+    return "crypto" if t.startswith(("KXBTC", "KXETH", "KXSOL", "KXBNB")) or "15M" in t else "sports"
 
 
 def learning_domain_of(ticker_or_series):
@@ -113,6 +115,11 @@ def get_weights(store, domain=None):
     return w
 
 
+# Readings that are the Kalshi price (or a small nudge of it), not an
+# independent forecast.
+MARKET_ANCHORED = ("kalshi_market", "trade_flow", "crypto_kalshi_orderbook")
+
+
 def blend(readings, weights):
     """Return (prob, external_confidence) from a list of Readings."""
     num = den = 0.0
@@ -129,10 +136,11 @@ def blend(readings, weights):
     ext_conf = ext_conf_num / ext_conf_den if ext_conf_den else 0.0
     blended = num / den
     # when the independent outside signals argue with each other, trust the
-    # blend less. trade_flow is built around the Kalshi price itself, so its
-    # gap from a model is the edge being measured, not disagreement.
+    # blend less. trade_flow and crypto_kalshi_orderbook are built around the
+    # Kalshi price itself, so their gap from a model is the edge being
+    # measured, not disagreement.
     ext = [(weights.get(r.name, 0.3) * r.confidence, logit(r.prob)) for r in readings
-           if r.name not in ("kalshi_market", "trade_flow")]
+           if r.name not in MARKET_ANCHORED]
     wsum = sum(w for w, _ in ext)
     if len(ext) >= 2 and wsum > 0:
         mean = sum(w * x for w, x in ext) / wsum
@@ -222,7 +230,11 @@ def calibration_table(store, buckets=10, domain=None, as_of_ts=None):
 
 def calibrate(prob, store, domain=None, as_of_ts=None):
     """Shrink or stretch a probability using only prior settled forecasts."""
-    table = calibration_table(store, domain=domain, as_of_ts=as_of_ts)
+    return calibrate_with_table(prob, calibration_table(store, domain=domain, as_of_ts=as_of_ts))
+
+
+def calibrate_with_table(prob, table):
+    """calibrate() with a precomputed calibration_table (backtests reuse tables)."""
     n_total = sum(v["n"] for v in table.values())
     if n_total < CAL_MIN_SAMPLES:
         return prob

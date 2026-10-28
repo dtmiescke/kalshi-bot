@@ -62,7 +62,9 @@ def write(store, llm, path="data/BRIEFING.txt"):
                            bets=json.dumps(bets, default=str)[:6000] if bets else "none settled yet",
                            open_bets=json.dumps(open_bets, default=str)[:2000] if open_bets else "none",
                            weights=json.dumps(hist)[:2000])
-    text, model = llm.ask(prompt, temperature=0.3, max_tokens=500)
+    from .llm import preferred_model
+    text, model = llm.ask(prompt, model=preferred_model(llm, "briefing"),
+                          temperature=0.3, max_tokens=500)
     store.set_kv("briefing_last", time.time())
     if not text:
         return None

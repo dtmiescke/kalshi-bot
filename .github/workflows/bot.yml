@@ -9,6 +9,14 @@ name: kalshi-bot
 # Unlimited free minutes on a PUBLIC repo.
 
 on:
+  # Run one paper-only cycle after reliability workflow/memory-save changes
+  # so the live public-data path and persistent snapshot are exercised post-merge.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/bot.yml"
+      - ".github/load.sh"
+      - ".github/save.sh"
   schedule:
     - cron: "*/12 * * * *"
   workflow_dispatch: {}
@@ -20,11 +28,20 @@ concurrency:
 permissions:
   contents: write
   actions: write   # queue the next cycle (see "Queue the next run")
+  models: read     # free GitHub Models AI fallback (bot/llm.py)
 
 jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # Optional Hugging Face memory (bot/hf_memory.py): unset = bot-data only.
+    # Optional Val Town bridge (bot/valtown_bridge.py) for public Kalshi catalog
+    # reads; unset = direct Kalshi. Never used for order books or orders.
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_MEMORY_REPO: ${{ vars.HF_MEMORY_REPO || secrets.HF_MEMORY_REPO }}
+      VAL_TOWN_KALSHI_URL: ${{ vars.VAL_TOWN_KALSHI_URL || secrets.VAL_TOWN_KALSHI_URL }}
+      ATI_INGEST_SHARED_TOKEN: ${{ secrets.ATI_INGEST_SHARED_TOKEN }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -73,6 +90,12 @@ jobs:
           LITELLM_URL: ${{ vars.LITELLM_URL }}
           LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
           LITELLM_MODELS: ${{ vars.LITELLM_MODELS }}
+          # Free AI fallbacks after OpenRouter (bot/llm.py): GitHub Models uses this
+          # run's own token; Gemini needs a free GEMINI_API_KEY secret.
+          GITHUB_MODELS_TOKEN: ${{ github.token }}
+          GITHUB_MODELS_MODELS: ${{ vars.GITHUB_MODELS_MODELS }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODELS: ${{ vars.GEMINI_MODELS }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           SPORTS_EVERY_HOURS: ${{ vars.SPORTS_EVERY_HOURS || '5.5' }}
           SPORTS_SCAN_EVENT_BUDGET: ${{ vars.SPORTS_SCAN_EVENT_BUDGET || '150' }}
@@ -153,9 +176,18 @@ jobs:
         # the fallback that restarts the chain. A run started with this token via
         # workflow_dispatch is allowed to trigger a new run.
         # Set the repository variable CHAIN_RUNS=no to stop chaining.
+        # A failed cycle re-queues too (after a short wait, at most twice in a row):
+        # one failed save on 2026-10-27 otherwise left the bot idle for 2 hours.
+        # A cancelled run (superseded, or stopped by hand) never re-queues.
         if: >-
-          always() && steps.save-memory.outcome == 'success' &&
-          github.ref == 'refs/heads/main' && vars.CHAIN_RUNS != 'no'
+          !cancelled() && github.ref == 'refs/heads/main' && vars.CHAIN_RUNS != 'no'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash .github/chain_next.sh
+          SAVED: ${{ steps.save-memory.outcome }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          if [ "$SAVED" = "success" ]; then
+            bash .github/chain_next.sh
+          else
+            bash .github/chain_next.sh after-failure
+          fi

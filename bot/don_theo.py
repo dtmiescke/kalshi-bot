@@ -192,7 +192,9 @@ def _ai_line(store, llm, facts, fallback, now):
         "results. Do not repeat bad news, it is said before your line.\n"
         f"Facts: {facts}\nExample in his voice: {fallback}\nLine:")
     try:
-        text, _ = llm.ask(prompt, temperature=0.8, max_tokens=80)
+        from .llm import preferred_model
+        text, _ = llm.ask(prompt, model=preferred_model(llm, "don_theo"),
+                          temperature=0.8, max_tokens=80)
     except Exception:
         return None
     text = " ".join(str(text or "").split()).strip('"')

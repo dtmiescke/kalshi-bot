@@ -22,7 +22,7 @@ BASE_FILE="$(pwd)/data/.memory_base"
 export GIT_TERMINAL_PROMPT=0
 export GIT_HTTP_LOW_SPEED_LIMIT=1000
 export GIT_HTTP_LOW_SPEED_TIME=30
-GIT_REMOTE_TIMEOUT_SECONDS="${GIT_REMOTE_TIMEOUT_SECONDS:-90}"
+GIT_REMOTE_TIMEOUT_SECONDS="${GIT_REMOTE_TIMEOUT_SECONDS:-240}"
 
 python -c 'import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); result=c.execute("PRAGMA quick_check").fetchone()[0]; print("SQLite quick_check:", result); sys.exit(result != "ok")' data/bot.sqlite
 python -m bot.main report > /tmp/REPORT.txt || { echo "WARNING: report failed; saving memory anyway." >&2; echo "report unavailable" > /tmp/REPORT.txt; }
@@ -50,10 +50,26 @@ finally:
 PY
 gzip -n -c "$WORK/bot.snapshot.sqlite" > "$WORK/bot.sqlite.gz"
 rm -f "$WORK/bot.snapshot.sqlite"
-# GitHub rejects files over 100 MB. Alert at 80% so the janitors' retention can
-# be tightened before memory stops saving; refuse a push that would fail anyway.
+# With Hugging Face memory configured the database goes there (no 100 MB limit,
+# same refuse-if-moved guard); bot-data then carries only the small files the
+# app reads. Without it, the GitHub size guard below applies as before.
 SIZE=$(stat -c %s "$WORK/bot.sqlite.gz")
-if [ "$SIZE" -ge 95000000 ]; then
+if python -m bot.hf_memory enabled; then
+  hf_base=$(cat data/.memory_base_hf 2>/dev/null || echo missing)
+  if [ "$hf_base" = "missing" ]; then
+    echo "ERROR: Hugging Face memory is configured but this run did not restore from it; not saving." >&2
+    exit 1
+  fi
+  if hf_new=$(timeout --foreground "${GIT_REMOTE_TIMEOUT_SECONDS}s" python -m bot.hf_memory save "$WORK/bot.sqlite.gz" "$hf_base"); then
+    echo "$hf_new" | tail -1 > data/.memory_base_hf
+    echo "Memory ($SIZE bytes) saved to Hugging Face."
+    rm -f "$WORK/bot.sqlite.gz"
+  else
+    echo "ERROR: Hugging Face memory save failed or memory moved since restore; not saved." >&2
+    python -c 'import sys; from bot import alerts; alerts.send("Memory save failed", sys.argv[1], priority="high", tags=["warning"])' "Hugging Face upload failed; this run's memory was not saved." || true
+    exit 1
+  fi
+elif [ "$SIZE" -ge 95000000 ]; then
   echo "ERROR: bot.sqlite.gz is $SIZE bytes, too close to GitHub's 100 MB file limit; not saving." >&2
   python -c 'import sys; from bot import alerts; alerts.send("Memory too big to save", sys.argv[1], priority="urgent", tags=["warning"])' "bot.sqlite.gz is $SIZE bytes; memory was NOT saved." || true
   exit 1
@@ -90,7 +106,7 @@ if [ "$base" = "missing" ] || { [ "$base" = "none" ] && [ -n "$current" ]; } || 
   python -c 'import sys; from bot import alerts; alerts.send("Memory save skipped", sys.argv[1], priority="high", tags=["warning"])' "bot-data changed during this run; this run's memory was not saved so the newer copy is kept." || true
   exit 1
 fi
-if timeout --foreground "${GIT_REMOTE_TIMEOUT_SECONDS}s" git push -qf "$REMOTE" HEAD:bot-data; then
+if timeout --foreground "${GIT_REMOTE_TIMEOUT_SECONDS}s" git push --progress -f "$REMOTE" HEAD:bot-data; then
   # a later save in the same job (e.g. a mid-session save) builds on this one
   git rev-parse HEAD > "$BASE_FILE"
   echo "Persistent memory saved."

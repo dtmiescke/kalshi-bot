@@ -86,6 +86,16 @@ def settle_bets(store, client):
             store.db.commit()
         if cur.rowcount == 1:
             done += 1
+            # Persist an auditable postmortem only after the ledger is graded.
+            # Review creation is idempotent and never changes execution or sizing.
+            try:
+                from .coin_learning import persist_trade_review
+                reviewed = dict(b)
+                reviewed.update(result=result, pnl=round(pnl, 2), closing_price=close,
+                                clv=clv, graded_ts=int(time.time()), status="graded")
+                persist_trade_review(store, reviewed)
+            except Exception:
+                log.exception("trade postmortem failed for bet id=%s", b.get("id"))
     return done
 
 
