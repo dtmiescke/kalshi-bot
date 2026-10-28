@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { handleRest } from "./rest.js";
 
 const UPSTREAM = "https://external-api-ws.kalshi.com/trade-api/ws/v2";
 const SIGN_PATH = "/trade-api/ws/v2";
@@ -88,7 +89,9 @@ export default {
       return json({ ok: true, service: "kalshi-readonly-feed", now: Date.now(),
         credentialsConfigured: Boolean(env.KALSHI_DATA_KEY_ID && env.KALSHI_DATA_PRIVATE_KEY) });
     }
-    if (url.pathname !== "/ws") return json({ error: "Use /health or /ws" }, 404);
+    const rest = await handleRest(request);
+    if (rest) return rest;
+    if (url.pathname !== "/ws") return json({ error: "Use /health, /ws or /api/*" }, 404);
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
       return json({ error: "WebSocket upgrade required" }, 426);
     }
