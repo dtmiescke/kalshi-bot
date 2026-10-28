@@ -426,7 +426,10 @@ async function loadHistory(key){
   }
 }
 function push(k,p,t=Date.now()){if(!live[k])return;const pts=live[k].pts;if(p==null||!isFinite(p))return;
-  if(pts.length&&t-pts[pts.length-1].t<2000)pts[pts.length-1]={t,p};else pts.push({t,p});if(pts.length>600)pts.shift()}
+  if(pts.length&&t-pts[pts.length-1].t<2000)pts[pts.length-1]={t,p};else pts.push({t,p});if(pts.length>600)pts.shift();live[k].v=(live[k].v||0)+1}
+// DOM writes only when something changed: the 1-second ticker touches nothing that is already up to date
+function setHTML(el,h){if(el._h!==h){el._h=h;el.innerHTML=h}}
+function setText(el,t){if(el.textContent!==t)el.textContent=t}
 let ws=null,wsTimer=null,wsOK=false;
 function connectWS(){
   try{ws=new WebSocket(feedBase().replace(/^http/,"ws")+"/ws")}catch(e){return}
@@ -777,26 +780,29 @@ document.addEventListener("scroll",e=>{const el=e.target;if(!el.classList||!el.c
   if(card){card.querySelectorAll(".dots button").forEach((b,j)=>b.setAttribute("aria-current",String(j===i)));const sm=card.querySelector(".dots small"),db=card.querySelectorAll(".dots button")[i];if(sm&&db&&db.dataset.l)sm.textContent=db.dataset.l}
   scheduleLive()},true);
 function drawCharts(withStatic=true){
+  const tick=Math.floor(Date.now()/5000); // the time axis creeps forward: redraw at most every 5 s without new prices
   document.querySelectorAll('[data-live^="chart:"]').forEach(el=>{const k=el.dataset.live.slice(6),L=live[k];if(!L)return;const m=botModel(k),hb=heldBet(k);
-    if(!L.pts.length&&!L.err){if(!el.firstElementChild||!el.firstElementChild.classList.contains("sk"))el.innerHTML=`<span class="sk skblock" style="height:${+el.dataset.h||150}px"></span>`;return}
+    if(!L.pts.length&&!L.err){setHTML(el,`<span class="sk skblock" style="height:${+el.dataset.h||150}px"></span>`);return}
+    const w=el.clientWidth||326,sig=[L.v,w,tick,m&&m.p,hb&&hb.id,L.err].join("|");if(el._sig===sig)return;el._sig=sig;
     const from=L.kind==="ladder"?Math.max(L.open||0,Date.now()-6*3600e3):L.open;
-    el.innerHTML=chanceSVG(L.pts,el.clientWidth||326,+el.dataset.h||150,{from,to:null,model:L.kind==="ladder"||!m?null:m.p,
+    el.innerHTML=chanceSVG(L.pts,w,+el.dataset.h||150,{from,to:null,model:L.kind==="ladder"||!m?null:m.p,
       entry:hb&&hb.price!=null?(hb.side==="NO"?1-hb.price:hb.price):null,entryT:hb?hb.ts:null})});
-  document.querySelectorAll('[data-live^="mini:"]').forEach(el=>{const L=live[el.dataset.live.slice(5)];if(!L)return;if(!L.pts.length){el.innerHTML=`<span class="sk skblock" style="height:44px"></span>`;return}el.innerHTML=lineSVG(L.pts.map(p=>p.p),el.clientWidth||326,44)});
-  document.querySelectorAll('[data-live^="spark:"]').forEach(el=>{const L=live[el.dataset.live.slice(6)];el.innerHTML=lineSVG(L.pts.map(p=>p.p),64,26)});
+  document.querySelectorAll('[data-live^="mini:"]').forEach(el=>{const L=live[el.dataset.live.slice(5)];if(!L)return;if(!L.pts.length){setHTML(el,`<span class="sk skblock" style="height:44px"></span>`);return}
+    const w=el.clientWidth||326,sig=L.v+"|"+w;if(el._sig!==sig){el._sig=sig;el.innerHTML=lineSVG(L.pts.map(p=>p.p),w,44)}});
+  document.querySelectorAll('[data-live^="spark:"]').forEach(el=>{const L=live[el.dataset.live.slice(6)];if(!L||el._sig===L.v)return;el._sig=L.v;el.innerHTML=lineSVG(L.pts.map(p=>p.p),64,26)});
   if(!withStatic)return;
   const pc=$("pnlchart");if(pc){const v=pc.dataset.vals.split(",").map(Number);pc.innerHTML=lineSVG(v,pc.clientWidth||326,90,"var(--blue)",true)}
   const bk=$("bankchart");if(bk){const v=bk.dataset.vals.split(",").map(Number),b0=+bk.dataset.base;bk.innerHTML=lineSVG(v,bk.clientWidth||326,90,v[v.length-1]>=b0?"var(--blue)":"var(--down)",b0)}
   const bc=$("betchart");if(bc)drawBetChart(bc);
 }
 function updateLive(){
-  document.querySelectorAll('[data-live^="cd:"]').forEach(el=>el.textContent=countdown(el.dataset.live.slice(3)));
-  document.querySelectorAll('[data-live^="ch:"]').forEach(el=>el.innerHTML=chanceLine(el.dataset.live.slice(3)));
-  document.querySelectorAll('[data-live^="q:"]').forEach(el=>{const h=qHTML(el.dataset.live.slice(2));if(el.innerHTML!==h)el.innerHTML=h});
-  document.querySelectorAll('[data-live^="model:"]').forEach(el=>el.textContent=modelNote(el.dataset.live.slice(6)));
-  document.querySelectorAll('[data-live^="spot:"]').forEach(el=>el.textContent=spotLine(el.dataset.live.slice(5)));
-  document.querySelectorAll('[data-live^="settle:"]').forEach(el=>el.textContent=settleLine(el.dataset.live.slice(7)));
-  document.querySelectorAll('[data-live^="yn:"]').forEach(el=>el.innerHTML=ynTiles(el.dataset.live.slice(3)));
+  document.querySelectorAll('[data-live^="cd:"]').forEach(el=>setText(el,countdown(el.dataset.live.slice(3))));
+  document.querySelectorAll('[data-live^="ch:"]').forEach(el=>setHTML(el,chanceLine(el.dataset.live.slice(3))));
+  document.querySelectorAll('[data-live^="q:"]').forEach(el=>setHTML(el,qHTML(el.dataset.live.slice(2))));
+  document.querySelectorAll('[data-live^="model:"]').forEach(el=>setText(el,modelNote(el.dataset.live.slice(6))));
+  document.querySelectorAll('[data-live^="spot:"]').forEach(el=>setText(el,spotLine(el.dataset.live.slice(5))));
+  document.querySelectorAll('[data-live^="settle:"]').forEach(el=>setText(el,settleLine(el.dataset.live.slice(7))));
+  document.querySelectorAll('[data-live^="yn:"]').forEach(el=>setHTML(el,ynTiles(el.dataset.live.slice(3))));
   drawCharts(false);
 }
 const betCandles={};
@@ -824,7 +830,7 @@ document.addEventListener("click",async e=>{
   if(a==="tab")return tab(v);
   if(a==="feat"){ui.feat=v;return render()}
   if(a==="slide"){const el=t.closest(".livecard").querySelector(".slides");return showSlide(el,+t.dataset.i,true)}
-  if(a==="coin"){ui.coinTab=t.dataset.sub||"overview";return go({page:"coin",sym:v})}
+  if(a==="coin"){ui.coinTab=t.dataset.sub||"overview";const c=COINS.find(x=>x.sym===v);if(c)spot(c).then(updateLive);return go({page:"coin",sym:v})}
   if(a==="bet")return go({page:"bet",id:v});
   if(a==="set")return go({page:"set",sec:v});
   if(["coinTab","pnlRange","sportsType","league","actView"].includes(a)){ui[a]=v;return render()}
@@ -866,18 +872,28 @@ async function refresh(){
     file("LIVE.json").then(t=>{try{liveSnap=t?JSON.parse(t):null}catch(e){liveSnap=null}}).catch(()=>{});
   }else{sample=true;bets=sampleBets();briefing="Sample mode. Your bot’s AI briefing shows here once connected.";report="Sample mode."}
   await loadDB().catch(()=>{});
+  refresh.at=Date.now();
   const editing=document.querySelector("[data-var]:focus,[data-bet]:focus")||[...document.querySelectorAll("[data-bet],[data-var]")].some(el=>el.value.trim()!==el.dataset.orig);
-  if(!editing)render();   // never wipe unsaved bet settings
+  const sig=dataSig();if(!editing&&sig!==refresh.sig){refresh.sig=sig;render()}   // never wipe unsaved edits; skip no-op rebuilds
+}
+function dataSig(){ // everything the screens are built from (live prices update in place and aren't part of it)
+  const b=bets.map(x=>x.id+":"+x.status+":"+x.pnl).join(",");
+  return JSON.stringify([b,sample,vars,wfState,runsCache.map(r=>r.id+r.status+r.conclusion),account,briefing.length,report.length,
+    liveSnap&&liveSnap.ts,model&&model.ts,storage&&storage.file_mb,dbNote,summaryKV.kalshi_health,Math.floor(Date.now()/600000)]);
 }
 function start(){
   $("setup").hidden=true;$("screen").hidden=false;$("tabs").hidden=false;
   render(true);refresh();
-  COINS.forEach(spot);connectWS();
+  connectWS();
   (async()=>{const order=[COINS.find(x=>x.sym===ui.feat),...COINS.filter(x=>x.sym!==ui.feat)];
     for(const c of order){await discover(c);scheduleLive()}
     for(const c of order){await discoverLadder(c);scheduleLive()}})();
   setInterval(pollMarkets,10000);
-  setInterval(()=>{if(document.visibilityState==="visible")COINS.forEach(spot)},10000);
+  setInterval(()=>{if(document.visibilityState==="visible"&&route.page==="coin")spot(COINS.find(c=>c.sym===route.sym))},10000);
+  // coming back to the app: catch up at once instead of waiting for the next timer
+  document.addEventListener("visibilitychange",()=>{if(document.visibilityState!=="visible")return;
+    if(!ws||ws.readyState>1){clearTimeout(wsTimer);connectWS()}
+    updateLive();pollMarkets();if(Date.now()-(refresh.at||0)>30000)refresh()});
   setInterval(()=>{if(document.visibilityState==="visible")updateLive()},1000);
   setInterval(()=>{if(document.visibilityState==="visible")refresh()},60000);
   addEventListener("resize",()=>drawCharts());
