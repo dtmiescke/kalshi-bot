@@ -13,6 +13,7 @@ from .llm import LLM
 from .config import CRYPTO_15M, SPORTS
 from .kalshi_client import KalshiClient, num, price
 from .matching import market_team_labels, match_event
+from .redact import redact
 from .odds import OddsClient, consensus, next_game_ts as odds_next_game, record_spend, refresh_plan
 from . import crypto_brain
 from .live import settlement
@@ -249,13 +250,13 @@ class Engine:
             # from being used for bets; health is explicit for the dashboard/report.
             health = {
                 "status": "error", "ts": now, "sport": sport,
-                "error": str(exc)[:500], "cached_events": len(cached_events),
+                "error": redact(str(exc))[:500], "cached_events": len(cached_events),
             }
             self.store.set_kv(f"odds_feed_health_{sport}", health)
-            log.warning("sportsbook odds %s unavailable: %s", sport, exc)
+            log.warning("sportsbook odds %s unavailable: %s", sport, redact(str(exc)))
             try:
                 alerts.send("Sportsbook odds feed unavailable",
-                            f"{sport}: {str(exc)[:300]}. Cached data retained; freshness gate remains active.",
+                            f"{sport}: {redact(str(exc))[:300]}. Cached data retained; freshness gate remains active.",
                             tags=["warning"])
             except Exception:
                 log.debug("could not send sportsbook feed alert", exc_info=True)

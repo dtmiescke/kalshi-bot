@@ -81,6 +81,30 @@ def janitor_retention(store, now=None):
             "ts": now}
 
 
+def janitor_scrub_secrets(store, now=None):
+    """Remove any secret that is already sitting in a stored URL (older saves kept one in plain text in the
+    published database). Runs with the other janitors and does nothing when the data is clean."""
+    from .redact import scrub_urls
+    now = int(time.time() if now is None else now)
+    fixed = 0
+    with store.lock:
+        db = store.db
+        rows = db.execute("""SELECT k, v FROM kv WHERE v LIKE '%key=%' OR v LIKE '%token=%'
+                             OR v LIKE '%Key=%' OR v LIKE '%secret=%'""").fetchall()
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            for k, v in rows:
+                new = scrub_urls(v)
+                if new != v:
+                    db.execute("UPDATE kv SET v=? WHERE k=?", (new, k))
+                    fixed += 1
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+    return {"janitor": "scrub_secrets", "fixed": fixed, "ts": now}
+
+
 # decision_audit keeps every decision forever (calibration and backtests read
 # model_prob/outcome), but its signals_json snapshot with per-signal details is
 # read only for the newest graded rows (about a day of them). Older rows keep
@@ -209,7 +233,9 @@ def run_janitors(store, now=None, force=False, every_hours=1):
     b = janitor_retention(store, now=now)
     d = janitor_prune_audit(store, now=now)
     c = janitor_slim_audit(store, now=now, keep_days=pressure_keep_days(store))
-    result = {"ok": True, "janitor_a": a, "janitor_b": b, "janitor_c": c, "janitor_d": d, "ts": int(now)}
+    e = janitor_scrub_secrets(store, now=now)
+    result = {"ok": True, "janitor_a": a, "janitor_b": b, "janitor_c": c, "janitor_d": d, "janitor_e": e,
+              "ts": int(now)}
     trimmed = sum(b["before"][t] - b["after"].get(t, b["before"][t]) for t in b["before"])
     trimmed += d["unscored"] + d["unsettled"]
     if trimmed >= COMPACT_AFTER_ROWS or c["bytes_saved"] >= COMPACT_AFTER_BYTES:
