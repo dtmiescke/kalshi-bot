@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from . import brain, guard
-from . import cross_market, entry_rules, entry_timing, hindsight, lead_lag, online, simulate, slices, sweep, window_review
+from . import cross_market, entry_rules, readiness, entry_timing, hindsight, lead_lag, online, simulate, slices, sweep, window_review
 from .storage import stats_since
 
 E = html.escape
@@ -433,7 +433,7 @@ def summary(store):
                "aggression_level": s.aggression_level} if s else None
     kv = {k: store.get_kv(k) for k in SUMMARY_KV}
     kv.update({k: store.get_kv(k) for k in (f"tail_model_{c}" for c in ("BTC", "ETH", "SOL"))})
-    return {
+    out = {
         "version": 1, "ts": int(time.time()),
         "council": council[:50], "members": members, "model": model,
         "lessons": q("SELECT ts, text FROM lessons ORDER BY ts DESC LIMIT 5"),
@@ -461,6 +461,8 @@ def summary(store):
         "sweep": _safe(sweep.report, store),
         "account": account,
     }
+    out["readiness"] = _safe(lambda st: readiness.report(st, out), store)
+    return out
 
 
 def write(store, settings, out_dir="data/site"):
