@@ -96,6 +96,23 @@ def _rotating_event_batch(events, cursor="", budget=150, held=()):
     return [event for _, event in held_rows + selected], next_cursor
 
 
+def soon_odds_events(events_by_series, odds_series, now, hours=36, cap=60):
+    """Tickers of games in odds-covered leagues starting soon, nearest first.
+
+    The rotating batch can go many scans without selecting a league the books cover,
+    so these are always scanned: otherwise nothing is ever compared to book prices."""
+    from .event_clock import event_start_ts
+    rows = []
+    for series in odds_series:
+        for ev in events_by_series.get(series, []):
+            start = event_start_ts(ev)
+            ticker = str(ev.get("event_ticker") or "")
+            if ticker and start is not None and now - 3 * 3600 <= start <= now + hours * 3600:
+                rows.append((start, ticker))
+    rows.sort()
+    return [t for _, t in rows[:max(0, int(cap))]]
+
+
 def _series_sport(series, metadata=None):
     """Map a discovered Kalshi series to a known odds key or a research category."""
     if series in SPORTS:
@@ -570,6 +587,7 @@ class Engine:
         if event_budget is not None:
             summary["event_budget"] = int(event_budget)
         held = {b["event_ticker"] for b in self.store.open_bets(mode=self.s.mode)}
+        soon = set()
         if sports and event_budget is None and getattr(self.s, "combo_research_enabled", True):
             from . import combo_research
             summary["combos"] = combo_research.scan(self.data, self.store, settings=self.s)
@@ -688,8 +706,12 @@ class Engine:
                 cursor = str(self.store.get_kv("sports_event_cursor", "") or "")
                 all_unique = [ev for series in sorted(events_by_series)
                               for ev in events_by_series.get(series, [])]
+                odds_leagues = set(SPORTS.values())
+                soon = set(soon_odds_events(
+                    events_by_series, [k for k, v in series_map.items() if v in odds_leagues],
+                    now, cap=int(os.environ.get("SPORTS_SOON_CAP", "60"))))
                 selected_events, cursor = _rotating_event_batch(
-                    all_unique, cursor, event_budget, held=held)
+                    all_unique, cursor, event_budget, held=set(held) | soon)
                 selected_by_series = {}
                 for ev in selected_events:
                     series = ev.get("series_ticker")
@@ -769,6 +791,7 @@ class Engine:
                 # revisit events with open positions, even after the budget.
                 event_ticker = str(ev.get("event_ticker") or "")
                 if (market_budget is not None and event_ticker not in held
+                        and event_ticker not in soon
                         and sports_markets_processed >= market_budget):
                     sports_markets_deferred += len(markets)
                     continue
