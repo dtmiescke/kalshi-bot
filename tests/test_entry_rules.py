@@ -63,6 +63,20 @@ class TestTable(unittest.TestCase):
         self.assertGreater(by["first_clear"]["mean"], 0)                                    # YES won at 56¢ + fee
         self.assertEqual(by["first_clear"]["state"], "learning")                            # one window proves nothing
 
+    def test_persistent_edge_needs_the_same_side_on_two_readings_in_a_row(self):
+        close = entry_rules.entry_timing.close_ts("KXBTC15M-26OCT282345-45")
+        # window A: YES clears the bar at two readings in a row -> entered at the second
+        self.add("KXBTC15M-26OCT282345-45", close - 9 * 60, 0.72, 0.55, 1, {})
+        self.add("KXBTC15M-26OCT282345-45", close - 8 * 60, 0.72, 0.55, 1, {})
+        # window B: clears once, then the edge disappears -> never entered
+        self.add("KXETH15M-26OCT282345-45", close - 9 * 60, 0.72, 0.55, 0, {})
+        self.add("KXETH15M-26OCT282345-45", close - 8 * 60, 0.55, 0.55, 0, {})
+        t = entry_rules.table(self.store, now=close)
+        by = {r["rule"]: r for r in t["rules"]}
+        self.assertEqual(by["first_clear"]["n"], 2)
+        self.assertEqual(by["persistent_edge"]["n"], 1)
+        self.assertGreater(by["persistent_edge"]["mean"], 0)                                # window A's YES won
+
 
 if __name__ == "__main__":
     unittest.main()
