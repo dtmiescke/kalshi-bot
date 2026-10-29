@@ -130,6 +130,12 @@ def periodic_cycle(s, store, data):
         crypto_combo.grade(store)
     except Exception as e:
         logging.warning("crypto combo grading failed: %s", e)
+    if os.environ.get("NBA_TONIGHT", "yes") == "yes":      # reads tonight's slate and keeps the shadow picks graded (never trades)
+        try:
+            from . import nba_tonight
+            nba_tonight.run(store, data, every=int(os.environ.get("NBA_EVERY_SECONDS", 3600)))
+        except Exception as e:
+            logging.warning("nba tonight failed: %s", e)
 
 
 def _attach_code_health(store_health, code_health):
