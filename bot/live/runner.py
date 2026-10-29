@@ -88,6 +88,8 @@ class LiveRunner:
         self._sl = (0.0, None)    # (time, bet-slice table)
         self._et = (0.0, None)    # (time, entry-timing table), refreshed every 10 minutes
         self.lead_lag = lead_lag_study.LeadLag(store)   # records how fast Kalshi follows spot jumps (no bets)
+        self.perp = feeds.PerpMids()                    # Hyperliquid perpetual mids, free WebSocket
+        self.perp_lead = lead_lag_study.LeadLag(store, table="perp_lead")   # same study, triggered by perp jumps (no bets)
         # A prior process may have died after Kalshi accepted a resting order.
         # Do not resume trading until that exchange state is reconciled manually.
         prior_maker = self.store.get_kv("maker_recovery")
@@ -558,6 +560,11 @@ class LiveRunner:
             self.lead_lag.observe(ticker, info["series"], now, (ctx.get("spot") or {}).get("composite"),
                                   ctx.get("kalshi_yes_bid"), ctx.get("kalshi_yes_ask"),
                                   cm.prob if cm else None, ctx.get("vol_forecast_per_min"))
+            perp_mid = self.perp.mid(COINS_TO_COIN.get(info["series"]))
+            if perp_mid:
+                self.perp_lead.observe(ticker, info["series"], now, perp_mid, ctx.get("kalshi_yes_bid"),
+                                       ctx.get("kalshi_yes_ask"), cm.prob if cm else None,
+                                       ctx.get("vol_forecast_per_min"), ref=(ctx.get("spot") or {}).get("composite"))
             terms = info["terms"]
             close_ts = int(terms["close_ts"] or 0)
             if close_ts <= 0:
@@ -1177,6 +1184,10 @@ class LiveRunner:
             tasks.append(asyncio.create_task(feeds.run_feed(
                 "gemini", feeds.GEMINI_WS, lambda: feeds.gemini_subs(list(by_gemini)),
                 lambda m: feeds.handle_gemini(m, by_gemini, gemini_books), gemini_gap, stop)))
+        if os.environ.get("PERP_LEAD_FEED", "yes") == "yes":
+            tasks.append(asyncio.create_task(feeds.run_feed(
+                "hyperliquid", feeds.HYPERLIQUID_WS, feeds.hyperliquid_subs,
+                lambda m: feeds.handle_hyperliquid(m, self.perp), lambda: None, stop)))
         data_kid, data_pem = self.s.data_key()
         use_ws = bool(data_kid and data_pem)
         kalshi_task = None

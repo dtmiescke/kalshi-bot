@@ -455,6 +455,7 @@ def summary(store):
         "slices": _safe(slices.summary, store),
         "simulation": _safe(simulate.report, store),
         "lead_lag": _safe(lead_lag.report, store),
+        "perp_lead": _safe(lambda st: lead_lag.report(st, table="perp_lead"), store),
         "online": _safe(online.report, store),
         "sweep": _safe(sweep.report, store),
         "account": account,
