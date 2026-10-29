@@ -19,7 +19,7 @@ import subprocess
 import shlex
 import time
 
-from .. import alerts, brain, briefing, council, crypto_brain, entry_timing, fees, slices, lead_lag as lead_lag_study, guard, handoff, hindsight, ml, risk, token_data, window_review
+from .. import alerts, brain, briefing, council, crypto_brain, entry_timing, fees, slices, cross_market, lead_lag as lead_lag_study, guard, handoff, hindsight, ml, risk, token_data, window_review
 from .. import features, marketdata, vol as volmod
 from ..engine import Engine
 from ..grader import grade
@@ -88,6 +88,7 @@ class LiveRunner:
         self._sl = (0.0, None)    # (time, bet-slice table)
         self._et = (0.0, None)    # (time, entry-timing table), refreshed every 10 minutes
         self.lead_lag = lead_lag_study.LeadLag(store)   # records how fast Kalshi follows spot jumps (no bets)
+        self.cross = cross_market.CrossMarket(store)    # hourly ladder vs the 15-minute window ending with it (no bets)
         self.perp = feeds.PerpMids()                    # Hyperliquid perpetual mids, free WebSocket
         self.perp_lead = lead_lag_study.LeadLag(store, table="perp_lead")   # same study, triggered by perp jumps (no bets)
         # A prior process may have died after Kalshi accepted a resting order.
@@ -392,6 +393,25 @@ class LiveRunner:
                 self._pb = (now, self._pb[1] or {"rules": {}, "windows": 0})
         return self._pb[1]
 
+    def maybe_cross_check(self, ticker, info, terms, close_ts, now, ctx):
+        """Hourly ladder vs this 15-minute window, same second, off the loop. A study: it never trades."""
+        try:
+            if os.environ.get("CROSS_MARKET_STUDY", "yes") != "yes" or info["series"] not in cross_market.LADDER:
+                return
+            if close_ts % 3600 or not self.cross.due(ticker, now, close_ts):
+                return
+            bid, ask, strike = ctx.get("kalshi_yes_bid"), ctx.get("kalshi_yes_ask"), terms.get("strike")
+            if bid is None or ask is None or not strike:
+                return
+            self.cross.next[ticker] = now + cross_market.CHECK_EVERY       # one in flight per window
+            fetch = lambda ev: self.rest._paged("/markets", "markets", {"event_ticker": ev, "limit": 200}, max_pages=2)
+            job = asyncio.to_thread(self.cross.check, ticker, info["series"], now, close_ts, strike, bid, ask, fetch)
+            asyncio.get_running_loop().create_task(job)
+        except RuntimeError:
+            pass                                   # no running loop (synchronous callers and tests)
+        except Exception as exc:
+            log.debug("cross-market check skipped: %s", exc)
+
     def entry_table(self, now):
         """When in the window entries have paid (bot/entry_timing.py), recomputed every 10 minutes."""
         if self._et[1] is None or now - self._et[0] >= 600:
@@ -569,6 +589,7 @@ class LiveRunner:
             close_ts = int(terms["close_ts"] or 0)
             if close_ts <= 0:
                 continue
+            self.maybe_cross_check(ticker, info, terms, close_ts, now, ctx)
             self.store.set_kv(f"start_{ticker}", close_ts)
             self.store.set_kv(f"settle_after_{ticker}", close_ts + 300)
             # Read and test everything from 20 s before the window starts until the bet is
