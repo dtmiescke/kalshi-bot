@@ -48,3 +48,24 @@ minus half the spread; newer events store bid and ask.
 98% win rate at +23 cents. That was an artifact: `market_price` is a mid, and on most rungs the real ask is far worse. Using
 the bot's own edge, computed against the real ask and fee, only 44 markets had a tradable edge and they averaged +6.8 cents
 at z 1.0. Not significant. Keep this in mind for any result that looks too good: check it against the real ask first.
+
+## Round 3: what Kalshi lists beyond crypto, and a test on FX
+
+**Public structure (API + rulebook only; Kalshi's internal code is not accessible and was not touched).** Of 1,093 financial
+series, the frequent ones are 14 fifteen-minute, 33 hourly and 61 daily. Median volume per settled market (last 40):
+S&P 500 daily up/down (KXINXDUD) 17,600 contracts, USDJPY 15-minute 8,400, EURUSD 15-minute 8,200, GBPUSD 4,600,
+Nasdaq daily 4,200, USDCAD 3,900, AUDUSD 2,900, Treasury yields 15-minute 240-860. Most hourly index and yield series trade
+nothing. FX 15-minute markets settle on the **Pyth Network** price (target = Pyth at the window start, `>=` so ties resolve
+Yes); the S&P daily settles on the index close against the prior week's close. Pyth's historical endpoints now need
+credentials, so the exact oracle series could not be replayed; Kalshi's settled markets publish the strike and settlement value.
+
+**Pre-registered test (24 rules, bar z >= 2.87, 900 windows over 5 days: EURUSD, USDJPY, GBPUSD).** At 10, 7, 4 and 2 minutes
+left: buy the long shot or the favorite when one side is 85+ cents, always Yes, always No, follow or fade a Kalshi price move of
+8+ points over 3 minutes. **0 of 24 passed.** Nothing was positive on both halves. The always-No rule lost about $9-10 per
+$100 bet on both halves at 4 and 2 minutes left (ties resolve Yes, and Yes was never cheaper), and fading price moves lost about
+$11-13 per $100 late in the window. Costs and the Yes-on-tie rule explain a small part; the rest is that the price path is not
+exploitable with these rules.
+
+**Next honest step.** The FX markets are thick and settle on a free public oracle (Pyth Hermes streams live). The one thing not
+tested is a live quote-lag study like the crypto one (record Pyth and Kalshi quotes each second, log would-be entries, settle
+them), which needs the bot to read Pyth in the stream. That is a new collector, not a new rule.
