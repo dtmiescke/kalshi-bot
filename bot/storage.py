@@ -9,6 +9,8 @@ import threading
 import time
 from datetime import datetime, timezone
 
+from .redact import scrub_urls
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS market_snapshots (
     ts INTEGER, ticker TEXT, event_ticker TEXT, series TEXT, title TEXT,
@@ -372,7 +374,8 @@ class Store:
         return json.loads(rows[0]["v"]) if rows else default
 
     def set_kv(self, k, v):
-        self.x("INSERT OR REPLACE INTO kv(k, v) VALUES(?, ?)", (k, json.dumps(v)))
+        # Last line of defence: an error text with a key in its URL must never be saved (the database is published).
+        self.x("INSERT OR REPLACE INTO kv(k, v) VALUES(?, ?)", (k, scrub_urls(json.dumps(v))))
 
     def reserve_kv(self, k, v):
         """Atomically reserve a KV key across threads and processes.

@@ -9,6 +9,8 @@ import time
 
 import requests
 
+from .redact import redact
+
 from .config import BOOK_WEIGHTS
 
 ODDS_URL = "https://api.the-odds-api.com/v4/sports/{sport}/odds"
@@ -98,12 +100,20 @@ class OddsClient:
         # the last known-good cache rather than silently disabling sportsbook data.
         if not self.api_key:
             raise RuntimeError("ODDS_API_KEY is missing; live sportsbook consensus is unavailable")
-        r = requests.get(ODDS_URL.format(sport=sport), params={
-            "apiKey": self.api_key, "regions": regions, "markets": "h2h",
-            "oddsFormat": "american"}, timeout=self.timeout)
-        # Authentication and unsupported-market errors are not valid empty
-        # schedules. Raise so callers preserve the last known-good odds cache.
-        r.raise_for_status()
+        try:
+            r = requests.get(ODDS_URL.format(sport=sport), params={
+                "apiKey": self.api_key, "regions": regions, "markets": "h2h",
+                "oddsFormat": "american"}, timeout=self.timeout)
+            # Authentication and unsupported-market errors are not valid empty
+            # schedules. Raise so callers preserve the last known-good odds cache.
+            r.raise_for_status()
+        except requests.RequestException as exc:
+            # requests puts the full URL, which carries the API key, in its error text.
+            message = redact(str(exc))
+            try:
+                raise type(exc)(message) from None
+            except TypeError:
+                raise RuntimeError(message) from None
         payload = r.json()
         if not isinstance(payload, list):
             raise RuntimeError("Odds API returned an unexpected payload; expected a list of events")

@@ -52,7 +52,7 @@ SPORTS = {
     "KXEREDIVISIEGAME": "soccer_netherlands_eredivisie",
     "KXLIGAMXGAME": "soccer_mexico_ligamx",
     "KXBRASILEIROGAME": "soccer_brazil_campeonato",
-    "KXSAUDIPLGAME": "soccer_saudi_professional_league",
+    "KXSAUDIPLGAME": "soccer_saudi_arabia_pro_league",
 }
 
 # Kalshi 15-minute crypto Up/Down series -> reference USD pair identifier.
