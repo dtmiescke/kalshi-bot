@@ -5,6 +5,7 @@ Kalshi labels teams loosely ("Boston", "BOS", "Celtics"); books use full names
 be close, so two games involving the same city can't get crossed.
 """
 import re
+import unicodedata
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 
@@ -13,12 +14,20 @@ ALIASES = {
     "ny": "new york", "la": "los angeles", "sf": "san francisco",
     "kc": "kansas city", "tb": "tampa bay", "gb": "green bay",
     "no": "new orleans", "ne": "new england", "lv": "las vegas",
+    "psg": "paris saint germain", "man": "manchester", "utd": "united",
 }
 
 
+# Club-name padding that one side writes and the other does not ("AFC Bournemouth" / "Bournemouth").
+CLUB_NOISE = {"fc", "afc", "cf", "sc", "ac", "cd", "ud"}
+# Kalshi lists soccer games with a third market for the draw; the sportsbooks call that outcome "Draw".
+DRAW_LABELS = {"tie", "draw", "the draw"}
+
+
 def norm(s):
-    s = re.sub(r"[^a-z0-9 ]", " ", (s or "").lower())
-    words = [ALIASES.get(w, w) for w in s.split()]
+    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode()      # "Atletico" == "Atl\u00e9tico"
+    s = re.sub(r"[^a-z0-9 ]", " ", s.lower())
+    words = [ALIASES.get(w, w) for w in s.split() if w not in CLUB_NOISE]
     return " ".join(words)
 
 
@@ -81,7 +90,9 @@ def match_event(kalshi_teams, kalshi_time, odds_events, max_hours=96, min_score=
     "Los Angeles" from pairing with the wrong LA team. Returns
     ({kalshi_team: book_team}, event) or (None, None).
     """
-    if len(kalshi_teams) != 2:
+    draws = [t for t in kalshi_teams if norm(t) in DRAW_LABELS]
+    kalshi_teams = [t for t in kalshi_teams if norm(t) not in DRAW_LABELS]
+    if len(kalshi_teams) != 2 or len(draws) > 1:
         return None, None
     kt = _parse_time(kalshi_time)
     best, best_score = None, 0.0
@@ -95,4 +106,6 @@ def match_event(kalshi_teams, kalshi_time, odds_events, max_hours=96, min_score=
             sa, sb = name_score(a, x), name_score(b, y)
             if min(sa, sb) >= min_score and sa + sb > best_score:
                 best_score, best = sa + sb, ({a: x, b: y}, ev)
+    if best and draws:
+        best[0][draws[0]] = "Draw"          # the draw market is priced against the books' "Draw" outcome
     return best if best else (None, None)

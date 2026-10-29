@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from . import brain, guard
-from . import cross_market, entry_rules, experiment, readiness, entry_timing, hindsight, lead_lag, online, simulate, slices, sweep, window_review
+from . import cross_market, entry_rules, experiment, sports_study, readiness, entry_timing, hindsight, lead_lag, online, simulate, slices, sweep, window_review
 from .storage import stats_since
 
 E = html.escape
@@ -457,6 +457,7 @@ def summary(store):
         "lead_lag": _safe(lead_lag.report, store),
         "cross_market": _safe(cross_market.report, store),
         "experiment": _safe(experiment.report, store),
+        "sports_study": _safe(sports_study.report, store),
         "perp_lead": _safe(lambda st: lead_lag.report(st, table="perp_lead"), store),
         "online": _safe(online.report, store),
         "sweep": _safe(sweep.report, store),
