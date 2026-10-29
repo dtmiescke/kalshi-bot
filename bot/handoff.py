@@ -8,7 +8,6 @@ A deploy or a manual run waiting in line also ends the stream at the next such p
 so changes are not held up for hours.
 """
 import logging
-import os
 
 import requests
 

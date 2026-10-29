@@ -23,7 +23,7 @@ from .. import alerts, brain, briefing, council, crypto_brain, entry_timing, fee
 from .. import features, marketdata, vol as volmod
 from ..engine import Engine
 from ..grader import grade
-from ..kalshi_client import KalshiClient, price
+from ..kalshi_client import KalshiClient
 from ..llm import LLM
 from ..signals import crypto as crypto_sig
 from ..signals import flow as flow_sig

@@ -1,12 +1,11 @@
 """The probability the bot bets on is Kalshi's price plus the share of its disagreement that was real."""
-import json
 import os
 import random
 import tempfile
 import unittest
 from unittest import mock
 
-from bot import brain, features, ml
+from bot import brain, ml
 from bot.storage import Store
 
 

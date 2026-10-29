@@ -125,6 +125,11 @@ class TestAppSummary(unittest.TestCase):
         for old in ('Math.abs(l.mean_pnl*100).toFixed(1)+"¢"', 'Math.abs(r.mean*100).toFixed(1)+"¢"', '(r.edge*100).toFixed(1)}¢'):
             self.assertNotIn(old, html)
 
+    def test_plural_handles_y_words_and_the_status_pill_is_honest_when_unknown(self):
+        html = open(os.path.join(os.path.dirname(__file__), "..", "index.html"), encoding="utf-8").read()
+        self.assertIn('/[^aeiou]y$/.test(w)?w.slice(0,-1)+"ies"', html)                 # "entries", not "entrys"
+        self.assertIn('(demo?"Demo":"Checking")', html)                                   # connected but state unknown is not "Demo"
+
     def test_insights_shows_each_window_read_and_its_result(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")
         self.assertIn("function readsCard(sym)", html)

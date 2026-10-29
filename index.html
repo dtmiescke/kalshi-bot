@@ -242,7 +242,7 @@ function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");cle
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 const fmt2=x=>Math.abs(x).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
 function money(x){return (x<0?"−$":"$")+fmt2(x)}
-const plural=(n,w)=>n+" "+w+(n===1?"":"s");
+const plural=(n,w)=>n+" "+(n===1?w:/[^aeiou]y$/.test(w)?w.slice(0,-1)+"ies":w+"s");
 const per100=v=>(v>=0?"+":"−")+"$"+Math.abs(v*200).toFixed(2); // profit per contract -> about $ per $100 bet, at the usual ~50¢ price (200 contracts)
 const cash=x=>Number.isInteger(+x)?"$"+(+x).toLocaleString("en-US"):money(+x);
 function smoney(x){return (x>=0?"+$":"−$")+fmt2(x)}
@@ -535,7 +535,7 @@ $("tabs").addEventListener("click",e=>{const b=e.target.closest("button");if(b)t
 /* ================= screens ================= */
 function header(title,right=""){return`<div class="head"><div class="t"><h1>${title}</h1>${sample?'<span class="samplechip">Sample data</span>':""}</div>${right}</div>`}
 function detailHeader(title,right=""){return`<div class="head"><div class="t"><button class="back" data-act="back" aria-label="Back">${BACK}</button><h1 style="font-size:19px">${esc(title)}</h1></div>${right}</div>`}
-function botStatus(){const on=wfState==="active";return`<div style="display:flex;gap:8px;align-items:center;flex:0 0 auto"><span class="status"><span class="dot ${wfState&&!on?"off":""}"></span>${wfState?(on?"Running":"Paused"):"Demo"}</span><span class="pill">${esc((vars.BOT_MODE||"paper").toUpperCase())}</span></div>`}
+function botStatus(){const on=wfState==="active";return`<div style="display:flex;gap:8px;align-items:center;flex:0 0 auto"><span class="status"><span class="dot ${wfState&&!on?"off":""}"></span>${wfState?(on?"Running":"Paused"):(demo?"Demo":"Checking")}</span><span class="pill">${esc((vars.BOT_MODE||"paper").toUpperCase())}</span></div>`}
 function countdown(k){const L=live[k];if(!L||!L.close)return"–";const s=Math.max(0,Math.round((L.close-Date.now())/1000));
   if(s>=86400)return Math.floor(s/86400)+"d "+Math.floor(s%86400/3600)+"h";
   const h=Math.floor(s/3600),m=Math.floor(s%3600/60),ss=String(s%60).padStart(2,"0");return h?h+":"+String(m).padStart(2,"0")+":"+ss:m+":"+ss}
@@ -701,14 +701,14 @@ function timingCard(){ // when in the 15-minute window would-be entries have pai
   const b=sample?[[13.55,12,40,.012,"learning"],[12,10,71,.021,"open"],[10,8,88,.004,"open"],[8,6,92,-.011,"open"],[6,4,64,-.052,"blocked"],[4,2,58,.009,"learning"]].map(r=>({from:r[0],to:r[1],n:r[2],mean:r[3],state:r[4]})):(timingRep&&timingRep.buckets);
   if(!b||!b.length)return"";
   const name=r=>`${Math.round(15-r.from)}–${Math.round(15-r.to)} min in`,word={learning:"Learning",open:"Open",blocked:"Skipped",favoured:"Paying"};
-  return`<section class="card" style="gap:0"><div class="cardhead"><h2>Best time to bet</h2><small class="muted">would-be entries, per $100 bet</small></div>
+  return`<section class="card" style="gap:0"><div class="cardhead"><h2>Best time to bet</h2><small class="muted">per $100 bet</small></div>
     ${b.map(r=>`<div class="kv"><span>${name(r)} <small class="muted">· ${plural(r.n,"window")}</small></span><b class="num ${r.n&&r.mean>0?"up":r.n&&r.mean<0?"down":""}">${r.n?per100(r.mean):"–"} · ${word[r.state]||r.state}</b></div>`).join("")}
     <small class="note" style="margin-top:8px">The bot bets the first time its edge clears the bar, any time from 90 seconds in. A stretch is skipped only once ${timingRep?timingRep.min_windows:60}+ windows show entries there lose money. Until then nothing is skipped.</small></section>`}
 function rulesCard(){ // would waiting for confirmation have paid? (summary.json "entry_rules")
   const r=sample?{min_trades:60,rules:[{label:"Bet when the edge clears (current)",n:83,mean:-.041,state:"no proof"},{label:"Skip prices near 50¢ (higher fees)",n:68,mean:-.036,state:"no proof"},{label:"Wait for a 5-minute candle that agrees",n:49,mean:-.054,state:"learning"},{label:"5-min, 15-min and strike all agree, 8+ min in",n:24,mean:-.079,state:"learning"}]}:rulesRep;
   if(!r||!r.rules.length)return"";
   const word={learning:"Learning",paying:"Paying","no proof":"No proof",losing:"Losing"};
-  return`<section class="card" style="gap:0"><div class="cardhead"><h2>Wait for confirmation?</h2><small class="muted">would-be entries, per $100 bet</small></div>
+  return`<section class="card" style="gap:0"><div class="cardhead"><h2>Wait for confirmation?</h2><small class="muted">per $100 bet</small></div>
     ${r.rules.map(x=>`<div class="kv"><span>${esc(x.label)} <small class="muted">· ${plural(x.n,"entry")}</small></span><b class="num ${x.n&&x.mean>0?"up":x.n&&x.mean<0?"down":""}">${x.n?per100(x.mean):"–"} · ${word[x.state]||x.state}</b></div>`).join("")}
     <small class="note" style="margin-top:8px">Each rule is replayed on settled windows after fees. A later entry pays Kalshi’s later price, so waiting only helps if the confirmation is worth more than the price move. A rule counts only with ${r.min_trades}+ entries and a result that beats luck; nothing here places or changes a bet.</small></section>`}
 function slicesCard(){ // which kinds of settled paper bets paid, with a bar raised for how many were compared (summary.json "slices")
