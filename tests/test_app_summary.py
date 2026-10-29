@@ -118,6 +118,13 @@ class TestAppSummary(unittest.TestCase):
         self.assertNotIn('document.addEventListener("touchmove"', html)  # page scrolling never waits on JS
         self.assertIn("if(el._scrubbing)return;", html)                # the chart holds still while being read
 
+    def test_study_cards_show_dollars_per_100_dollar_bet_not_cents(self):
+        html = open(os.path.join(os.path.dirname(__file__), "..", "index.html"), encoding="utf-8").read()
+        self.assertIn("const per100=", html)
+        self.assertGreaterEqual(html.count("per $100 bet"), 4)
+        for old in ('Math.abs(l.mean_pnl*100).toFixed(1)+"¢"', 'Math.abs(r.mean*100).toFixed(1)+"¢"', '(r.edge*100).toFixed(1)}¢'):
+            self.assertNotIn(old, html)
+
     def test_insights_shows_each_window_read_and_its_result(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")
         self.assertIn("function readsCard(sym)", html)
