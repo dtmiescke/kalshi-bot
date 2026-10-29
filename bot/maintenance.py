@@ -5,6 +5,7 @@ Janitor B removes invalid raw rows and applies existing retention windows.
 Neither janitor deletes bets, forecasts, grades, lessons, model weights, or audit history.
 """
 import json
+import os
 import sqlite3
 import time
 
@@ -88,6 +89,22 @@ def janitor_retention(store, now=None):
 AUDIT_DETAIL_DAYS = 2
 AUDIT_SLIM_OVER = 400       # bytes; smaller snapshots are left alone
 AUDIT_SLIM_BATCH = 50_000
+
+
+# The compressed memory file must stay well under GitHub's 100 MB limit (the save refuses past about 95 MB, which
+# would lose a whole run's learning). The database file is about 10x its compressed size, so once it passes this
+# many bytes the full-detail window shrinks from two days to six hours, which frees the most bulky rows first.
+AUDIT_PRESSURE_BYTES = 700_000_000
+AUDIT_PRESSURE_DETAIL_DAYS = 0.25
+
+
+def pressure_keep_days(store):
+    """Days of full-detail audit snapshots to keep: the normal window, or the short one when the file is large."""
+    try:
+        size = os.path.getsize(store.path)
+    except (AttributeError, OSError):
+        return AUDIT_DETAIL_DAYS
+    return AUDIT_PRESSURE_DETAIL_DAYS if size > AUDIT_PRESSURE_BYTES else AUDIT_DETAIL_DAYS
 
 
 def slim_signals(raw):
@@ -191,7 +208,7 @@ def run_janitors(store, now=None, force=False, every_hours=1):
     a = janitor_dedupe(store, now=now)
     b = janitor_retention(store, now=now)
     d = janitor_prune_audit(store, now=now)
-    c = janitor_slim_audit(store, now=now)
+    c = janitor_slim_audit(store, now=now, keep_days=pressure_keep_days(store))
     result = {"ok": True, "janitor_a": a, "janitor_b": b, "janitor_c": c, "janitor_d": d, "ts": int(now)}
     trimmed = sum(b["before"][t] - b["after"].get(t, b["before"][t]) for t in b["before"])
     trimmed += d["unscored"] + d["unsettled"]

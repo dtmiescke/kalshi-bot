@@ -192,6 +192,7 @@ def stats_since(raw=None):
 
 class Store:
     def __init__(self, path):
+        self.path = path
         d = os.path.dirname(path)
         if d:
             os.makedirs(d, exist_ok=True)
