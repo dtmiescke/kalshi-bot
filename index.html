@@ -243,6 +243,7 @@ function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&l
 const fmt2=x=>Math.abs(x).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
 function money(x){return (x<0?"−$":"$")+fmt2(x)}
 const plural=(n,w)=>n+" "+w+(n===1?"":"s");
+const per100=v=>(v>=0?"+":"−")+"$"+Math.abs(v*200).toFixed(2); // profit per contract -> about $ per $100 bet, at the usual ~50¢ price (200 contracts)
 const cash=x=>Number.isInteger(+x)?"$"+(+x).toLocaleString("en-US"):money(+x);
 function smoney(x){return (x>=0?"+$":"−$")+fmt2(x)}
 function cls(x){return x>0?"up":x<0?"down":""}
@@ -680,7 +681,7 @@ function gapCard(){ // is there anything to find? Kalshi's excess error and how 
 function sweepCard(){ // which settings would have worked, tested on windows the pick never saw (summary.json "sweep")
   const w=sample?{windows:1041,combinations:16,needed_z:2.73,verdict:"does not hold up",best:{bar:.03,shrink:1,train_n:144,train_mean:.0081,train_z:.22,test_n:134,test_mean:.0109,test_z:.29}}:sweepRep;
   if(!w)return"";
-  const b=w.best,cents=v=>(v>=0?"+":"−")+Math.abs(v*100).toFixed(1)+"¢";
+  const b=w.best,cents=v=>per100(v);
   return`<section class="card" style="gap:0"><div class="cardhead"><h2>Settings search</h2><small class="muted">${w.combinations} combinations tried</small></div>
     <div class="kv"><span>Verdict</span><b class="${w.verdict==="holds up"?"up":w.verdict==="does not hold up"?"down":""}">${w.verdict==="holds up"?"Holds up":w.verdict==="does not hold up"?"Does not hold up":"Too few windows yet"}</b></div>
     ${b?`<div class="kv"><span>Best on older windows <small class="muted">· ${plural(b.train_n,"bet")}</small></span><b class="num">${cents(b.train_mean)} · ${b.train_z==null?"–":b.train_z.toFixed(1)} se</b></div>
@@ -693,22 +694,22 @@ function lagCard(){ // does Kalshi lag a jump in the spot price, and did buying 
   return`<section class="card" style="gap:0"><div class="cardhead"><h2>Does Kalshi lag the spot price?</h2><small class="muted">after sudden jumps</small></div>
     <div class="kv"><span>Jumps recorded</span><b class="num">${l.events}</b></div>
     ${hs.map(h=>`<div class="kv"><span>Share of the move Kalshi had made after ${h}s</span><b class="num">${Math.round(f[h].slope*100)}%</b></div>`).join("")}
-    <div class="kv"><span>Buying the instant it is seen, per contract</span><b class="num ${l.mean_pnl>0?"up":l.mean_pnl<0?"down":""}">${l.mean_pnl==null?"–":(l.mean_pnl>=0?"+":"−")+Math.abs(l.mean_pnl*100).toFixed(1)+"¢"}${l.settled?` · ${plural(l.settled,"settled jump")}`:""}</b></div>
-    ${l.delayed&&l.delayed.settled?`<div class="kv"><span>Buying ${l.delayed.latency_s}s later (a real order), per contract</span><b class="num ${l.delayed.mean_pnl>0?"up":l.delayed.mean_pnl<0?"down":""}">${(l.delayed.mean_pnl>=0?"+":"−")+Math.abs(l.delayed.mean_pnl*100).toFixed(1)}¢ · ${plural(l.delayed.settled,"settled jump")}</b></div>`:""}
+    <div class="kv"><span>Buying the instant it is seen, per $100 bet</span><b class="num ${l.mean_pnl>0?"up":l.mean_pnl<0?"down":""}">${l.mean_pnl==null?"–":per100(l.mean_pnl)}${l.settled?` · ${plural(l.settled,"settled jump")}`:""}</b></div>
+    ${l.delayed&&l.delayed.settled?`<div class="kv"><span>Buying ${l.delayed.latency_s}s later (a real order), per $100 bet</span><b class="num ${l.delayed.mean_pnl>0?"up":l.delayed.mean_pnl<0?"down":""}">${(l.delayed.mean_pnl>=0?"+":"−")+Math.abs(l.delayed.mean_pnl*100).toFixed(1)}¢ · ${plural(l.delayed.settled,"settled jump")}</b></div>`:""}
     <small class="note" style="margin-top:8px">A study, not a strategy: it places no bets. If Kalshi is slow to follow and buying into the jump pays after fees on enough settled jumps, that is an edge the bot could trade; until then it is just a measurement.</small></section>`}
 function timingCard(){ // when in the 15-minute window would-be entries have paid (summary.json "entry_timing")
   const b=sample?[[13.55,12,40,.012,"learning"],[12,10,71,.021,"open"],[10,8,88,.004,"open"],[8,6,92,-.011,"open"],[6,4,64,-.052,"blocked"],[4,2,58,.009,"learning"]].map(r=>({from:r[0],to:r[1],n:r[2],mean:r[3],state:r[4]})):(timingRep&&timingRep.buckets);
   if(!b||!b.length)return"";
   const name=r=>`${Math.round(15-r.from)}–${Math.round(15-r.to)} min in`,word={learning:"Learning",open:"Open",blocked:"Skipped",favoured:"Paying"};
-  return`<section class="card" style="gap:0"><div class="cardhead"><h2>Best time to bet</h2><small class="muted">would-be entries, per contract</small></div>
-    ${b.map(r=>`<div class="kv"><span>${name(r)} <small class="muted">· ${plural(r.n,"window")}</small></span><b class="num ${r.n&&r.mean>0?"up":r.n&&r.mean<0?"down":""}">${r.n?(r.mean>=0?"+":"−")+Math.abs(r.mean*100).toFixed(1)+"¢":"–"} · ${word[r.state]||r.state}</b></div>`).join("")}
+  return`<section class="card" style="gap:0"><div class="cardhead"><h2>Best time to bet</h2><small class="muted">would-be entries, per $100 bet</small></div>
+    ${b.map(r=>`<div class="kv"><span>${name(r)} <small class="muted">· ${plural(r.n,"window")}</small></span><b class="num ${r.n&&r.mean>0?"up":r.n&&r.mean<0?"down":""}">${r.n?per100(r.mean):"–"} · ${word[r.state]||r.state}</b></div>`).join("")}
     <small class="note" style="margin-top:8px">The bot bets the first time its edge clears the bar, any time from 90 seconds in. A stretch is skipped only once ${timingRep?timingRep.min_windows:60}+ windows show entries there lose money. Until then nothing is skipped.</small></section>`}
 function rulesCard(){ // would waiting for confirmation have paid? (summary.json "entry_rules")
   const r=sample?{min_trades:60,rules:[{label:"Bet when the edge clears (current)",n:83,mean:-.041,state:"no proof"},{label:"Skip prices near 50¢ (higher fees)",n:68,mean:-.036,state:"no proof"},{label:"Wait for a 5-minute candle that agrees",n:49,mean:-.054,state:"learning"},{label:"5-min, 15-min and strike all agree, 8+ min in",n:24,mean:-.079,state:"learning"}]}:rulesRep;
   if(!r||!r.rules.length)return"";
   const word={learning:"Learning",paying:"Paying","no proof":"No proof",losing:"Losing"};
-  return`<section class="card" style="gap:0"><div class="cardhead"><h2>Wait for confirmation?</h2><small class="muted">would-be entries, per contract</small></div>
-    ${r.rules.map(x=>`<div class="kv"><span>${esc(x.label)} <small class="muted">· ${plural(x.n,"entry")}</small></span><b class="num ${x.n&&x.mean>0?"up":x.n&&x.mean<0?"down":""}">${x.n?(x.mean>=0?"+":"−")+Math.abs(x.mean*100).toFixed(1)+"¢":"–"} · ${word[x.state]||x.state}</b></div>`).join("")}
+  return`<section class="card" style="gap:0"><div class="cardhead"><h2>Wait for confirmation?</h2><small class="muted">would-be entries, per $100 bet</small></div>
+    ${r.rules.map(x=>`<div class="kv"><span>${esc(x.label)} <small class="muted">· ${plural(x.n,"entry")}</small></span><b class="num ${x.n&&x.mean>0?"up":x.n&&x.mean<0?"down":""}">${x.n?per100(x.mean):"–"} · ${word[x.state]||x.state}</b></div>`).join("")}
     <small class="note" style="margin-top:8px">Each rule is replayed on settled windows after fees. A later entry pays Kalshi’s later price, so waiting only helps if the confirmation is worth more than the price move. A rule counts only with ${r.min_trades}+ entries and a result that beats luck; nothing here places or changes a bet.</small></section>`}
 function slicesCard(){ // which kinds of settled paper bets paid, with a bar raised for how many were compared (summary.json "slices")
   const r=sample?{min_bets:30,needed_z:2.7,bets:239,slices:[{dim:"all bets",label:"all bets",n:239,mean:0,state:"no proof"},{dim:"coin",label:"BNB",n:40,mean:-.29,state:"losing"},{dim:"coin",label:"BTC",n:84,mean:.15,state:"no proof"},{dim:"time",label:"first 3 min",n:50,mean:-.29,state:"losing"}]}:slicesRep;
@@ -722,7 +723,7 @@ function slicesCard(){ // which kinds of settled paper bets paid, with a bar rai
 function playbookCard(){ // setups the bot has proven on settled windows, by market condition (summary.json "playbook")
   const pb=sample?{windows:212,tested:54,validated:2,min_windows:50,top:[{regime:"trend/volup",label:"Trend follow",n:84,hit:.64,edge:.021},{regime:"range/voldown",label:"RSI fade",n:61,hit:.61,edge:.013}]}:playbook;
   if(!pb)return"";
-  const rows=(pb.top||[]).map(r=>`<div class="row" style="min-height:0;padding:8px 0"><span class="rowmain"><b>${esc(r.label)}</b><small>${esc(r.regime.replace("/"," · "))} · ${plural(r.n,"window")} · ${pct(r.hit)} right</small></span><span class="rowend up num">+${(r.edge*100).toFixed(1)}¢</span></div>`).join("");
+  const rows=(pb.top||[]).map(r=>`<div class="row" style="min-height:0;padding:8px 0"><span class="rowmain"><b>${esc(r.label)}</b><small>${esc(r.regime.replace("/"," · "))} · ${plural(r.n,"window")} · ${pct(r.hit)} right</small></span><span class="rowend up num">${per100(r.edge)}</span></div>`).join("");
   return`<section class="card"><div class="cardhead"><h2>Playbook</h2><small class="muted">learned after every window</small></div>
     <small class="muted" style="margin-top:-6px">After each window settles the bot replays every tool on it. ${plural(pb.windows,"window")} reviewed; a setup is trusted only after ${pb.min_windows}+ windows with a proven edge after fees (${pb.validated} so far).</small>
     ${rows||`<p class="empty">No setup has proven itself yet. It keeps testing.</p>`}</section>`}
