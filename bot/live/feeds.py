@@ -24,6 +24,7 @@ KRAKEN_WS = "wss://ws.kraken.com/v2"
 COINBASE_WS = "wss://ws-feed.exchange.coinbase.com"
 BITSTAMP_WS = "wss://ws.bitstamp.net"
 GEMINI_WS = "wss://api.gemini.com/v2/marketdata"
+HYPERLIQUID_WS = "wss://api.hyperliquid.xyz/ws"
 KALSHI_WS = {"demo": "wss://demo-api.kalshi.co/trade-api/ws/v2",
              "production": "wss://api.elections.kalshi.com/trade-api/ws/v2"}
 
@@ -218,6 +219,42 @@ async def run_feed(name, url, subscribe_msgs, handler, on_gap, stop, headers_fn=
             log.warning("%s feed dropped (%s); reconnecting in %ss", name, e, backoff)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60)
+
+
+class PerpMids:
+    """Latest Hyperliquid perpetual mid per coin (a derivatives venue that often moves before the spot exchanges
+    Kalshi settles on). Free public WebSocket, one subscription for every coin."""
+
+    def __init__(self, coins=("BTC", "ETH", "SOL", "BNB")):
+        self.coins = tuple(coins)
+        self.last = {}                        # coin -> (ts, mid)
+
+    def update(self, coin, mid, now=None):
+        self.last[coin] = (time.time() if now is None else now, float(mid))
+
+    def mid(self, coin, now=None, max_age=5.0):
+        """Mid if it is fresh, else None (never trade or study on a stale quote)."""
+        v = self.last.get(coin)
+        now = time.time() if now is None else now
+        return v[1] if v and now - v[0] <= max_age else None
+
+
+def handle_hyperliquid(msg, perp, now=None):
+    """allMids message -> update the coins we follow. Anything else is ignored."""
+    if not isinstance(msg, dict) or msg.get("channel") != "allMids":
+        return
+    mids = (msg.get("data") or {}).get("mids") or {}
+    for coin in perp.coins:
+        v = mids.get(coin)
+        if v not in (None, ""):
+            try:
+                perp.update(coin, v, now)
+            except (TypeError, ValueError):
+                pass
+
+
+def hyperliquid_subs():
+    return [{"method": "subscribe", "subscription": {"type": "allMids"}}]
 
 
 def kraken_subs(symbols, depth=100):

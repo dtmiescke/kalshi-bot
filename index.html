@@ -236,7 +236,7 @@ const $=id=>document.getElementById(id);
 const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
 let cfg=null;try{cfg=JSON.parse(localStorage.getItem("kbot")||"null")}catch(e){}
 let demo=false, vars={}, wfState=null, runsCache=[], bets=[], sample=false, briefing="", report="";
-let account=null, winReport=null, playbook=null, edgeRep=null, timingRep=null, rulesRep=null, slicesRep=null, simRep=null, lagRep=null, onlineRep=null, sweepRep=null, sigReport=[], council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
+let account=null, winReport=null, playbook=null, edgeRep=null, timingRep=null, rulesRep=null, slicesRep=null, perpRep=null, simRep=null, lagRep=null, onlineRep=null, sweepRep=null, sigReport=[], council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
 
 function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),2800)}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
@@ -364,7 +364,7 @@ async function loadDB(){
     if(sf.sha===loadDB.sha)return;
     try{const s=JSON.parse(await file("summary.json"));
       council=s.council||[];model=s.model||null;lessons=s.lessons||[];audit=s.audit||[];combos=s.combos||[];storage=s.storage||null;
-      summaryKV=s.kv||{};members=s.members||{};account=s.account||null;sigReport=s.signals||[];winReport=s.windows&&s.windows.stats?s.windows:null;playbook=s.playbook&&s.playbook.min_windows?s.playbook:null;edgeRep=s.edge&&s.edge.windows!=null?s.edge:null;timingRep=s.entry_timing&&s.entry_timing.buckets?s.entry_timing:null;simRep=s.simulation&&s.simulation.lam_used!=null?s.simulation:null;slicesRep=s.slices&&s.slices.slices?s.slices:null;rulesRep=s.entry_rules&&s.entry_rules.rules?s.entry_rules:null;lagRep=s.lead_lag&&s.lead_lag.events!=null?s.lead_lag:null;onlineRep=s.online&&s.online.online?s.online:null;sweepRep=s.sweep&&s.sweep.verdict?s.sweep:null;loadDB.sha=sf.sha;dbNote="";return}
+      summaryKV=s.kv||{};members=s.members||{};account=s.account||null;sigReport=s.signals||[];winReport=s.windows&&s.windows.stats?s.windows:null;playbook=s.playbook&&s.playbook.min_windows?s.playbook:null;edgeRep=s.edge&&s.edge.windows!=null?s.edge:null;timingRep=s.entry_timing&&s.entry_timing.buckets?s.entry_timing:null;simRep=s.simulation&&s.simulation.lam_used!=null?s.simulation:null;perpRep=s.perp_lead&&s.perp_lead.events!=null?s.perp_lead:null;slicesRep=s.slices&&s.slices.slices?s.slices:null;rulesRep=s.entry_rules&&s.entry_rules.rules?s.entry_rules:null;lagRep=s.lead_lag&&s.lead_lag.events!=null?s.lead_lag:null;onlineRep=s.online&&s.online.online?s.online:null;sweepRep=s.sweep&&s.sweep.verdict?s.sweep:null;loadDB.sha=sf.sha;dbNote="";return}
     catch(e){/* fall back to the full database below */}
   }
   const f=(list||[]).find(x=>x.name==="bot.sqlite.gz")||(list||[]).find(x=>x.name==="bot.sqlite");
@@ -628,7 +628,7 @@ function screenInsights(){
       ${I.cal.map(r=>`<div class="cal"><span class="muted">${r.l}</span><span class="track"><i style="width:${Math.round(r.won*100)}%"></i><u style="left:calc(${Math.round(r.said*100)}% - 1px)"></u></span><b class="num">${Math.round(r.won*100)}% <span class="muted" style="font-weight:500">of ${r.n}</span></b></div>`).join("")}</section>`+
     `<section class="card"><h2>P/L by time of day</h2><div class="bars hours">${I.hours.map(v=>`<div class="bar"><div class="u"><i style="height:${v>0?Math.round(v/mx*38):0}px"></i></div><div class="d"><i style="height:${v<0?Math.round(-v/mx*38):0}px"></i></div></div>`).join("")}</div>
       <div class="hourlab">${["12a","2a","4a","6a","8a","10a","12p","2p","4p","6p","8p","10p"].map(h=>`<span>${h}</span>`).join("")}</div></section>`+
-    readsCard(sym)+(sym?"":edgeCard()+scoreCard()+gapCard()+sweepCard()+lagCard()+timingCard()+rulesCard()+slicesCard()+playbookCard()+reportCard())+
+    readsCard(sym)+(sym?"":edgeCard()+scoreCard()+gapCard()+sweepCard()+lagCard()+perpCard()+timingCard()+rulesCard()+slicesCard()+playbookCard()+reportCard())+
     `<section class="card" style="gap:0"><div class="cardhead"><h2>Edge check</h2></div>
       <div class="kv"><span>Avg edge on winners</span><b class="num">${pts(I.edgeW)}</b></div>
       <div class="kv"><span>Avg edge on losers</span><b class="num">${pts(I.edgeL)}</b></div>
@@ -697,6 +697,18 @@ function lagCard(){ // does Kalshi lag a jump in the spot price, and did buying 
     <div class="kv"><span>Buying the instant it is seen, per $100 bet</span><b class="num ${l.mean_pnl>0?"up":l.mean_pnl<0?"down":""}">${l.mean_pnl==null?"–":per100(l.mean_pnl)}${l.settled?` · ${plural(l.settled,"settled jump")}`:""}</b></div>
     ${l.delayed&&l.delayed.settled?`<div class="kv"><span>Buying ${l.delayed.latency_s}s later (a real order), per $100 bet</span><b class="num ${l.delayed.mean_pnl>0?"up":l.delayed.mean_pnl<0?"down":""}">${(l.delayed.mean_pnl>=0?"+":"−")+Math.abs(l.delayed.mean_pnl*100).toFixed(1)}¢ · ${plural(l.delayed.settled,"settled jump")}</b></div>`:""}
     <small class="note" style="margin-top:8px">A study, not a strategy: it places no bets. If Kalshi is slow to follow and buying into the jump pays after fees on enough settled jumps, that is an edge the bot could trade; until then it is just a measurement.</small></section>`}
+function perpCard(){ // does the perpetual-futures price move before spot, and does Kalshi lag it? (summary.json "perp_lead")
+  const p=sample?{events:96,unmoved:{of:96,events:41,settled:30,mean_pnl:.011,z:.4,follow:{"2":{slope:.12,n:41},"5":{slope:.31,n:41},"10":{slope:.55,n:41}},delayed:{latency_s:2,settled:28,mean_pnl:.004,z:.1}}}:perpRep;
+  if(!p)return"";
+  const u=p.unmoved,f=(u&&u.follow)||{},hs=["2","5","10","30"].filter(h=>f[h]);
+  const col=v=>v>0?"up":v<0?"down":"";
+  return`<section class="card" style="gap:0"><div class="cardhead"><h2>Do perps move first?</h2><small class="muted">futures vs spot</small></div>
+    <div class="kv"><span>Perp jumps recorded</span><b class="num">${p.events}</b></div>
+    ${u?`<div class="kv"><span>Where spot had not moved yet</span><b class="num">${u.events} of ${u.of}</b></div>
+    ${hs.map(h=>`<div class="kv"><span>Share of the move Kalshi had made after ${h}s</span><b class="num">${Math.round(f[h].slope*100)}%</b></div>`).join("")}
+    ${u.settled?`<div class="kv"><span>Buy the instant it is seen, per $100 bet</span><b class="num ${col(u.mean_pnl)}">${u.mean_pnl==null?"–":per100(u.mean_pnl)} · ${plural(u.settled,"settled jump")}</b></div>`:""}
+    ${u.delayed&&u.delayed.settled?`<div class="kv"><span>Buy ${u.delayed.latency_s}s later (a real order), per $100 bet</span><b class="num ${col(u.delayed.mean_pnl)}">${per100(u.delayed.mean_pnl)} · ${plural(u.delayed.settled,"settled jump")}</b></div>`:""}`:`<p class="empty">Fills in as perp jumps are recorded.</p>`}
+    <small class="note" style="margin-top:8px">A study, not a strategy: it places no bets. Futures often move before the spot exchanges Kalshi settles on. If Kalshi is slow to follow a perp jump that spot has not yet made, and buying into it pays after fees on enough settled jumps, that would be a tradable lead.</small></section>`}
 function timingCard(){ // when in the 15-minute window would-be entries have paid (summary.json "entry_timing")
   const b=sample?[[13.55,12,40,.012,"learning"],[12,10,71,.021,"open"],[10,8,88,.004,"open"],[8,6,92,-.011,"open"],[6,4,64,-.052,"blocked"],[4,2,58,.009,"learning"]].map(r=>({from:r[0],to:r[1],n:r[2],mean:r[3],state:r[4]})):(timingRep&&timingRep.buckets);
   if(!b||!b.length)return"";

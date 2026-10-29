@@ -112,3 +112,52 @@ class TestReport(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPerpLead(unittest.TestCase):
+    def setUp(self):
+        from bot.live import feeds
+        self.feeds = feeds
+        self.store = Store(os.path.join(tempfile.mkdtemp(), "t.sqlite"))
+
+    def test_hyperliquid_mids_update_only_the_coins_followed(self):
+        perp = self.feeds.PerpMids(("BTC", "ETH"))
+        self.feeds.handle_hyperliquid({"channel": "allMids", "data": {"mids": {"BTC": "81000.5", "ETH": "2300", "DOGE": "0.1", "@5": "1"}}}, perp, now=100.0)
+        self.assertEqual(perp.mid("BTC", now=101.0), 81000.5)
+        self.assertEqual(perp.mid("ETH", now=101.0), 2300.0)
+        self.assertIsNone(perp.mid("DOGE", now=101.0))
+        self.assertIsNone(perp.mid("BTC", now=110.0))                       # stale after 5 s: never study on an old quote
+        self.feeds.handle_hyperliquid({"channel": "subscriptionResponse"}, perp, now=102.0)    # other messages ignored
+        self.feeds.handle_hyperliquid("junk", perp, now=102.0)
+        self.assertEqual(self.feeds.hyperliquid_subs()[0]["subscription"]["type"], "allMids")
+
+    def run_study(self, spot_moves):
+        ll = lead_lag.LeadLag(self.store, table="perp_lead")
+        t0, perp, spot = 1_000.0, 100.0, 100.0
+        for i in range(0, 100):
+            now = t0 + i
+            if i >= 20:
+                perp = 100.0 * 1.003                       # a perp jump of 0.3% (about 3 sigma at 0.05%/min) at second 20
+                if spot_moves:
+                    spot = 100.0 * 1.003
+            ll.observe("KXBTC15M-26OCT282345-45", "KXBTC15M", now, perp, 0.50, 0.52, 0.55, 0.0005, ref=spot)
+        return ll
+
+    def test_a_perp_jump_with_flat_spot_is_recorded_as_unmoved(self):
+        self.run_study(spot_moves=False)
+        self.store.x("INSERT INTO graded_markets VALUES(?,?,?,?)", ("KXBTC15M-26OCT282345-45", 1, 1, "live"))
+        rep = lead_lag.report(self.store, now=1_100.0, table="perp_lead")
+        self.assertEqual(rep["events"], 1)
+        self.assertEqual(rep["unmoved"]["events"], 1)
+        self.assertEqual(rep["unmoved"]["of"], 1)
+
+    def test_a_jump_spot_also_made_is_not_counted_as_unmoved(self):
+        self.run_study(spot_moves=True)
+        rep = lead_lag.report(self.store, now=1_100.0, table="perp_lead")
+        self.assertEqual(rep["events"], 1)
+        self.assertEqual(rep["unmoved"]["events"], 0)
+        self.assertEqual(rep["unmoved"]["of"], 1)
+
+    def test_perp_and_spot_studies_use_separate_tables(self):
+        self.run_study(spot_moves=False)
+        self.assertEqual(lead_lag.report(self.store, now=1_100.0)["events"], 0)         # the spot table is untouched
