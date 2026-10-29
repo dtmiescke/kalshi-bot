@@ -102,7 +102,16 @@ def settle_bets(store, client):
 def learn_from_markets(store, client, max_fetch=150):
     """Grade every researched market that has settled, then update weights."""
     now = int(time.time())
-    tickers = _rotating_tickers(store, "signals", "learning_cursor_ticker", max_fetch)
+    rotating = _rotating_tickers(store, "signals", "learning_cursor_ticker", max_fetch)
+    # 15-minute markets settle five minutes after they close and everything downstream (the scoreboard, the
+    # checklist, the learning) waits for them. The rotation above is alphabetical over thousands of sports futures
+    # that will not settle for weeks, so a full sweep took about 3.5 hours and each 15-minute market was graded
+    # that late. They go first on every pass; the rotation, and its cursor, carry on for everything else.
+    priority = [r["ticker"] for r in store.q(
+        """SELECT DISTINCT s.ticker FROM signal_readings s LEFT JOIN graded_markets g ON g.ticker=s.ticker
+           WHERE g.ticker IS NULL AND s.ticker LIKE 'KX%15M-%' ORDER BY s.ticker LIMIT ?""", (int(max_fetch),))]
+    first = set(priority)
+    tickers = priority + [t for t in rotating if t not in first]
     graded = []
     for t in tickers:
         start = store.get_kv(f"start_{t}")
@@ -147,7 +156,7 @@ def learn_from_markets(store, client, max_fetch=150):
                      t))
         store.x("INSERT OR IGNORE INTO graded_markets VALUES(?,?,?,?)",
                 (t, now, y, m.get("series_ticker") or m.get("series") or ""))
-    _advance_cursor(store, "learning_cursor_ticker", tickers)
+    _advance_cursor(store, "learning_cursor_ticker", rotating)       # the cursor follows the rotation, not the priority list
     changes = {}
     # Learn independently by identifiable league. Unknown leagues stay in the
     # shared sports bucket; crypto remains isolated from all sports weights.
