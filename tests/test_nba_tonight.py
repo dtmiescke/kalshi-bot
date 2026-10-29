@@ -95,14 +95,19 @@ class FakeClient:
         return {"result": self.results.get(ticker)}
 
 
+INJURIES = {"Cleveland Cavaliers": [{"name": "Teammate Out", "status": "Out", "comment": "out", "level": "out"}]}
+
+
 def fake_world():
     games_a = [game(f"2026-02-{i % 27 + 1:02d}", 34, pts=p) for i, p in enumerate([26, 30, 24, 28, 32, 27, 25, 29, 31, 26] * 3)]
     return [
         patch.object(nba, "tonight_games", lambda day=None, fetch=None: [{"id": "g1", "tip": TIP, "status": "STATUS_SCHEDULED", "home": HOME, "away": AWAY}]),
         patch.object(nba, "standings", lambda season, fetch=None: {"1": {"net": 1.0, "games": 5, "ppg": 118.0, "oppg": 117.0, "record": "3-2", "name": "Atlanta Hawks"},
                                                                   "5": {"net": 3.0, "games": 5, "ppg": 119.0, "oppg": 116.0, "record": "4-1", "name": "Cleveland Cavaliers"}}),
-        patch.object(nba, "roster", lambda tid, fetch=None: [{"id": "77", "name": "Star Player", "injuries": []}] if tid == "5" else []),
+        patch.object(nba, "roster", lambda tid, fetch=None: [{"id": "77", "name": "Star Player", "injuries": []},
+                                                             {"id": "78", "name": "Teammate Out", "injuries": []}] if tid == "5" else []),
         patch.object(nba, "player_games", lambda aid, fetch=None: games_a),
+        patch.object(nba, "injuries_feed", lambda fetch=None: INJURIES),
     ]
 
 
@@ -134,6 +139,70 @@ class TestReport(unittest.TestCase):
             if p["kind"] == "prop":
                 self.assertGreaterEqual(p["edge"], nba.MIN_EDGE)
                 self.assertGreater(p["cautious_edge"], 0)
+
+
+class TestLineups(unittest.TestCase):
+    def test_injury_levels_are_read_from_status_and_comment(self):
+        feed = {"injuries": [{"displayName": "Team A", "injuries": [
+            {"status": "Out", "shortComment": "knee surgery", "athlete": {"displayName": "A One"}},
+            {"status": "Day-To-Day", "shortComment": "Two is questionable for Thursday", "athlete": {"displayName": "A Two"}},
+            {"status": "Day-To-Day", "shortComment": "Three is doubtful for Thursday", "athlete": {"displayName": "A Three"}},
+            {"status": "Probable", "shortComment": "sore back, expected to play", "athlete": {"displayName": "A Four"}}]}]}
+
+        class R:
+            status_code = 200
+
+            def json(self):
+                return feed
+        out = nba.injuries_feed(lambda url, params=None, timeout=None: R())["Team A"]
+        self.assertEqual([r["level"] for r in out], ["out", "doubt", "out", "ok"])
+
+    def test_missing_minutes_raise_a_teammates_projection_but_never_past_the_cap(self):
+        games = [game(f"2026-02-{i % 27 + 1:02d}", 24, pts=12) for i in range(25)]
+        base, info = nba.projection(games, ("PTS",))
+        more, info2 = nba.projection(games, ("PTS",), extra_min=3.0)
+        huge, info3 = nba.projection(games, ("PTS",), extra_min=30.0)
+        self.assertGreater(more, base)
+        self.assertEqual(info2["minutes"], 27.0)
+        self.assertEqual(info3["minutes"], nba.MINUTES_CAP)                              # never bumped past 29
+        starters = [game(f"2026-02-{i % 27 + 1:02d}", 35, pts=20) for i in range(25)]
+        self.assertEqual(nba.projection(starters, ("PTS",), extra_min=8.0)[1]["minutes"], 35.0)   # his own minutes are never cut
+        games = [game(f"2026-02-{i % 27 + 1:02d}", 24, pts=12) for i in range(25)]
+        rebounds = [{**g, "REB": 6.0} for g in games]
+        self.assertGreater(nba.projection(rebounds, ("REB",), extra_min=3.0)[0], nba.projection(rebounds, ("REB",))[0])
+        self.assertLess(nba.projection(rebounds, ("REB",), extra_min=3.0)[0] / nba.projection(rebounds, ("REB",))[0],
+                        nba.projection(games, ("PTS",), extra_min=3.0)[0] / base)       # scoring also gets a usage bump; rebounds only minutes
+
+    def test_a_star_who_is_out_costs_his_team_strength(self):
+        self.assertAlmostEqual(nba.net_loss(28, 7), 0.12 * (28 + 10.5), places=3)
+        self.assertGreater(nba.net_loss(28, 7), nba.net_loss(8, 1))
+
+    def test_the_report_shows_who_is_out_and_passes_on_their_minutes(self):
+        ps = fake_world()
+        for p in ps:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in ps])
+        rep = nba.build_report(FakeClient(), None, now=1_793_300_000, day="20261029")
+        g = rep["games"][0]
+        self.assertEqual([a["name"] for a in g["lineups"]["away"]["absent"]], ["Teammate Out"])
+        self.assertLess(g["lineups"]["away"]["net_adjustment"], 0)                       # Cleveland is weaker without him
+        star = g["props"][0]
+        self.assertGreater(star["extra_minutes"], 0)                                      # the Star picks up some of his minutes
+        self.assertLessEqual(star["minutes"], max(nba.MINUTES_CAP, 34.0))                # never bumped past the cap (his own minutes aside)
+
+    def test_a_player_who_is_out_or_uncertain_is_never_picked(self):
+        for level in ("out", "doubt"):
+            feed = {"Cleveland Cavaliers": [{"name": "Star Player", "status": "x", "comment": "x", "level": level}]}
+            ps = fake_world()[:3] + [patch.object(nba, "player_games", lambda aid, fetch=None: [game(f"2026-02-{i % 27 + 1:02d}", 34, pts=p) for i, p in enumerate([26, 30, 24, 28, 32, 27, 25, 29, 31, 26] * 3)]),
+                                     patch.object(nba, "injuries_feed", lambda fetch=None, feed=feed: feed)]
+            for p in ps:
+                p.start()
+            try:
+                rep = nba.build_report(FakeClient(), None, now=1_793_300_000, day="20261029")
+            finally:
+                for p in ps:
+                    p.stop()
+            self.assertFalse([p for p in rep["picks"] if "Star Player" in p["label"]], level)
 
 
 class TestShadowAccount(unittest.TestCase):

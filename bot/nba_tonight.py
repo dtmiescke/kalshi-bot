@@ -40,6 +40,8 @@ LABEL = {"KXNBAPTS": "points", "KXNBAREB": "rebounds", "KXNBAAST": "assists", "K
          "KXNBABLK": "blocks", "KXNBAPRA": "pts+reb+ast", "KXNBAPR": "pts+reb", "KXNBAPA": "pts+ast", "KXNBARA": "reb+ast",
          "KXNBASTOCK": "stl+blk"}
 PRIOR_GAMES = 12            # last season counts as this many games of evidence for a player
+ABSORB = 0.4                # share of an absent teammate's minutes that the rest of the rotation picks up
+MINUTES_CAP = 29.0          # lineup news never bumps a player past this many minutes (his own recent minutes are never cut)
 TEAM_PRIOR = 20             # ... and this many for a team
 HOME_EDGE, GAME_SD = 2.5, 12.0
 MIN_EDGE, ML_EDGE, MAX_SPREAD, STAKE = 0.08, 0.03, 0.08, 5.0
@@ -88,7 +90,10 @@ def _rate(gs, comps):
     return sum(value(g, comps) for g in gs) / minutes if minutes else None
 
 
-def projection(games, comps, cur_start="2026-10-01"):
+USAGE_COMPS = {"PTS", "AST", "3PM"}      # production that rises when more of the offence runs through him
+
+
+def projection(games, comps, cur_start="2026-10-01", extra_min=0.0):
     """(projected mean, details). Production per MINUTE (this season blended with last by games played, 60%) plus his
     last 10 games (40%), multiplied by the minutes he is actually playing now (the last 5 games count most). Working
     in minutes is what lets a bigger role, or a returning injury, show up straight away."""
@@ -103,7 +108,10 @@ def projection(games, comps, cur_start="2026-10-01"):
     base = r_prior if not cur else (n * r_cur + PRIOR_GAMES * r_prior) / (n + PRIOR_GAMES)
     r10 = _rate(played[-10:], comps)
     exp_min = 0.7 * (sum(g["MIN"] for g in played[-5:]) / len(played[-5:])) + 0.3 * (sum(g["MIN"] for g in played[-15:]) / len(played[-15:]))
-    mu = (0.6 * base + 0.4 * r10) * exp_min
+    own_min = exp_min
+    exp_min = max(own_min, min(MINUTES_CAP, exp_min + extra_min))   # minutes a missing teammate leaves behind, capped
+    usage = 1 + 0.5 * (exp_min - own_min) / own_min if USAGE_COMPS & set(comps) else 1.0
+    mu = (0.6 * base + 0.4 * r10) * exp_min * usage
     per_game = lambda gs: round(sum(value(g, comps) for g in gs) / len(gs), 1) if gs else None
     return mu, {"season": per_game(cur), "last_season": per_game(prior), "l10": per_game(played[-10:]),
                 "l5": per_game(played[-5:]), "minutes": round(exp_min, 1), "games_this_season": n, "history": len(played)}
@@ -205,6 +213,34 @@ def roster(team_id, fetch=requests.get):
             for a in data.get("athletes") or [] if isinstance(a, dict) and a.get("id")]
 
 
+def injuries_feed(fetch=requests.get):
+    """ESPN's league-wide injury list -> {team display name: [{"name", "status", "comment", "level"}]}. level is
+    "out" (out or doubtful), "doubt" (day-to-day or questionable: his minutes are uncertain) or "ok"."""
+    data = _get(ESPN + "/injuries", None, fetch)
+    out = {}
+    for t in data.get("injuries") or []:
+        rows = []
+        for i in t.get("injuries") or []:
+            a = i.get("athlete") or {}
+            text = (i.get("shortComment") or i.get("longComment") or "")
+            low = (text + " " + str(i.get("status") or "")).lower()
+            if str(i.get("status") or "").lower() == "out" or "doubtful" in low or "ruled out" in low:
+                level = "out"
+            elif "day-to-day" in low or "questionable" in low or "game-time" in low or "minutes" in low:
+                level = "doubt"
+            else:
+                level = "ok"
+            rows.append({"name": a.get("displayName"), "status": i.get("status"), "comment": text[:160], "level": level})
+        out[t.get("displayName")] = rows
+    return out
+
+
+def net_loss(pts, ast):
+    """Points of team strength lost when a player with these per-game numbers is out (a heuristic: about 0.12 points
+    of margin per point or 1.5-assist-equivalent he produces, so a 28-point, 7-assist star is worth about 4.6)."""
+    return 0.12 * (pts + 1.5 * ast)
+
+
 def player_games(athlete_id, fetch=requests.get):
     games = []
     for season in (LAST, CURRENT):
@@ -295,6 +331,55 @@ def build_report(client, store=None, now=None, day=None, fetch=requests.get, max
     cur_start = "2026-10-01"
     report = {"ts": now, "day": day, "games": [], "picks": []}
     rosters, gl = {}, {}
+    for g in games:
+        for t in (g["home"], g["away"]):
+            rosters[t["id"]] = _cached(store, f"nba_roster_{t['id']}", 12 * 3600, lambda t=t: roster(t["id"], fetch), now)
+
+    def logs(pl):
+        if pl["id"] not in gl:
+            gl[pl["id"]] = _cached(store, f"nba_games_{pl['id']}", 6 * 3600, lambda: player_games(pl["id"], fetch), now)
+        return gl[pl["id"]]
+
+    # lineup news: who is out tonight, what that costs the team, and where their minutes go
+    inj = _cached(store, "nba_injuries", 1800, lambda: injuries_feed(fetch), now)
+    prop_events = {sr: [ev for ev in kalshi_events(client, sr) if event_game(ev, games)] for sr in SERIES}
+    listed = {}                                      # team id -> {player id: player}: the rotation Kalshi prices tonight
+    for sr, evs in prop_events.items():
+        for ev in evs:
+            g = event_game(ev, games)
+            ros = rosters[g["home"]["id"]] + rosters[g["away"]["id"]]
+            for m in ev.get("markets") or []:
+                mt = _PLAYER.match(m.get("yes_sub_title") or "")
+                pl = find_player(mt.group(1).strip(), ros) if mt else None
+                if pl:
+                    team = g["home"]["id"] if any(r["id"] == pl["id"] for r in rosters[g["home"]["id"]]) else g["away"]["id"]
+                    listed.setdefault(team, {})[pl["id"]] = pl
+    team_info = {}                                   # team id -> {"absent": [...], "doubt": [...], "net": float, "extra": float}
+    for g in games:
+        for t in (g["home"], g["away"]):
+            rows, absent, doubt = inj.get(t["name"], []), [], []
+            for r in rows:
+                pl = find_player(r["name"] or "", rosters[t["id"]])
+                if not pl or r["level"] == "ok":
+                    continue
+                played = [x for x in logs(pl) if x["MIN"] >= 8]
+                if r["level"] == "doubt":
+                    doubt.append({"name": pl["name"], "status": r["status"], "comment": r["comment"]})
+                    continue
+                if len(played) < 3:
+                    absent.append({"name": pl["name"], "status": r["status"], "comment": r["comment"], "minutes": 0.0, "pts": 0.0, "ast": 0.0, "id": pl["id"]})
+                    continue
+                last10 = played[-10:]
+                absent.append({"name": pl["name"], "status": r["status"], "comment": r["comment"], "id": pl["id"],
+                               "minutes": round(sum(x["MIN"] for x in played[-5:]) / len(played[-5:]), 1),
+                               "pts": round(sum(x["PTS"] for x in last10) / len(last10), 1),
+                               "ast": round(sum(x["AST"] for x in last10) / len(last10), 1)})
+            out_ids = {a["id"] for a in absent}
+            doubt_names = {norm(d["name"]) for d in doubt}
+            active = [pl for pid, pl in listed.get(t["id"], {}).items() if pid not in out_ids and norm(pl["name"]) not in doubt_names]
+            mins = {pl["id"]: (lambda pg: sum(x["MIN"] for x in pg[-5:]) / len(pg[-5:]) if pg else 0.0)([x for x in logs(pl) if x["MIN"] >= 8]) for pl in active}
+            team_info[t["id"]] = {"absent": absent, "doubt": doubt, "net": -min(12.0, sum(net_loss(a["pts"], a["ast"]) for a in absent)),
+                                  "out_min": sum(a["minutes"] for a in absent), "active_min": sum(mins.values()), "mins": mins}
 
     # moneyline
     ml_markets = {}
@@ -306,7 +391,14 @@ def build_report(client, store=None, now=None, day=None, fetch=requests.get, max
         h, a = g["home"], g["away"]
         sh = team_strength(cur.get(h["id"], {}), last.get(h["id"], {}))
         sa = team_strength(cur.get(a["id"], {}), last.get(a["id"], {}))
-        entry = {"id": g["id"], "tip": g["tip"], "home": h["name"], "away": a["name"], "ml": None, "props": []}
+        if sh is not None:
+            sh += team_info[h["id"]]["net"]                   # minus what the players who are out are worth
+        if sa is not None:
+            sa += team_info[a["id"]]["net"]
+        entry = {"id": g["id"], "tip": g["tip"], "home": h["name"], "away": a["name"], "ml": None, "props": [],
+                 "lineups": {k: {"absent": [{x: y for x, y in r.items() if x != "id"} for r in team_info[t["id"]]["absent"]],
+                                 "doubtful": team_info[t["id"]]["doubt"], "net_adjustment": round(team_info[t["id"]]["net"], 1)}
+                             for k, t in (("home", h), ("away", a))}}
         for side_key in ("home", "away"):
             t = g[side_key]
             entry[side_key + "_stats"] = {"record": cur.get(t["id"], {}).get("record"), "ppg": round(cur.get(t["id"], {}).get("ppg", 0), 1) or None,
@@ -348,14 +440,9 @@ def build_report(client, store=None, now=None, day=None, fetch=requests.get, max
 
     # player props
     for series, comps in SERIES.items():
-        for ev in kalshi_events(client, series):
+        for ev in prop_events[series]:
             g = event_game(ev, games)
-            if not g:
-                continue
             entry = next(x for x in report["games"] if x["id"] == g["id"])
-            for t in (g["home"], g["away"]):
-                if t["id"] not in rosters:
-                    rosters[t["id"]] = _cached(store, f"nba_roster_{t['id']}", 12 * 3600, lambda t=t: roster(t["id"], fetch), now)
             ros = rosters[g["home"]["id"]] + rosters[g["away"]["id"]]
             ladders = {}
             for m in ev.get("markets") or []:
@@ -367,14 +454,19 @@ def build_report(client, store=None, now=None, day=None, fetch=requests.get, max
                 pl = find_player(name, ros)
                 if not pl:
                     continue
-                if pl["id"] not in gl:
-                    gl[pl["id"]] = _cached(store, f"nba_games_{pl['id']}", 6 * 3600, lambda pl=pl: player_games(pl["id"], fetch), now)
-                games_p = gl[pl["id"]]
-                mu, info = projection(games_p, comps, cur_start)
+                tid = g["home"]["id"] if any(r["id"] == pl["id"] for r in rosters[g["home"]["id"]]) else g["away"]["id"]
+                ti = team_info[tid]
+                level = "out" if pl["id"] in {a["id"] for a in ti["absent"]} else "doubt" if norm(pl["name"]) in {norm(d["name"]) for d in ti["doubt"]} else "ok"
+                games_p = logs(pl)
+                extra = 0.0
+                if level == "ok" and ti["active_min"] > 0 and ti["out_min"] > 0:
+                    extra = ABSORB * ti["out_min"] * ti["mins"].get(pl["id"], 0.0) / ti["active_min"]   # his share of the missing minutes
+                mu, info = projection(games_p, comps, cur_start, extra_min=extra)
                 if mu is None or info.get("history", 0) < MIN_HISTORY:
                     continue
-                row = {"player": pl["name"], "stat": LABEL[series], "projection": round(mu, 1), **info,
-                       "status": ",".join(pl["injuries"]) if pl["injuries"] else "healthy", "rungs": []}
+                mu0, info0 = projection(games_p, comps, cur_start)         # the same player without any minutes passed on
+                row = {"player": pl["name"], "stat": LABEL[series], "projection": round(mu, 1), **info, "extra_minutes": round(extra, 1),
+                       "status": {"out": "out", "doubt": "uncertain"}.get(level, "healthy"), "rungs": []}
                 best = None
                 for k, m in sorted(rungs):
                     bid, ask = _f(m.get("yes_bid_dollars")), _f(m.get("yes_ask_dollars"))
@@ -385,23 +477,28 @@ def build_report(client, store=None, now=None, day=None, fetch=requests.get, max
                     p_cal = mid + SHRINK * (p - mid)                    # the same forecast, pulled toward Kalshi's own price
                     es = [e for e in side_edges(p, bid, ask) if (ask - bid) <= MAX_SPREAD]
                     ec = [e for e in side_edges(p_cal, bid, ask) if (ask - bid) <= MAX_SPREAD]
+                    p0 = prob_at_least(games_p, comps, mu0, info0["minutes"], k)
+                    e0 = [e for e in side_edges(p0, bid, ask) if (ask - bid) <= MAX_SPREAD] if p0 is not None else []
                     rung = {"line": k, "bid": bid, "ask": ask, "kalshi_mid": round(mid, 3), "p_model": round(p, 3),
                             "p_cautious": round(p_cal, 3), "best": es[0] if es else None, "ticker": m["ticker"]}
                     row["rungs"].append(rung)
                     # a pick needs the raw model to clear the bar AND the cautious version to still agree on the side
+                    # and, where lineup news moved his minutes, the version WITHOUT that guess has to agree on the side too
                     if es and es[0]["edge"] >= MIN_EDGE and ec and ec[0]["side"] == es[0]["side"] and ec[0]["edge"] > 0 \
+                            and e0 and e0[0]["side"] == es[0]["side"] and e0[0]["edge"] > 0.02 \
                             and (best is None or es[0]["edge"] > best[1]["edge"]):
-                        best = (rung, {**es[0], "cautious_edge": ec[0]["edge"]})
+                        best = (rung, {**es[0], "cautious_edge": ec[0]["edge"], "base_edge": e0[0]["edge"]})
                 fit = min(row["rungs"], key=lambda r: abs(r["line"] - mu), default=None)
                 row["fit_line"] = None if fit is None else {k: fit[k] for k in ("line", "kalshi_mid", "p_model")}
                 entry["props"].append(row)
-                if best and not pl["injuries"]:
+                if best and level == "ok":                           # never pick a player who is out or whose minutes are uncertain
                     rung, e = best
                     report["picks"].append({"kind": "prop", "game": f'{g["away"]["name"]} at {g["home"]["name"]}', "ticker": rung["ticker"],
                                             "label": f'{pl["name"]} {rung["line"]}+ {LABEL[series]} ({e["side"].upper()})', "side": e["side"],
                                             "price": e["price"], "contracts": e["contracts"], "fee": e["fee"], "p_model": e["p_win"],
                                             "edge": e["edge"], "tip": g["tip"], "projection": row["projection"],
-                                            "cautious_edge": e["cautious_edge"], "minutes": info["minutes"]})
+                                            "cautious_edge": e["cautious_edge"], "base_edge": e["base_edge"], "minutes": info["minutes"],
+                                            "extra_minutes": round(extra, 1)})
     # keep the strongest few props per game, and every moneyline pick
     kept, count = [], {}
     for pk in sorted(report["picks"], key=lambda r: -r["edge"]):
