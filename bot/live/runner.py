@@ -19,7 +19,7 @@ import subprocess
 import shlex
 import time
 
-from .. import alerts, brain, briefing, council, crypto_brain, entry_timing, fees, slices, cross_market, lead_lag as lead_lag_study, guard, handoff, hindsight, ml, risk, token_data, window_review
+from .. import alerts, brain, briefing, council, crypto_brain, entry_timing, fees, slices, cross_market, experiment, lead_lag as lead_lag_study, guard, handoff, hindsight, ml, risk, token_data, window_review
 from .. import features, marketdata, vol as volmod
 from ..engine import Engine
 from ..grader import grade
@@ -88,6 +88,10 @@ class LiveRunner:
         self._sl = (0.0, None)    # (time, bet-slice table)
         self._et = (0.0, None)    # (time, entry-timing table), refreshed every 10 minutes
         self.lead_lag = lead_lag_study.LeadLag(store)   # records how fast Kalshi follows spot jumps (no bets)
+        self.experiment = experiment.Experiment(           # shadow account for loosened rules (never trades)
+            store, min_edge=float(os.environ.get("EXPERIMENT_MIN_EDGE", experiment.MIN_EDGE)),
+            stake=float(os.environ.get("EXPERIMENT_STAKE", experiment.STAKE)))
+        self.exp_next = {}                                # ticker -> next time the shadow account may look
         self.cross = cross_market.CrossMarket(store)    # hourly ladder vs the 15-minute window ending with it (no bets)
         self.perp = feeds.PerpMids()                    # Hyperliquid perpetual mids, free WebSocket
         self.perp_lead = lead_lag_study.LeadLag(store, table="perp_lead")   # same study, triggered by perp jumps (no bets)
@@ -393,6 +397,28 @@ class LiveRunner:
                 self._pb = (now, self._pb[1] or {"rules": {}, "windows": 0})
         return self._pb[1]
 
+    def experiment_step(self, ticker, info, readings, weights, now, mins_left):
+        """Shadow account: what the loosened rules would do at this second's real quotes. Never trades, never raises,
+        and looks at most every 5 seconds per market."""
+        try:
+            if os.environ.get("EXPERIMENT_LANE", "yes") != "yes" or ticker in self.experiment.done:
+                return
+            if now < self.exp_next.get(ticker, 0):
+                return
+            self.exp_next[ticker] = now + 5
+            book = self.books.get(ticker)
+            if book is None or book.age() is None or book.age() > 5:
+                return
+            blend_in, _proven = hindsight.split_playbook(readings)
+            prob, _conf = brain.blend(blend_in, weights)
+            if prob is None:
+                return
+            prob = brain.calibrate(prob, self.store, domain=brain.domain_of(info["series"]))   # full forecast: no shrink
+            self.experiment.observe(ticker, info["series"], now, mins_left, prob,
+                                    risk.asks_from_book(book.as_rest_book()))
+        except Exception as exc:
+            log.debug("experiment lane skipped: %s", exc)
+
     def maybe_cross_check(self, ticker, info, terms, close_ts, now, ctx):
         """Hourly ladder vs this 15-minute window, same second, off the loop. A study: it never trades."""
         try:
@@ -652,6 +678,7 @@ class LiveRunner:
             mins_left = (close_ts - now) / 60
             if not (self.s.crypto_min_minutes <= mins_left <= self.s.crypto_max_minutes):
                 continue
+            self.experiment_step(ticker, info, readings, weights, now, mins_left)
             if not self.betting_ok or guard.league_benched(self.store, info["series"], mode=self.s.mode):
                 continue
             if os.environ.get("ENTRY_TIMING_GATE", "yes") == "yes" and \
