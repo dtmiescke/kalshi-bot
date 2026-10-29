@@ -7,6 +7,7 @@ luck, so a slice is called "paying" only if its lower bound clears zero at the b
 (hindsight.family_z over every slice tried), and "losing" only if its upper bound is below zero."""
 import math
 import time
+from datetime import datetime, timezone
 
 from . import entry_timing, hindsight
 
@@ -14,6 +15,7 @@ MIN_BETS = 30
 LOOKBACK_DAYS = 5      # a blocked kind of bet stops adding losses, so old ones must age out for it to be retested
 PRICE_BANDS = ((0.0, 0.25), (0.25, 0.40), (0.40, 0.60), (0.60, 0.75), (0.75, 1.01))
 TIME_BANDS = ((0, 3, "first 3 min"), (3, 6, "3–6 min in"), (6, 9, "6–9 min in"), (9, 15, "9+ min in"))
+SESSIONS = ((0, 7, "Asia hours (00–07 UTC)"), (7, 13, "Europe hours (07–13 UTC)"), (13, 21, "US hours (13–21 UTC)"), (21, 24, "Late US (21–24 UTC)"))
 COINS = {"KXBTC15M": "BTC", "KXETH15M": "ETH", "KXSOL15M": "SOL", "KXBNB15M": "BNB"}
 
 
@@ -33,6 +35,11 @@ def _minute_in(r):
             return name
 
 
+def _session(ts):
+    h = datetime.fromtimestamp(float(ts), timezone.utc).hour
+    return next((n for lo, hi, n in SESSIONS if lo <= h < hi), None)
+
+
 def keys(r):
     """The slices one bet belongs to: [(dimension, label)]."""
     out = [("all bets", "all bets"), ("style", (r["style"] or "taker") + " orders")]
@@ -44,6 +51,8 @@ def keys(r):
     t = _minute_in(r)
     if t:
         out.append(("time", t))
+    if r["ts"] is not None:
+        out.append(("session", _session(r["ts"])))
     return [(d, l) for d, l in out if l]
 
 
@@ -75,15 +84,16 @@ def summary(store):
     return table(store)
 
 
-GATED = ("coin", "price", "time")           # only these can stop a bet; side/style/overall are for reading
+GATED = ("coin", "price", "time", "session")           # only these can stop a bet; side/style/overall are for reading
 
 
-def blocked(tbl, series, side, price, mins_in):
+def blocked(tbl, series, side, price, mins_in, now=None):
     """The reason to skip a bet, or None. Only a slice proven to lose (past the whole-family bar) blocks."""
     if not tbl:
         return None
     mine = {("coin", COINS.get(series)), ("price", _band(price if price <= 1 else price / 100)),
-            ("time", next((n for lo, hi, n in TIME_BANDS if lo <= mins_in < hi), None))}
+            ("time", next((n for lo, hi, n in TIME_BANDS if lo <= mins_in < hi), None)),
+            ("session", _session(time.time() if now is None else now))}
     for s in tbl["slices"]:
         if s["dim"] in GATED and s["state"] == "losing" and (s["dim"], s["label"]) in mine:
             return f"{s['dim']} '{s['label']}': {s['n']} settled bets averaged {s['mean'] * 100:+.0f}% per dollar"

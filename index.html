@@ -714,7 +714,7 @@ function rulesCard(){ // would waiting for confirmation have paid? (summary.json
 function slicesCard(){ // which kinds of settled paper bets paid, with a bar raised for how many were compared (summary.json "slices")
   const r=sample?{min_bets:30,needed_z:2.7,bets:239,slices:[{dim:"all bets",label:"all bets",n:239,mean:0,state:"no proof"},{dim:"coin",label:"BNB",n:40,mean:-.29,state:"losing"},{dim:"coin",label:"BTC",n:84,mean:.15,state:"no proof"},{dim:"time",label:"first 3 min",n:50,mean:-.29,state:"losing"}]}:slicesRep;
   if(!r||!r.slices.length)return"";
-  const word={learning:"Learning",paying:"Paying","no proof":"No proof",losing:"Skipped"},names={"all bets":"Overall",style:"Order type",coin:"Coin",side:"Side",price:"Price paid",time:"When in the window"};
+  const word={learning:"Learning",paying:"Paying","no proof":"No proof",losing:"Skipped"},names={"all bets":"Overall",style:"Order type",coin:"Coin",side:"Side",price:"Price paid",time:"When in the window",session:"Time of day"};
   let last=null;
   return`<section class="card" style="gap:0"><div class="cardhead"><h2>Where bets have paid</h2><small class="muted">${plural(r.bets,"settled bet")}</small></div>
     ${r.slices.map(x=>{const head=x.dim!==last&&x.dim!=="all bets"?`<span class="cap" style="margin-top:8px">${names[x.dim]||x.dim}</span>`:"";last=x.dim;

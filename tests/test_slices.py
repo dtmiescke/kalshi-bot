@@ -59,9 +59,23 @@ class TestSlices(unittest.TestCase):
         for _ in range(60):
             self.bet(price=0.85, win=self.rng.random() < 0.5, mins_in=1.0)                # expensive and early, loses
         t = slices.table(self.store, now=self.now)
-        self.assertIn("75–100", slices.blocked(t, "KXETH15M", "yes", 0.9, 8.0))
-        self.assertIn("first 3 min", slices.blocked(t, "KXETH15M", "yes", 0.5, 1.0))
-        self.assertIsNone(slices.blocked(t, "KXETH15M", "yes", 0.5, 8.0))
+        t = {**t, "slices": [x for x in t["slices"] if x["dim"] != "session"]}                # judge price and timing on their own
+        self.assertIn("75–100", slices.blocked(t, "KXETH15M", "yes", 0.9, 8.0, now=self.now))
+        self.assertIn("first 3 min", slices.blocked(t, "KXETH15M", "yes", 0.5, 1.0, now=self.now))
+        self.assertIsNone(slices.blocked(t, "KXETH15M", "yes", 0.5, 8.0, now=self.now))      # that price and point in the window are fine
+
+    def test_the_time_of_day_session_is_a_slice_and_can_block(self):
+        for _ in range(240):
+            self.bet(series="KXSOL15M", price=0.5, win=self.rng.random() < 0.05, mins_in=self.rng.uniform(0, 14.9), age=self.rng.uniform(60, 3 * 86400))
+        t = slices.table(self.store, now=self.now)
+        sessions = {s["label"]: s for s in t["slices"] if s["dim"] == "session"}
+        self.assertTrue(sessions and sum(s["n"] for s in sessions.values()) == 240)
+        self.assertTrue(any(s["state"] == "losing" for s in sessions.values()))
+        busy = max(sessions.values(), key=lambda s: s["n"])["label"]
+        hour = {"Asia": 3, "Europe": 9, "US": 15, "Late": 22}[busy.split()[0]]
+        at = self.now - self.now % 86400 + hour * 3600
+        reasons = [slices.blocked(t, "KXBTC15M", "yes", 0.5, 8.0, now=at)]
+        self.assertTrue(any(reasons) or all(s["state"] != "losing" for s in sessions.values() if s["label"] == busy))
 
 
 if __name__ == "__main__":

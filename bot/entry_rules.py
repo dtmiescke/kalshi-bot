@@ -14,12 +14,13 @@ import time
 from . import entry_timing, hindsight, risk
 
 MIN_TRADES = 60
-RULES = ("first_clear", "away_from_even", "candle_5m", "candle_5m_vs_strike", "momentum_agree")
+RULES = ("first_clear", "away_from_even", "candle_5m", "candle_5m_vs_strike", "momentum_agree", "persistent_edge")
 LABELS = {"first_clear": "Bet when the edge clears (current)",
           "away_from_even": "Skip prices near 50¢ (higher fees)",
           "candle_5m": "Wait for a 5-minute candle that agrees",
           "candle_5m_vs_strike": "…and price already on the right side of the strike",
-          "momentum_agree": "5-min, 15-min and strike all agree, 8+ min in"}
+          "momentum_agree": "5-min, 15-min and strike all agree, 8+ min in",
+          "persistent_edge": "Same-side edge on two readings in a row"}
 
 
 def _sign(v):
@@ -30,7 +31,7 @@ def accepts(rule, yes, cost, min_left, ind):
     """Does this rule let the entry on `yes` (True for the YES side) through?"""
     want = 1 if yes else -1
     r5, r15, d = (_sign(ind.get(k)) for k in ("ret_5m", "ret_15m", "dist_sigma"))
-    if rule == "first_clear":
+    if rule in ("first_clear", "persistent_edge"):      # persistence is checked across readings in table()
         return True
     if rule == "away_from_even":
         return not 0.40 <= cost <= 0.60
@@ -43,12 +44,25 @@ def accepts(rule, yes, cost, min_left, ind):
     return False
 
 
-def _entry(rule, p, k, y, min_left, ind, fee_rate=0.07):
+def _entry(rule, p, k, y, min_left, ind, fee_rate=0.07, prev_side=None):
+    """(side, profit per $1 contract) of the first side whose edge clears the bar and the rule, else None.
+    persistent_edge also needs the same side to have cleared the bar on the reading before this one."""
     for yes, win_p, cost in ((True, p, k + 0.01), (False, 1 - p, 1 - k + 0.01)):
         cost = min(cost, 0.99)
         fee = risk.taker_fee(100, cost, fee_rate) / 100
         if win_p - cost - fee >= entry_timing.EDGE_BAR and accepts(rule, yes, cost, min_left, ind):
-            return (1 - cost - fee) if (y == 1) == yes else (-cost - fee)
+            if rule == "persistent_edge" and prev_side != yes:
+                continue
+            return yes, ((1 - cost - fee) if (y == 1) == yes else (-cost - fee))
+    return None
+
+
+def _clears(p, k):
+    """Which side (True=YES) has an edge over the bar at this reading, or None."""
+    for yes, win_p, cost in ((True, p, k + 0.01), (False, 1 - p, 1 - k + 0.01)):
+        cost = min(cost, 0.99)
+        if win_p - cost - risk.taker_fee(100, cost, 0.07) / 100 >= entry_timing.EDGE_BAR:
+            return yes
     return None
 
 
@@ -60,6 +74,7 @@ def table(store, now=None):
                       ORDER BY ts""", (*entry_timing.BAND, now - entry_timing.LOOKBACK_DAYS * 86400))
     taken = {r: {} for r in RULES}
     windows = set()
+    prev = {}                                   # ticker -> side that cleared the bar at the previous reading
     for r in rows:
         close = entry_timing.close_ts(r["ticker"])
         if close is None:
@@ -72,12 +87,14 @@ def table(store, now=None):
             ind = (json.loads(r["signals_json"] or "{}") or {}).get("indicators") or {}
         except ValueError:
             ind = {}
+        p, k = float(r["model_prob"]), float(r["market_price"])
         for rule in RULES:
             if r["ticker"] in taken[rule]:
                 continue
-            pnl = _entry(rule, float(r["model_prob"]), float(r["market_price"]), int(r["outcome"]), left, ind)
-            if pnl is not None:
-                taken[rule][r["ticker"]] = pnl
+            got = _entry(rule, p, k, int(r["outcome"]), left, ind, prev_side=prev.get(r["ticker"]))
+            if got is not None:
+                taken[rule][r["ticker"]] = got[1]
+        prev[r["ticker"]] = _clears(p, k)
     z = hindsight.family_z(len(RULES))
     out = []
     for rule in RULES:
