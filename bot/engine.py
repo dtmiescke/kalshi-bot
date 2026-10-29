@@ -32,6 +32,31 @@ log = logging.getLogger("bot")
 _EXECUTION_LOCK = threading.RLock()
 
 
+def top_up_known_leagues(data, events_by_series, series_map, only=None, known=None):
+    """The catalog listing is capped (20 pages of 200 events), and the leagues the bot has sportsbook odds for
+    (NBA, NHL, NFL, college football, MLB, the soccer leagues) can fall outside it. When they did, no game was
+    scanned, the odds were never refreshed and every sports market was skipped for "insufficient independent
+    evidence", with nothing in the logs. Fetch any such league directly. Returns the series it added."""
+    added = []
+    for series, sport in (known if known is not None else SPORTS).items():
+        if only is not None and series not in only:
+            continue
+        if events_by_series.get(series):
+            continue
+        try:
+            found = data.sports_events(series)
+        except Exception as exc:
+            log.warning("events %s: %s", series, exc)
+            continue
+        for ev in found or ():
+            ev.setdefault("series_ticker", series)
+        if found:
+            events_by_series[series] = list(found)
+            series_map[series] = sport
+            added.append(series)
+    return added
+
+
 def _rotating_event_batch(events, cursor="", budget=150, held=()):
     """Prioritize imminent games while preserving rotation and held-event coverage."""
     from .event_clock import event_start_ts
@@ -560,6 +585,7 @@ class Engine:
 
         series_map = {} if event_budget is not None else dict(SPORTS)
         events_by_series = {}
+        full_events_by_series = {}        # every event per series before the rotating batch narrows it
         selected = self.s.selected_series() if hasattr(self.s, "selected_series") else None
         if sports and getattr(self.s, "sports_mode", "configured") in ("all", "configured"):
             try:
@@ -585,8 +611,11 @@ class Engine:
                     ev.setdefault("series_ticker", series)
                     series_map[series] = _series_sport(series, catalog.get(series))
                     events_by_series.setdefault(series, []).append(ev)
+                topped = top_up_known_leagues(self.data, events_by_series, series_map, only=selected)
+                if topped:
+                    log.info("sports catalog was capped; fetched %d known league(s) directly: %s", len(topped), topped)
                 self.store.set_kv("sports_catalog_health", {
-                    "ts": now, "series_discovered": len(catalog),
+                    "ts": now, "series_discovered": len(catalog), "known_leagues_topped_up": topped,
                     "open_events_seen": total_events,
                     "events_scanned": len(all_events), "event_budget": event_budget,
                     "event_cursor": cursor,
@@ -653,6 +682,7 @@ class Engine:
             except Exception as e:
                 log.exception("sports scanner fleet failed: %s", e)
                 summary["scanner_fleet_error"] = type(e).__name__
+            full_events_by_series = {k: list(v) for k, v in events_by_series.items()}
             if event_budget is not None:
                 cursor = str(self.store.get_kv("sports_event_cursor", "") or "")
                 all_unique = [ev for series in sorted(events_by_series)
@@ -709,6 +739,13 @@ class Engine:
                 log.warning("events %s: %s", series, e)
                 continue
             if not events:
+                # This scan's batch held none of the league's games, but its odds must still stay fresh.
+                full = full_events_by_series.get(series)
+                if full and sport in set(SPORTS.values()):
+                    try:
+                        self.refresh_odds(sport, odds_next_game(full, now))
+                    except Exception as e:
+                        log.warning("odds %s: %s", sport, e)
                 continue
             supported_odds = sport in set(SPORTS.values())
             if supported_odds:
