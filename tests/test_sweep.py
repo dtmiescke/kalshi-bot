@@ -1,5 +1,4 @@
 """The settings sweep: an in-sample winner must survive unseen windows and the number of tries."""
-import math
 import random
 import unittest
 

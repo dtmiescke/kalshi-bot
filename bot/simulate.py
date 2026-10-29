@@ -172,7 +172,6 @@ def scenario_table(n=30000, seed=7):
 
 
 if __name__ == "__main__":
-    import sys
     for e in scenario_table():
         print(e)
     for sk, sf in ((0.1, 0.3), (0.2, 0.3), (0.0, 0.3)):
