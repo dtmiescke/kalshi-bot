@@ -30,3 +30,21 @@ see, and fees plus spread make the rest negative. It does not prove no edge exis
 windows to show, a different kind of information (order-flow, news, the lead-lag study) is not in these features, and ETH
 and SOL are untested. The next honest steps are more windows (the live bot adds ~400 a day across coins) and running any
 future candidate first on a coin it was not found on.
+
+## Round 2 (three more angles, same honesty rules)
+
+**Final two minutes (BTC, 1,328 windows, 8 rules fixed in advance, bar z >= 2.50).** Buying when the formula beats the
+ask by 3, 6 or 10 points with 60-120 seconds left lost 1.4-3.2 cents per contract on both halves. These are mostly 3-cent
+long shots that win about 7% of the time: the model overstates tail chances, and Kalshi's near-certain prices in the last
+minutes are right. The 30-60 second window has no usable quotes. 0 of 8 passed.
+
+**Scalping the lead-lag (280 spot jumps of 2+ standard deviations).** Kalshi does lag: after 2 seconds its mid has made 8% of
+its eventual move, 20% after 5 seconds, 60% after 20 seconds. But the gap to close is small (median 3.8 cents against a 1-cent
+spread), so buying the jump and selling 10-60 seconds later lost 1.1-3.7 cents per contract after both fees (z down to -10.8).
+The lag is real; it is smaller than the round-trip cost. Older events store only mid prices, so exits were estimated as mid
+minus half the spread; newer events store bid and ask.
+
+**Daily crypto ladders (KXETHD, KXBTCD).** A first look showed the bot's forecast beating Kalshi's price at z 43-56 and a
+98% win rate at +23 cents. That was an artifact: `market_price` is a mid, and on most rungs the real ask is far worse. Using
+the bot's own edge, computed against the real ask and fee, only 44 markets had a tradable edge and they averaged +6.8 cents
+at z 1.0. Not significant. Keep this in mind for any result that looks too good: check it against the real ask first.
