@@ -45,6 +45,8 @@ SHRINK = 0.5               # the cautious check trusts a disagreement with Kalsh
 STAKE = nba.STAKE
 MAX_PER_PLAYER = 2
 MAX_PER_GAME = 5
+MAX_PER_STAT = 2           # ... of one kind of stat in a game, so a game is not five "rushing yards" bets
+MAX_SAME_SIDE = 3          # ... and at most this many leaning the same way (all unders, all overs)
 MAX_PER_RUN = 20
 SCHEMA = """CREATE TABLE IF NOT EXISTS nfl_picks (
     ticker TEXT PRIMARY KEY, ts INTEGER, game TEXT, kind TEXT, label TEXT, side TEXT, price REAL, contracts INTEGER,
@@ -174,6 +176,10 @@ def player_games(athlete_id, fetch=requests.get):
 
 # ---------- the report ----------------------------------------------------------------------------------------
 
+def limits():
+    return (MAX_PER_GAME, MAX_PER_PLAYER, MAX_PER_STAT, MAX_SAME_SIDE)
+
+
 def liquid(m):
     """A rung worth rating: both sides quoted, a tight enough book, and a price that is not already a near-certainty."""
     bid, ask = nba._f(m.get("yes_bid_dollars")), nba._f(m.get("yes_ask_dollars"))
@@ -272,12 +278,14 @@ def build_report(client, store=None, now=None, fetch=requests.get):
                         "price": e["price"], "contracts": e["contracts"], "fee": e["fee"], "p_model": e["p_win"], "edge": e["edge"],
                         "cautious_edge": round(best["cautious"], 4), "tip": g["tip"], "projection": round(mu, 1), "script": round(f, 3),
                         "season_avg": info.get("season_avg"), "last3": info.get("last3")})
-    per_player, per_game, picks = {}, {}, []
+    counts, picks = {}, []
     for c in sorted(candidates, key=lambda c: -c["edge"]):
-        if per_player.get(c["player"], 0) >= MAX_PER_PLAYER or per_game.get(c["game_id"], 0) >= MAX_PER_GAME or len(picks) >= MAX_PER_RUN:
+        if len(picks) >= MAX_PER_RUN:
+            break
+        player, stat, side = nba.label_parts(c["label"])
+        if not nba.allowed(counts, c["game_id"], player, stat, side, limits()):
             continue
-        per_player[c["player"]] = per_player.get(c["player"], 0) + 1
-        per_game[c["game_id"]] = per_game.get(c["game_id"], 0) + 1
+        nba.tally(counts, c["game_id"], player, stat, side)
         picks.append(c)
     report["picks"] = picks
     return report
@@ -294,6 +302,14 @@ def record_picks(store, report, now=None):
         except ValueError:
             continue
         if tip <= now:
+            continue
+        counts = {}
+        for r in store.q("SELECT label, side FROM nfl_picks WHERE game=?", (p["game"],)):
+            player, stat, side = nba.label_parts(r["label"])
+            nba.tally(counts, p["game"], player, stat, side or r["side"])
+        player, stat, side = nba.label_parts(p["label"])
+        if store.q("SELECT 1 FROM nfl_picks WHERE ticker=?", (p["ticker"],)) or \
+                not nba.allowed(counts, p["game"], player, stat, side or p["side"], limits()):
             continue
         cur = store.x("""INSERT OR IGNORE INTO nfl_picks (ticker, ts, game, kind, label, side, price, contracts, stake, fee,
                          p_model, edge, tip_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'open')""",

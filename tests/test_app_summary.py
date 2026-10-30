@@ -147,7 +147,7 @@ class TestAppSummary(unittest.TestCase):
         self.assertIn("r.closing_text", html)                                          # last-20-seconds review shown
         self.assertIn("r.hindsight", html)                                             # what would have worked
         self.assertIn("Chart reads", html)
-        self.assertIn("readsCard(sym)+(sym?\"\":readyCard()+laneCard()+nbaCard()+nflCard()+expCard()+sportsStudyCard()+edgeCard()+scoreCard()+gapCard()+sweepCard()+lagCard()+perpCard()+crossCard()+consCard()+timingCard()+rulesCard()+slicesCard()+playbookCard()+reportCard())", html)                # on the overall and per-coin pages
+        self.assertIn("readsCard(sym)+(sym?\"\":readyCard()+laneCard()+nbaCard()+nflCard()+comboCard()+expCard()+sportsStudyCard()+edgeCard()+scoreCard()+gapCard()+sweepCard()+lagCard()+perpCard()+crossCard()+consCard()+timingCard()+rulesCard()+slicesCard()+playbookCard()+reportCard())", html)                # on the overall and per-coin pages
 
     def test_bets_csv_carries_compact_signals_for_bet_details(self):
         self.st.x("""INSERT INTO bets(ts,mode,ticker,event_ticker,series,side,price,contracts,stake,fee,
