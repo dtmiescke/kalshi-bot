@@ -236,7 +236,7 @@ const $=id=>document.getElementById(id);
 const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
 let cfg=null;try{cfg=JSON.parse(localStorage.getItem("kbot")||"null")}catch(e){}
 let demo=false, vars={}, wfState=null, runsCache=[], bets=[], sample=false, briefing="", report="";
-let account=null, winReport=null, playbook=null, edgeRep=null, timingRep=null, rulesRep=null, slicesRep=null, perpRep=null, crossRep=null, consRep=null, scoreRep=null, nflRep=null, comboRep=null, readyRep=null, expRep=null, sportsRep=null, nbaRep=null, simRep=null, lagRep=null, onlineRep=null, sweepRep=null, sigReport=[], council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
+let account=null, winReport=null, playbook=null, edgeRep=null, timingRep=null, rulesRep=null, slicesRep=null, perpRep=null, crossRep=null, consRep=null, scoreRep=null, nflRep=null, comboRep=null, monRep=null, readyRep=null, expRep=null, sportsRep=null, nbaRep=null, simRep=null, lagRep=null, onlineRep=null, sweepRep=null, sigReport=[], council=[], model=null, lessons=[], audit=[], combos=[], dbNote="", summaryKV={}, members={}, storage=null, liveSnap=null;
 
 function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove("show"),2800)}
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
@@ -364,7 +364,7 @@ async function loadDB(){
     if(sf.sha===loadDB.sha)return;
     try{const s=JSON.parse(await file("summary.json"));
       council=s.council||[];model=s.model||null;lessons=s.lessons||[];audit=s.audit||[];combos=s.combos||[];storage=s.storage||null;
-      summaryKV=s.kv||{};members=s.members||{};account=s.account||null;sigReport=s.signals||[];winReport=s.windows&&s.windows.stats?s.windows:null;playbook=s.playbook&&s.playbook.min_windows?s.playbook:null;edgeRep=s.edge&&s.edge.windows!=null?s.edge:null;timingRep=s.entry_timing&&s.entry_timing.buckets?s.entry_timing:null;simRep=s.simulation&&s.simulation.lam_used!=null?s.simulation:null;nbaRep=s.nba&&s.nba.tonight&&s.nba.tonight.games?s.nba:null;sportsRep=s.sports_study&&s.sports_study.games!=null?s.sports_study:null;expRep=s.experiment&&s.experiment.entries!=null?s.experiment:null;readyRep=s.readiness&&s.readiness.criteria?s.readiness:null;crossRep=s.cross_market&&s.cross_market.checks!=null?s.cross_market:null;consRep=s.sports_consistency&&s.sports_consistency.kinds?s.sports_consistency:null;scoreRep=s.scorecard&&s.scorecard.lanes?s.scorecard:null;nflRep=s.nfl&&s.nfl.account&&s.nfl.account.picks!=null?s.nfl:null;comboRep=s.bet_combos&&s.bet_combos.account&&s.bet_combos.account.combos!=null?s.bet_combos:null;perpRep=s.perp_lead&&s.perp_lead.events!=null?s.perp_lead:null;slicesRep=s.slices&&s.slices.slices?s.slices:null;rulesRep=s.entry_rules&&s.entry_rules.rules?s.entry_rules:null;lagRep=s.lead_lag&&s.lead_lag.events!=null?s.lead_lag:null;onlineRep=s.online&&s.online.online?s.online:null;sweepRep=s.sweep&&s.sweep.verdict?s.sweep:null;loadDB.sha=sf.sha;dbNote="";return}
+      summaryKV=s.kv||{};members=s.members||{};account=s.account||null;sigReport=s.signals||[];winReport=s.windows&&s.windows.stats?s.windows:null;playbook=s.playbook&&s.playbook.min_windows?s.playbook:null;edgeRep=s.edge&&s.edge.windows!=null?s.edge:null;timingRep=s.entry_timing&&s.entry_timing.buckets?s.entry_timing:null;simRep=s.simulation&&s.simulation.lam_used!=null?s.simulation:null;nbaRep=s.nba&&s.nba.tonight&&s.nba.tonight.games?s.nba:null;sportsRep=s.sports_study&&s.sports_study.games!=null?s.sports_study:null;expRep=s.experiment&&s.experiment.entries!=null?s.experiment:null;readyRep=s.readiness&&s.readiness.criteria?s.readiness:null;crossRep=s.cross_market&&s.cross_market.checks!=null?s.cross_market:null;consRep=s.sports_consistency&&s.sports_consistency.kinds?s.sports_consistency:null;scoreRep=s.scorecard&&s.scorecard.lanes?s.scorecard:null;nflRep=s.nfl&&s.nfl.account&&s.nfl.account.picks!=null?s.nfl:null;comboRep=s.bet_combos&&s.bet_combos.account&&s.bet_combos.account.combos!=null?s.bet_combos:null;monRep=s.monitor&&s.monitor.lanes?s.monitor:null;perpRep=s.perp_lead&&s.perp_lead.events!=null?s.perp_lead:null;slicesRep=s.slices&&s.slices.slices?s.slices:null;rulesRep=s.entry_rules&&s.entry_rules.rules?s.entry_rules:null;lagRep=s.lead_lag&&s.lead_lag.events!=null?s.lead_lag:null;onlineRep=s.online&&s.online.online?s.online:null;sweepRep=s.sweep&&s.sweep.verdict?s.sweep:null;loadDB.sha=sf.sha;dbNote="";return}
     catch(e){/* fall back to the full database below */}
   }
   const f=(list||[]).find(x=>x.name==="bot.sqlite.gz")||(list||[]).find(x=>x.name==="bot.sqlite");
@@ -523,7 +523,7 @@ function widthOf(id,fallback){const el=$(id);return el&&el.clientWidth?el.client
 
 /* ================= navigation ================= */
 let route={tab:"dash",page:"main"},stack=[];
-let ui={feat:"BTC",coinTab:"overview",pnlRange:"7d",sportsType:"all",league:"All",actView:"open"};
+let ui={feat:"BTC",coinTab:"overview",pnlRange:"7d",sportsType:"all",league:"All",actView:"open",mon:"combos"};
 let custom={types:{game:true,prop:true},leagues:{}};
 try{Object.assign(custom,JSON.parse(localStorage.getItem("kbot_custom")||"{}"))}catch(e){}
 function go(r){stack.push(route);route=Object.assign({tab:route.tab},r);history.pushState({d:stack.length},"");render(true)}
@@ -897,6 +897,27 @@ function screenCoin(){
 }
 function betRow(b){const sport=!b.coin;
   return`<button class="row" data-act="bet" data-v="${esc(b.id)}"><span class="badge ${sport?"sport":""}">${sport?(b.prop?"PROP":esc(b.league)):b.coin}</span><span class="rowmain"><b>${esc(betTitle(b))}</b><small>${b.status==="open"?"Open":b.pnl>0?"Won":"Lost"} · ${b.contracts??"?"} @ ${b.price!=null?Math.round(b.price*100)+"¢":"?"} · ${when(b.ts)}</small></span><span class="rowend num ${b.pnl==null?"":cls(b.pnl)}">${b.pnl==null?"Open":smoney(b.pnl)}</span></button>`}
+function monitorCard(){ // every shadow account in one place: combos, NBA, NFL (summary.json "monitor")
+  const m=sample?{lanes:{"Bet combos":{picks:6,open:5,settled:1,wins:0,pnl:-4.88},"NBA props":{picks:192,open:164,settled:28,wins:13,pnl:-26.3},"NFL props":{picks:20,open:20,settled:0}},picks:[],combos:[{status:"open",price:.52,chance:.64,stake:4.72,legs:[{label:"Cooper Flagg 8+ rebounds (NO)",price:.67,status:"open"},{label:"Ayo Dosunmu 20+ points (NO)",price:.74,status:"won"}]}]}:monRep;
+  if(!m)return"";
+  const L=m.lanes,tabs=[["combos","Combos"],["nba","NBA"],["nfl","NFL"]],cur=ui.mon;
+  const total=n=>{const a=L[n]||{};return a};
+  const usd=v=>v==null?"–":(v>=0?"+$":"−$")+Math.abs(v).toFixed(2);
+  const mark={won:"✓",lost:"✗",open:"•"},word={won:"Won",lost:"Lost",open:"Open"};
+  const when=t=>t?new Date(t*1000).toLocaleString([], {weekday:"short",hour:"numeric",minute:"2-digit"}):"";
+  const lane=names=>{const a=names.map(total),n=a.reduce((x,y)=>x+(y.picks||0),0),o=a.reduce((x,y)=>x+(y.open||0),0),w=a.reduce((x,y)=>x+(y.wins||0),0),sd=a.reduce((x,y)=>x+(y.settled||0),0),p=a.reduce((x,y)=>x+(y.pnl||0),0);
+    return`<section class="grid3"><div class="tile"><small>Recorded</small><b class="num">${n}</b></div><div class="tile"><small>Still open</small><b class="num">${o}</b></div><div class="tile"><small>${sd?w+" of "+sd+" won":"Settled"}</small><b class="num ${sd?(p>=0?"up":"down"):""}">${sd?usd(p):"–"}</b></div></section>`};
+  let body="";
+  if(cur==="combos"){
+    body=lane(["Bet combos"])+(m.combos.length?m.combos.map(c=>`<section class="card" style="gap:6px"><div class="kv"><span><b>${plural(c.legs.length,"leg")}</b> <small class="muted">· costs ${Math.round(c.price*100)}¢ per $1 · ${Math.round(c.chance*100)}% chance all hit · ${cash(c.stake)} stake</small></span><b class="num ${c.status==="open"?"":c.pnl>=0?"up":"down"}">${c.status==="open"?"Open":usd(c.pnl)}</b></div>${c.legs.map(g=>`<div class="kv"><span>${esc(g.label)} <small class="muted">· ${Math.round(g.price*100)}¢</small></span><b class="num ${g.status==="won"?"up":g.status==="lost"?"down":"muted"}">${mark[g.status]} ${word[g.status]}</b></div>`).join("")}</section>`).join(""):`<p class="empty">No combos yet. The bot builds them each hour from the open picks.</p>`)
+      +`<small class="note">Each combo pays only if every leg wins. One leg per game, a different player in each. The price is an estimate (the legs multiplied, plus a small margin per leg), not Kalshi's own combo price. Nothing is bet.</small>`;
+  }else{
+    const sp=cur==="nba"?"NBA":"NFL",names=cur==="nba"?["NBA props","NBA game winners"]:["NFL props"],rows=m.picks.filter(p=>p.sport===sp);
+    const games={};rows.forEach(p=>(games[p.game]=games[p.game]||[]).push(p));
+    body=lane(names)+(rows.length?Object.entries(games).map(([g,ps])=>`<section class="card list"><div class="kv" style="padding:10px 14px"><b>${esc(g)}</b><small class="muted">${ps[0].status==="open"?when(ps[0].tip):"settled"}</small></div>${ps.map(p=>`<div class="kv" style="padding:6px 14px"><span>${esc(p.label)} <small class="muted">· ${Math.round(p.price*100)}¢ · model ${Math.round(p.p*100)}% · ${Math.round(p.edge*100)}% edge</small></span><b class="num ${p.status==="settled"?(p.pnl>0?"up":"down"):"muted"}">${p.status==="settled"?usd(p.pnl):"Open"}</b></div>`).join("")}</section>`).join(""):`<p class="empty">No ${sp} picks recorded yet.</p>`)
+      +`<small class="note">Shadow picks: the bot records what it would bet, before the game starts, and grades it from Kalshi's result. No money is bet. Open picks are listed by game time, then the latest settled ones.</small>`;
+  }
+  return`<section class="card" style="gap:8px"><div class="cardhead"><h2>Shadow picks monitor</h2><small class="muted">paper · updates each bot run</small></div><div class="seg" role="group" aria-label="Shadow account">${tabs.map(t=>`<button data-act="mon" data-v="${t[0]}" aria-pressed="${t[0]===cur}">${t[1]}</button>`).join("")}</div>${body}</section>`}
 function screenSports(){
   const all=bets.filter(b=>!b.coin),leagues=[...new Set(all.map(b=>b.league))].sort();
   leagues.forEach(l=>{if(custom.leagues[l]==null)custom.leagues[l]=true});
@@ -905,7 +926,7 @@ function screenSports(){
   const list=all.filter(b=>on.includes(b.league)&&custom.types[b.prop?"prop":"game"]!==false&&(ui.league==="All"||b.league===ui.league)&&(ui.sportsType==="all"||(ui.sportsType==="prop")===b.prop));
   const s=statsOf(list);
   return header("Sports",`<button class="btn small" data-act="customize"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Customize</button>`)+
-    `<section class="grid3"><div class="tile"><small>Sports P/L</small><b class="num ${cls(s.total)}">${smoney(s.total)}</b></div><div class="tile"><small>Win rate</small><b class="num">${pct(s.win)}</b></div><div class="tile"><small>Bets</small><b class="num">${s.count}</b></div></section>`+
+    monitorCard()+`<section class="grid3"><div class="tile"><small>Sports P/L</small><b class="num ${cls(s.total)}">${smoney(s.total)}</b></div><div class="tile"><small>Win rate</small><b class="num">${pct(s.win)}</b></div><div class="tile"><small>Bets</small><b class="num">${s.count}</b></div></section>`+
     `<div class="seg" role="group" aria-label="Bet type">${types.map(t=>`<button data-act="sportsType" data-v="${t[0]}" aria-pressed="${t[0]===ui.sportsType}">${t[1]}</button>`).join("")}</div>`+
     (on.length>1?`<div class="leagues" role="group" aria-label="League">${["All",...on].map(l=>`<button class="lg" data-act="league" data-v="${esc(l)}" aria-pressed="${l===ui.league}">${esc(l)}</button>`).join("")}</div>`:"")+
     (list.length?`<section class="card list">${list.map(betRow).join("")}</section>`:`<p class="empty">${all.length?"No bets match these filters. Change them in Customize.":"The bot hasn’t placed any sports bets."}</p>`);
@@ -1129,7 +1150,7 @@ document.addEventListener("click",async e=>{
   if(a==="bet")return go({page:"bet",id:v});
   if(a==="set")return go({page:"set",sec:v});
   if(a==="insights")return go({page:"insights",sym:v||null});
-  if(["coinTab","pnlRange","sportsType","league","actView"].includes(a)){ui[a]=v;return render()}
+  if(["coinTab","pnlRange","sportsType","league","actView","mon"].includes(a)){ui[a]=v;return render()}
   if(a==="customize"){sheetOpen=true;return render()}
   if(a==="closeSheet"){sheetOpen=false;return render()}
   if(a==="toggleType"){custom.types[v]=custom.types[v]===false;saveCustom();return render()}
