@@ -43,6 +43,9 @@ PRIOR_GAMES = 12            # last season counts as this many games of evidence 
 TEAM_PRIOR = 20             # ... and this many for a team
 HOME_EDGE, GAME_SD = 2.5, 12.0
 MIN_EDGE, ML_EDGE, MAX_SPREAD, STAKE = 0.08, 0.03, 0.08, 5.0
+MAX_PER_GAME = 8            # picks recorded for one game, across every hourly pass (they used to pile up to 20)
+MAX_PER_PLAYER = 2          # ... and for one player: his lines all win or lose together
+BOOK_AGREE = 0.12           # a game-winner pick must be within this of the sportsbook consensus
 SHRINK = 0.35               # a disagreement with Kalshi is trusted this much for the cautious check (the bot's own learned trust is lower)
 MIN_HISTORY = 15            # games needed before a prop is rated
 _ET = ZoneInfo("America/New_York")
@@ -467,7 +470,8 @@ def build_report(client, store=None, now=None, day=None, fetch=requests.get, max
             entry["ml"] = {"model_home": round(p_home, 3), "options": sorted(opts, key=lambda r: -r["edge"])}
             best = entry["ml"]["options"][0] if entry["ml"]["options"] else None
             if best and best["edge"] >= ML_EDGE and (best["cautious_edge"] or 0) > 0 \
-                    and (best["p_book"] is None or best["p_book"] >= best["price"]):
+                    and best["p_book"] is not None and best["p_book"] >= best["price"] \
+                    and abs(best["p_win"] - best["p_book"]) <= BOOK_AGREE:
                 report["picks"].append({"kind": "ml", "game": f'{a["name"]} at {h["name"]}', "ticker": best["ticker"],
                                         "label": f'{best["team"]} to win', "side": "yes", "price": best["price"],
                                         "contracts": best["contracts"], "fee": best["fee"], "p_model": best["p_win"],
@@ -561,6 +565,14 @@ def record_picks(store, report, now=None):
             pass
         if tip is not None and tip <= now:
             continue                              # never "pick" a game that has started
+        if store.q("SELECT 1 FROM nba_picks WHERE ticker=?", (pk["ticker"],)):
+            continue
+        if store.q("SELECT COUNT(*) AS n FROM nba_picks WHERE game=?", (pk["game"],))[0]["n"] >= MAX_PER_GAME:
+            continue                              # the game already has its quota from earlier passes
+        who = re.match(r"(.+?) \d+\+", pk["label"]) if pk["kind"] == "prop" else None
+        if who and store.q("SELECT COUNT(*) AS n FROM nba_picks WHERE game=? AND label LIKE ?",
+                           (pk["game"], who.group(1) + " %"))[0]["n"] >= MAX_PER_PLAYER:
+            continue
         before = store.q("SELECT COUNT(*) AS n FROM nba_picks")[0]["n"]
         store.x("""INSERT OR IGNORE INTO nba_picks (ticker, ts, game, kind, label, side, price, contracts, stake, fee,
                    p_model, edge, tip_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'open')""",

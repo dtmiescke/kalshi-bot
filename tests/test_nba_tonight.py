@@ -251,3 +251,53 @@ class TestShadowAccount(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCaps(unittest.TestCase):
+    def pick(self, ticker, label, game="A at B", kind="prop", edge=0.1):
+        return {"ticker": ticker, "game": game, "kind": kind, "label": label, "side": "yes", "price": 0.5, "contracts": 10,
+                "fee": 0.2, "p_model": 0.6, "edge": edge, "tip": TIP}
+
+    def store(self):
+        import os
+        import tempfile
+        from bot.storage import Store
+        return Store(os.path.join(tempfile.mkdtemp(), "t.sqlite"))
+
+    def test_one_game_never_collects_more_than_the_quota_across_passes(self):
+        st = self.store()
+        for hour in range(5):                                           # hourly passes each bring new tickers
+            picks = [self.pick(f"T{hour}-{i}", f"Player {hour}{i} 10+ points (YES)") for i in range(4)]
+            nba.record_picks(st, {"picks": picks}, now=1_793_300_000 + hour)
+        self.assertEqual(st.q("SELECT COUNT(*) n FROM nba_picks")[0]["n"], nba.MAX_PER_GAME)
+        nba.record_picks(st, {"picks": [self.pick("X", "Someone 5+ rebounds (YES)", game="C at D")]}, now=1_793_300_100)
+        self.assertEqual(st.q("SELECT COUNT(*) n FROM nba_picks WHERE game='C at D'")[0]["n"], 1)   # other games unaffected
+
+    def test_one_player_is_capped_but_a_repeat_ticker_is_not_counted_twice(self):
+        st = self.store()
+        picks = [self.pick(f"T{i}", f"Jayson Tatum {10 + i}+ points (NO)") for i in range(5)]
+        self.assertEqual(nba.record_picks(st, {"picks": picks}, now=1_793_300_000), nba.MAX_PER_PLAYER)
+        self.assertEqual(nba.record_picks(st, {"picks": picks}, now=1_793_300_060), 0)
+        self.assertEqual(nba.record_picks(st, {"picks": [self.pick("M1", "Boston Celtics to win", kind="ml")]}, now=1_793_300_120), 1)
+
+    def test_a_game_winner_pick_needs_a_sportsbook_line_that_agrees(self):
+        class Cheap(FakeClient):
+            def _paged(self, path, key, params, max_pages=1):
+                if params["series_ticker"] == "KXNBAGAME":
+                    return [{"title": "Cleveland vs Atlanta", "event_ticker": "KXNBAGAME-26OCT29CLEATL",
+                             "markets": [mkt("ML-CLE", "Cleveland", 0.50, 0.52), mkt("ML-ATL", "Atlanta", 0.48, 0.50)]}]
+                return super()._paged(path, key, params, max_pages)
+
+        ps = fake_world()
+        for p in ps:
+            p.start()
+            self.addCleanup(p.stop)
+        base = nba.build_report(Cheap(), None, now=1_793_300_000, day="20261029")
+        top = base["games"][0]["ml"]["options"][0]
+        self.assertGreaterEqual(top["edge"], nba.ML_EDGE)
+        self.assertGreater(top["cautious_edge"], 0)
+        self.assertEqual([p for p in base["picks"] if p["kind"] == "ml"], [])                     # no book line: not picked
+        for book, expect in ((top["p_win"], 1), (top["p_win"] - 0.3, 0)):
+            with patch.object(nba, "book_prob", lambda store, team, now, b=book: b):
+                rep = nba.build_report(Cheap(), None, now=1_793_300_000, day="20261029")
+            self.assertEqual(len([p for p in rep["picks"] if p["kind"] == "ml"]), expect, book)
