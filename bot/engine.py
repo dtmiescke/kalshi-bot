@@ -8,7 +8,7 @@ import time
 import uuid
 from datetime import datetime
 
-from . import alerts, brain, council, fees, guard, risk
+from . import alerts, brain, council, espn_odds, fees, guard, risk
 from .llm import LLM
 from .config import CRYPTO_15M, SPORTS
 from .kalshi_client import KalshiClient, num, price
@@ -248,6 +248,7 @@ class Engine:
         store vig-free consensus. Stale lines never trade: evaluate() refuses
         consensus older than 1.5 x ODDS_MAX_AGE_MINUTES."""
         now = int(time.time())
+        self.espn_live(sport, now)
         cached_events = self.store.get_kv(f"odds_events_{sport}", []) or []
         due, why = refresh_plan(
             self.store, sport, now, next_game, self.s.odds_refresh_minutes,
@@ -258,6 +259,7 @@ class Engine:
                       sport, why, len(cached_events))
         if not due:
             log.debug("odds %s not refreshed: %s", sport, why)
+            self.espn_fill(sport, now)
             return
         try:
             events = self.odds.fetch(sport, self.s.odds_regions)
@@ -277,6 +279,7 @@ class Engine:
                             tags=["warning"])
             except Exception:
                 log.debug("could not send sportsbook feed alert", exc_info=True)
+            self.espn_fill(sport, now)
             return
         record_spend(self.store, self.odds, now, self.s.odds_regions,
                      int(os.environ.get("ODDS_MONTHLY_CREDITS", 500)), alert=alerts.send)
@@ -301,6 +304,60 @@ class Engine:
             "event_count": len(slim), "credits_remaining": getattr(self.odds, "last_remaining", None),
         })
         log.info("odds %s: %d events, credits left %s", sport, len(events), getattr(self.odds, "last_remaining", None))
+
+    def espn_live(self, sport, now):
+        """Live in-play moneylines from ESPN, free: kept as a snapshot for watching and study. They are never written to
+        the odds table the bot trades from, because a single delayed book against Kalshi's live price mostly shows lag,
+        not edge."""
+        if os.environ.get("ESPN_LIVE", "yes") != "yes" or sport not in espn_odds.ESPN_PATHS:
+            return
+        every = float(os.environ.get("ESPN_LIVE_SECONDS", 60))
+        if now - float(self.store.get_kv(f"espn_live_last_{sport}", 0) or 0) < every:
+            return
+        self.store.set_kv(f"espn_live_last_{sport}", now)
+        try:
+            games = espn_odds.fetch_live(sport)
+        except Exception as exc:
+            log.warning("espn live odds %s unavailable: %s", sport, redact(str(exc)))
+            return
+        out = []
+        for ev in games:
+            fair = {team: round(p, 4) for team, (p, _, _) in consensus(ev).items()}
+            out.append({"id": ev["id"], "home": ev["home_team"], "away": ev["away_team"], "clock": ev.get("clock"),
+                        "period": ev.get("period"), "score": ev.get("score"), "fair": fair})
+        self.store.set_kv(f"espn_live_{sport}", {"ts": now, "sport": sport, "games": out})
+
+    def espn_fill(self, sport, now):
+        """Free DraftKings moneylines from ESPN when The Odds API data for this sport is stale (out of credits, not due,
+        or failing). Never runs while the Odds API data is fresh, so a book is never counted twice, and it keeps its own
+        timestamps so it cannot hold back an Odds API refresh."""
+        if os.environ.get("ESPN_ODDS", "yes") != "yes" or sport not in espn_odds.ESPN_PATHS:
+            return
+        stale = now - float(self.store.get_kv(f"odds_last_{sport}", 0) or 0) > self.odds_max_age * 60
+        every = float(os.environ.get("ESPN_ODDS_MINUTES", 20)) * 60
+        if not stale or now - float(self.store.get_kv(f"espn_odds_last_{sport}", 0) or 0) < every:
+            return
+        try:
+            events = espn_odds.fetch(sport, now=now)
+        except Exception as exc:
+            self.store.set_kv(f"espn_odds_last_{sport}", now)         # back off for a full interval, not every scan
+            log.warning("espn odds %s unavailable: %s", sport, redact(str(exc)))
+            return
+        slim = []
+        for ev in events:
+            for team, (p, n, spread) in consensus(ev).items():
+                self.store.add_odds({
+                    "ts": now, "sport": sport, "event_id": ev["id"],
+                    "commence_time": ev.get("commence_time"), "home": ev.get("home_team"),
+                    "away": ev.get("away_team"), "team": team, "fair_prob": p,
+                    "n_books": n, "raw": {"spread": spread, "source": "espn"}})
+            slim.append({k: ev.get(k) for k in ("id", "home_team", "away_team", "commence_time")})
+        self.store.set_kv(f"espn_odds_last_{sport}", now)
+        if slim:
+            self.store.set_kv(f"odds_events_{sport}", slim)
+        self.store.set_kv(f"espn_odds_health_{sport}", {"status": "ok" if slim else "empty", "ts": now, "sport": sport,
+                                                       "event_count": len(slim)})
+        log.info("espn odds %s: %d events with a DraftKings moneyline", sport, len(slim))
 
     def snapshot(self, ev, m, now):
         row = {

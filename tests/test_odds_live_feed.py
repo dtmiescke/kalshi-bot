@@ -31,7 +31,8 @@ class TestLiveSportsbookFeed(unittest.TestCase):
         )
         client = OddsClient("")
         engine = Engine(settings, store, odds_client=client)
-        with patch("bot.engine.refresh_plan", return_value=(True, "test")):
+        with patch("bot.engine.refresh_plan", return_value=(True, "test")), \
+                patch.dict("os.environ", {"ESPN_ODDS": "no"}):      # the ESPN fallback has its own tests
             engine.refresh_odds("basketball_nba")
         calls = [call for call in store.set_kv.call_args_list
                  if call.args and call.args[0] == "odds_events_basketball_nba"]
