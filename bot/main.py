@@ -130,6 +130,12 @@ def periodic_cycle(s, store, data):
         crypto_combo.grade(store)
     except Exception as e:
         logging.warning("crypto combo grading failed: %s", e)
+    if os.environ.get("SPORTS_CONSISTENCY", "yes") == "yes":   # Kalshi-only price-consistency scan: measures, never trades
+        try:
+            from . import sports_consistency
+            sports_consistency.run(store, data, every=int(os.environ.get("SPORTS_CONSISTENCY_SECONDS", 300)))
+        except Exception as e:
+            logging.warning("sports consistency failed: %s", e)
     if os.environ.get("NBA_TONIGHT", "yes") == "yes":      # reads tonight's slate and keeps the shadow picks graded (never trades)
         try:
             from . import nba_tonight
