@@ -897,11 +897,17 @@ function screenCoin(){
 }
 function betRow(b){const sport=!b.coin;
   return`<button class="row" data-act="bet" data-v="${esc(b.id)}"><span class="badge ${sport?"sport":""}">${sport?(b.prop?"PROP":esc(b.league)):b.coin}</span><span class="rowmain"><b>${esc(betTitle(b))}</b><small>${b.status==="open"?"Open":b.pnl>0?"Won":"Lost"} · ${b.contracts??"?"} @ ${b.price!=null?Math.round(b.price*100)+"¢":"?"} · ${when(b.ts)}</small></span><span class="rowend num ${b.pnl==null?"":cls(b.pnl)}">${b.pnl==null?"Open":smoney(b.pnl)}</span></button>`}
-function monitorCard(){ // every shadow account in one place: combos, NBA, NFL (summary.json "monitor")
-  const m=sample?{lanes:{"Bet combos":{picks:6,open:5,settled:1,wins:0,pnl:-4.88},"NBA props":{picks:192,open:164,settled:28,wins:13,pnl:-26.3},"NFL props":{picks:20,open:20,settled:0}},picks:[],combos:[{status:"open",price:.52,chance:.64,stake:4.72,legs:[{label:"Cooper Flagg 8+ rebounds (NO)",price:.67,status:"open"},{label:"Ayo Dosunmu 20+ points (NO)",price:.74,status:"won"}]}]}:monRep;
+const MON_SAMPLE={lanes:{"Bet combos":{picks:6,open:5,settled:1,wins:0,pnl:-4.88},"NBA props":{picks:192,open:164,settled:28,wins:13,pnl:-26.3},"NFL props":{picks:20,open:20,settled:0}},
+  picks:[{id:"S1",sport:"NBA",label:"Cooper Flagg 8+ rebounds (NO)",game:"Houston Rockets at Dallas Mavericks",side:"no",price:.67,p:.87,edge:.18,status:"open",pnl:null,tip:Date.now()/1000+9e3,kind:"prop",ts:Date.now()/1000-3600,contracts:7,stake:4.69,fee:.14,win:2.17,lose:4.83,now:.7,now_ts:Date.now()/1000-120},
+    {id:"S2",sport:"NFL",label:"Jared Goff 275+ passing yards (YES)",game:"Minnesota Vikings at Detroit Lions",side:"yes",price:.4,p:.69,edge:.27,status:"open",pnl:null,tip:Date.now()/1000+2e5,kind:"prop",ts:Date.now()/1000-7200,contracts:12,stake:4.8,fee:.25,win:7.15,lose:5.05,now:.43,now_ts:Date.now()/1000-120}],
+  combos:[{id:"C1",status:"open",price:.52,chance:.64,model:.74,edge:.1,stake:4.72,fee:.2,contracts:9,win:4.12,lose:4.92,tip:Date.now()/1000+9e3,ts:Date.now()/1000-3600,now:.55,now_ts:Date.now()/1000-120,
+    legs:[{label:"Cooper Flagg 8+ rebounds (NO)",price:.67,p:.87,status:"open",now:.7},{label:"Ayo Dosunmu 20+ points (NO)",price:.74,p:.93,status:"won",now:1}]}]};
+const monData=()=>sample?MON_SAMPLE:monRep;
+function monitorCard(){ // every shadow account in one place: combos, NBA, NFL (summary.json "monitor"); every row opens its details
+  const m=monData();
   if(!m)return"";
   const L=m.lanes,tabs=[["combos","Combos"],["nba","NBA"],["nfl","NFL"]],cur=ui.mon;
-  const total=n=>{const a=L[n]||{};return a};
+  const total=n=>L[n]||{};
   const usd=v=>v==null?"–":(v>=0?"+$":"−$")+Math.abs(v).toFixed(2);
   const mark={won:"✓",lost:"✗",open:"•"},word={won:"Won",lost:"Lost",open:"Open"};
   const when=t=>t?new Date(t*1000).toLocaleString([], {weekday:"short",hour:"numeric",minute:"2-digit"}):"";
@@ -909,15 +915,48 @@ function monitorCard(){ // every shadow account in one place: combos, NBA, NFL (
     return`<section class="grid3"><div class="tile"><small>Recorded</small><b class="num">${n}</b></div><div class="tile"><small>Still open</small><b class="num">${o}</b></div><div class="tile"><small>${sd?w+" of "+sd+" won":"Settled"}</small><b class="num ${sd?(p>=0?"up":"down"):""}">${sd?usd(p):"–"}</b></div></section>`};
   let body="";
   if(cur==="combos"){
-    body=lane(["Bet combos"])+(m.combos.length?m.combos.map(c=>`<section class="card" style="gap:6px"><div class="kv"><span><b>${plural(c.legs.length,"leg")}</b> <small class="muted">· costs ${Math.round(c.price*100)}¢ per $1 · ${Math.round(c.chance*100)}% chance all hit · ${cash(c.stake)} stake</small></span><b class="num ${c.status==="open"?"":c.pnl>=0?"up":"down"}">${c.status==="open"?"Open":usd(c.pnl)}</b></div>${c.legs.map(g=>`<div class="kv"><span>${esc(g.label)} <small class="muted">· ${Math.round(g.price*100)}¢</small></span><b class="num ${g.status==="won"?"up":g.status==="lost"?"down":"muted"}">${mark[g.status]} ${word[g.status]}</b></div>`).join("")}</section>`).join(""):`<p class="empty">No combos yet. The bot builds them each hour from the open picks.</p>`)
-      +`<small class="note">Each combo pays only if every leg wins. One leg per game, a different player in each. The price is an estimate (the legs multiplied, plus a small margin per leg), not Kalshi's own combo price. Nothing is bet.</small>`;
+    body=lane(["Bet combos"])+(m.combos.length?m.combos.map(c=>`<button class="card" data-act="mcombo" data-v="${esc(c.id)}" style="gap:6px;text-align:left;width:100%"><div class="kv"><span><b>${plural(c.legs.length,"leg")}</b> <small class="muted">· costs ${Math.round(c.price*100)}¢ per $1 · ${Math.round(c.chance*100)}% chance all hit · ${cash(c.stake)} stake</small></span><b class="num ${c.status==="open"?"":c.pnl>=0?"up":"down"}">${c.status==="open"?"Open":usd(c.pnl)} ›</b></div>${c.legs.map(g=>`<div class="kv"><span>${esc(g.label)} <small class="muted">· ${Math.round(g.price*100)}¢</small></span><b class="num ${g.status==="won"?"up":g.status==="lost"?"down":"muted"}">${mark[g.status]} ${word[g.status]}</b></div>`).join("")}</button>`).join(""):`<p class="empty">No combos yet. The bot builds them each hour from the open picks.</p>`)
+      +`<small class="note">Tap a combo for its bet amount, win amount and chances. Each combo pays only if every leg wins. One leg per game, a different player in each. The price is an estimate (the legs multiplied, plus a small margin per leg), not Kalshi's own combo price. Nothing is bet.</small>`;
   }else{
     const sp=cur==="nba"?"NBA":"NFL",names=cur==="nba"?["NBA props","NBA game winners"]:["NFL props"],rows=m.picks.filter(p=>p.sport===sp);
     const games={};rows.forEach(p=>(games[p.game]=games[p.game]||[]).push(p));
-    body=lane(names)+(rows.length?Object.entries(games).map(([g,ps])=>`<section class="card list"><div class="kv" style="padding:10px 14px"><b>${esc(g)}</b><small class="muted">${ps[0].status==="open"?when(ps[0].tip):"settled"}</small></div>${ps.map(p=>`<div class="kv" style="padding:6px 14px"><span>${esc(p.label)} <small class="muted">· ${Math.round(p.price*100)}¢ · model ${Math.round(p.p*100)}% · ${Math.round(p.edge*100)}% edge</small></span><b class="num ${p.status==="settled"?(p.pnl>0?"up":"down"):"muted"}">${p.status==="settled"?usd(p.pnl):"Open"}</b></div>`).join("")}</section>`).join(""):`<p class="empty">No ${sp} picks recorded yet.</p>`)
-      +`<small class="note">Shadow picks: the bot records what it would bet, before the game starts, and grades it from Kalshi's result. No money is bet. Open picks are listed by game time, then the latest settled ones.</small>`;
+    body=lane(names)+(rows.length?Object.entries(games).map(([g,ps])=>`<section class="card list"><div class="kv" style="padding:10px 14px"><b>${esc(g)}</b><small class="muted">${ps[0].status==="open"?when(ps[0].tip):"settled"}</small></div>${ps.map(p=>`<button class="kv" data-act="mpick" data-v="${esc(p.id)}" style="padding:6px 14px;width:100%;background:none;border:0;color:inherit;font:inherit;text-align:left"><span>${esc(p.label)} <small class="muted">· ${Math.round(p.price*100)}¢ · model ${Math.round(p.p*100)}% · ${Math.round(p.edge*100)}% edge</small></span><b class="num ${p.status==="settled"?(p.pnl>0?"up":"down"):"muted"}">${p.status==="settled"?usd(p.pnl):"Open"} ›</b></button>`).join("")}</section>`).join(""):`<p class="empty">No ${sp} picks recorded yet.</p>`)
+      +`<small class="note">Tap a pick for its bet amount, win amount and chances. Shadow picks: the bot records what it would bet, before the game starts, and grades it from Kalshi's result. No money is bet.</small>`;
   }
   return`<section class="card" style="gap:8px"><div class="cardhead"><h2>Shadow picks monitor</h2><small class="muted">paper · updates each bot run</small></div><div class="seg" role="group" aria-label="Shadow account">${tabs.map(t=>`<button data-act="mon" data-v="${t[0]}" aria-pressed="${t[0]===cur}">${t[1]}</button>`).join("")}</div>${body}</section>`}
+const mUsd=v=>v==null?"–":(v>=0?"+$":"−$")+Math.abs(v).toFixed(2),mPct=v=>v==null?"–":Math.round(v*100)+"%";
+const mAgo=t=>t?ago(t*1000):"–",mWhen=t=>t?when(t*1000):"–";
+function liveBlock(now,nowTs,atBet,mine){ // Kalshi's chance now against the price paid and the bot's own chance
+  if(now==null)return`<div class="kv"><span>Kalshi chance now</span><b class="muted">not quoted yet</b></div>`;
+  const mv=Math.round((now-atBet)*100);
+  return`<div class="kv"><span>Kalshi chance now <small class="muted">· ${mAgo(nowTs)}</small></span><b class="num">${mPct(now)}</b></div>
+    <div class="kv"><span>Moved since the bet</span><b class="num ${mv>0?"up":mv<0?"down":""}">${mv>0?"+":mv<0?"−":""}${Math.abs(mv)} pts</b></div>
+    <div class="kv"><span>The bot's chance minus Kalshi's now</span><b class="num">${Math.round((mine-now)*100)>0?"+":""}${Math.round((mine-now)*100)} pts</b></div>`}
+function screenPick(){
+  const m=monData(),p=m&&m.picks.find(x=>String(x.id)===String(route.id));
+  if(!p)return detailHeader("Pick")+`<p class="empty">This pick is no longer in the list.</p>`;
+  const st=p.status==="open"?"Open":p.pnl>0?"Won":"Lost";
+  return detailHeader("Pick details",`<span class="pill" style="${st==="Lost"?"background:var(--sportBg);color:var(--noText)":""}">${st}</span>`)+
+    `<section class="card"><small class="muted">${p.sport} ${p.kind==="prop"?"player prop":"game winner"} · recorded ${mWhen(p.ts)}${p.status==="open"?" · starts "+mWhen(p.tip):""}</small><span class="q" style="font-size:17px">${esc(p.label)}</span><small class="muted">${esc(p.game)}</small>
+      <b style="font-size:28px" class="num ${p.pnl==null?"":cls(p.pnl)}">${p.pnl==null?"Open":mUsd(p.pnl)}</b></section>`+
+    `<section class="grid3"><div class="tile"><small>Bet amount</small><b class="num">${money(p.stake)}</b></div><div class="tile"><small>Kalshi win %</small><b class="num">${mPct(p.price)}</b></div><div class="tile"><small>My win %</small><b class="num">${mPct(p.p)}</b></div></section>`+
+    `<section class="grid3"><div class="tile"><small>Win amount</small><b class="num up">${mUsd(p.win)}</b></div><div class="tile"><small>Lose amount</small><b class="num down">${mUsd(-p.lose)}</b></div><div class="tile"><small>Edge</small><b class="num">${Math.round(p.edge*100)}%</b></div></section>`+
+    (p.status==="open"?`<section class="card"><h2>Live</h2>${liveBlock(p.now,p.now_ts,p.price,p.p)}</section>`:"")+
+    `<section class="card"><h2>The bet</h2><div class="kv"><span>Side</span><b>${p.side.toUpperCase()}</b></div><div class="kv"><span>Price paid</span><b class="num">${Math.round(p.price*100)}¢ per contract</b></div><div class="kv"><span>Contracts</span><b class="num">${p.contracts??"–"}</b></div><div class="kv"><span>Fee</span><b class="num">${money(p.fee)}</b></div>
+      <small class="note" style="margin-top:6px">"Kalshi win %" is the price paid, which is Kalshi's chance for the side bought. "My win %" is the bot's own chance. The win amount is what the bet pays after the fee. A shadow pick: no money is bet.</small></section>`}
+function screenCombo(){
+  const m=monData(),c=m&&m.combos.find(x=>String(x.id)===String(route.id));
+  if(!c)return detailHeader("Combo")+`<p class="empty">This combo is no longer in the list.</p>`;
+  const st=c.status==="open"?"Open":c.pnl>0?"Won":"Lost",mark={won:"✓ Won",lost:"✗ Lost",open:"• Open"};
+  return detailHeader("Combo details",`<span class="pill" style="${st==="Lost"?"background:var(--sportBg);color:var(--noText)":""}">${st}</span>`)+
+    `<section class="card"><small class="muted">${plural(c.legs.length,"leg")} · all must win · recorded ${mWhen(c.ts)}${c.status==="open"?" · first game "+mWhen(c.tip):""}</small>
+      <b style="font-size:28px" class="num ${c.pnl==null?"":cls(c.pnl)}">${c.pnl==null?"Open":mUsd(c.pnl)}</b></section>`+
+    `<section class="grid3"><div class="tile"><small>Bet amount</small><b class="num">${money(c.stake)}</b></div><div class="tile"><small>Kalshi win %</small><b class="num">${mPct(c.price)}</b></div><div class="tile"><small>My win %</small><b class="num">${mPct(c.chance)}</b></div></section>`+
+    `<section class="grid3"><div class="tile"><small>Win amount</small><b class="num up">${mUsd(c.win)}</b></div><div class="tile"><small>Lose amount</small><b class="num down">${mUsd(-c.lose)}</b></div><div class="tile"><small>Edge</small><b class="num">${Math.round(c.edge*100)}%</b></div></section>`+
+    (c.status==="open"?`<section class="card"><h2>Live</h2>${liveBlock(c.now,c.now_ts,c.price,c.chance)}</section>`:"")+
+    `<section class="card"><h2>The legs</h2>${c.legs.map(g=>`<div style="padding:6px 0;border-top:1px solid var(--line,#8883)"><div class="kv"><span>${esc(g.label)}</span><b class="num ${g.status==="won"?"up":g.status==="lost"?"down":"muted"}">${mark[g.status]}</b></div>
+      <small class="muted">Kalshi ${mPct(g.price)} at the bet${g.now!=null&&g.status==="open"?" · now "+mPct(g.now):""} · the bot ${mPct(g.p)}</small></div>`).join("")}
+      <small class="note" style="margin-top:6px">The combo pays $1 per contract only if every leg wins, and loses the moment one misses. "Kalshi win %" is the legs' prices multiplied, which is an estimate and not Kalshi's own combo price. "My win %" is the bot's cautious chance for all legs together (each leg pulled halfway toward Kalshi's price). A shadow combo: no money is bet.</small></section>`}
 function screenSports(){
   const all=bets.filter(b=>!b.coin),leagues=[...new Set(all.map(b=>b.league))].sort();
   leagues.forEach(l=>{if(custom.leagues[l]==null)custom.leagues[l]=true});
@@ -1054,7 +1093,7 @@ function customizeSheet(){
 let sheetOpen=false;
 function render(scrollTop){
   const s=$("screen");
-  const map={main:{dash:screenDash,crypto:screenCrypto,sports:screenSports,activity:screenActivity,settings:screenSettings}[route.tab],coin:screenCoin,bet:screenBet,set:screenSet,insights:screenInsights};
+  const map={main:{dash:screenDash,crypto:screenCrypto,sports:screenSports,activity:screenActivity,settings:screenSettings}[route.tab],coin:screenCoin,bet:screenBet,set:screenSet,insights:screenInsights,pick:screenPick,combo:screenCombo};
   s.innerHTML=(map[route.page]||screenDash)();
   document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-current",b.dataset.tab===route.tab?"page":"false"));
   $("sheetRoot").innerHTML=sheetOpen?customizeSheet():"";
@@ -1148,6 +1187,8 @@ document.addEventListener("click",async e=>{
   if(a==="slide"){const el=t.closest(".livecard").querySelector(".slides");return showSlide(el,+t.dataset.i,true)}
   if(a==="coin"){ui.coinTab=t.dataset.sub||"overview";const c=COINS.find(x=>x.sym===v);if(c)spot(c).then(updateLive);return go({page:"coin",sym:v})}
   if(a==="bet")return go({page:"bet",id:v});
+  if(a==="mpick")return go({page:"pick",id:v});
+  if(a==="mcombo")return go({page:"combo",id:v});
   if(a==="set")return go({page:"set",sec:v});
   if(a==="insights")return go({page:"insights",sym:v||null});
   if(["coinTab","pnlRange","sportsType","league","actView","mon"].includes(a)){ui[a]=v;return render()}
