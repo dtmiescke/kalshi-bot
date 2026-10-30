@@ -95,7 +95,7 @@ class TestWorkflowsAgree(unittest.TestCase):
         for name in ("bot.yml", "clear-pause.yml"):      # train.yml no longer saves memory
             text = (root / name).read_text()
             self.assertIn("STATS_SINCE: ${{ vars.APP_STATS_SINCE || '%s' }}" % RESET, text, name)
-            self.assertIn("BANKROLL: ${{ vars.APP_BANKROLL || '500' }}", text, name)
+            self.assertIn("BANKROLL: ${{ vars.APP_BANKROLL || '1000' }}", text, name)
 
 
 if __name__ == "__main__":

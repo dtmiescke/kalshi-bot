@@ -49,7 +49,7 @@ jobs:
       # ("Restart stats" in the app); older bets stay in memory and keep teaching
       # the bot. Keep these two lines identical in bot.yml and clear-pause.yml.
       STATS_SINCE: ${{ vars.APP_STATS_SINCE || '2026-10-28T11:45:00Z' }}
-      BANKROLL: ${{ vars.APP_BANKROLL || '500' }}
+      BANKROLL: ${{ vars.APP_BANKROLL || '1000' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -154,12 +154,12 @@ jobs:
           ORDER_STYLE: ${{ vars.ORDER_STYLE || 'maker' }}
           # Bet settings from the phone app (APP_* variables). Defaults: $5-$20 bets,
           # up to 4 coins x 4 fifteen-minute windows = 16 crypto bets an hour (each
-          # only when a trade clears the edge checks), stop if the $500 is lost.
+          # only when a trade clears the edge checks), stop if the $1,000 is lost.
           MIN_PER_BET: ${{ vars.APP_MIN_BET || '5' }}
           MAX_PER_BET: ${{ vars.APP_MAX_BET || '20' }}
           MAX_PER_GAME: ${{ vars.APP_MAX_BET || '20' }}
           MAX_PER_DAY: '8000'
-          MAX_TOTAL_LOSS: ${{ vars.APP_STOP_LOSS || '500' }}
+          MAX_TOTAL_LOSS: ${{ vars.APP_STOP_LOSS || '1000' }}
           MAX_DRAWDOWN: '100'
           MAX_OPEN_POSITIONS: '8'
           MAX_OPEN_COST: ${{ vars.APP_MAX_OPEN_COST || '160' }}
