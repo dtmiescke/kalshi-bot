@@ -52,6 +52,14 @@ jobs:
       BANKROLL: ${{ vars.APP_BANKROLL || '1000' }}
     steps:
       - uses: actions/checkout@v5
+      - name: Stop date
+        # Runs first. After APP_RUN_UNTIL (default Monday 2026-11-02 08:00 UTC, after Sunday's games have settled)
+        # this disables the workflow and cancels the run, so nothing more is fetched or spent.
+        # Set the repository variable APP_RUN_UNTIL to another time, or to "never", to change that.
+        env:
+          RUN_UNTIL: ${{ vars.APP_RUN_UNTIL || '2026-11-02T08:00:00Z' }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/run_until.sh
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
