@@ -168,6 +168,18 @@ class TestLineups(unittest.TestCase):
         cooling = [game(f"2026-10-{i+1:02d}", 34, pts=15) for i in range(10)] + [game(f"2026-10-{i+11:02d}", 24, pts=10) for i in range(5)]
         self.assertLess(nba.projection(cooling, ("PTS",))[1]["minutes"], 30.0)    # fewer recent minutes still pull him down
 
+    def test_matchup_and_back_to_back_adjust_scoring_only_a_little(self):
+        cur = {"1": {"oppg": 120.0, "games": 10}, "2": {"oppg": 100.0, "games": 10}, "3": {"oppg": 110.0, "games": 10}}
+        weak, strong = nba.matchup_factor(("PTS",), "1", cur, {}), nba.matchup_factor(("PTS",), "2", cur, {})
+        self.assertGreater(weak, 1.0)
+        self.assertLess(strong, 1.0)
+        self.assertLessEqual(weak, 1 + nba.MATCHUP_MAX)
+        self.assertEqual(nba.matchup_factor(("REB",), "1", cur, {}), 1.0)               # rebounds are not scoring
+        self.assertEqual(nba.matchup_factor(("PTS",), "9", cur, {}), 1.0)               # unknown opponent: no change
+        games = [game("2026-10-28", 30, 10)]
+        self.assertEqual(nba.rest_factor(games, "2026-10-30T00:00:00Z"), nba.BACK_TO_BACK)   # tips 8pm ET on the 29th
+        self.assertEqual(nba.rest_factor(games, "2026-10-31T00:00:00Z"), 1.0)           # a day of rest
+
     def test_a_star_who_is_out_costs_his_team_strength(self):
         self.assertAlmostEqual(nba.net_loss(28, 7), 0.12 * (28 + 10.5), places=3)
         self.assertGreater(nba.net_loss(28, 7), nba.net_loss(8, 1))
