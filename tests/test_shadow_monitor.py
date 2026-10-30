@@ -41,6 +41,7 @@ class TestMonitor(unittest.TestCase):
         self.assertEqual(out["lanes"]["Bet combos"]["open"], 1)
         combo = out["combos"][0]
         self.assertEqual([g["status"] for g in combo["legs"]], ["won", "open"])                 # leg statuses come from the picks
+        self.assertEqual([(g["id"], g["game"], g["side"]) for g in combo["legs"]], [("N1", "A at B", "yes"), ("F1", "A at B", "yes")])   # each leg has its own details
         sports = [(p["sport"], p["label"], p["status"]) for p in out["picks"]]
         self.assertEqual(sports[0][0], "NBA")                                                    # open picks first within a sport
         self.assertIn(("NFL", "Jared Goff 275+ passing yards (YES)", "open"), sports)

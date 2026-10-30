@@ -57,11 +57,13 @@ def report(store, now=None):
         progress = store.get_kv("pick_progress", {}) or {}
     except Exception:
         progress = {}
-    sides = {}
+    sides, games, tips = {}, {}, {}
     for sport, table in TABLES:
         rows = _q(store, f"SELECT * FROM {table}")
         for r in rows:
             sides[r["ticker"]] = r["side"]
+            games[r["ticker"]] = r["game"]
+            tips[r["ticker"]] = r["tip_ts"]
             status[r["ticker"]] = ("won" if r["pnl"] > 0 else "lost") if r["status"] == "settled" and r["pnl"] is not None else "open"
         if sport == "NBA":
             lanes["NBA props"] = _lane([r for r in rows if r["kind"] == "prop"])
@@ -91,6 +93,7 @@ def report(store, now=None):
                        "stake": r["stake"], "fee": r["fee"], "contracts": r["contracts"], "win": round(win, 2),
                        "lose": round(r["stake"] + r["fee"], 2), "tip": r["tip_ts"], "ts": r["ts"], "now": None if now_chance is None else round(now_chance, 4),
                        "now_ts": min((quotes[g["ticker"]]["ts"] for g in legs if g["ticker"] in quotes), default=None),
-                       "legs": [{"id": g["ticker"], "label": g["label"], "price": g["price"], "p": g.get("p_model"), "status": status.get(g["ticker"], "open"),
+                       "legs": [{"id": g["ticker"], "game": games.get(g["ticker"]), "tip": tips.get(g["ticker"]),
+                                 "side": g.get("side") or sides.get(g["ticker"], "yes"), "label": g["label"], "price": g["price"], "p": g.get("p_model"), "status": status.get(g["ticker"], "open"),
                                  "now": x, "prog": progress.get(g["ticker"])} for g, x in zip(legs, live)]})
     return {"lanes": lanes, "picks": picks, "combos": combos}
