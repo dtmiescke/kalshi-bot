@@ -111,6 +111,26 @@ def league_benched(store, series, n=40, mode=None):
     return bool(clvs) and sum(clvs) / len(clvs) < 0
 
 
+def proven_loser(store, series_list, n_min=20, z_min=1.64, mode=None):
+    """True when these series together have lost per dollar staked by a margin luck rarely explains: at least n_min
+    graded bets and the mean return per dollar is below zero by z_min standard errors. Needs no closing line."""
+    series_list = list(series_list)
+    if not series_list:
+        return False
+    marks = ",".join("?" for _ in series_list)
+    rows = store.q(f"""SELECT pnl, stake FROM bets WHERE status='graded' AND series IN ({marks})
+                       AND graded_ts >= ? AND (? IS NULL OR mode=?) AND stake > 0""",
+                   (*series_list, _since(), mode, mode))
+    rets = [float(r["pnl"] or 0) / float(r["stake"]) for r in rows]
+    if len(rets) < n_min:
+        return False
+    mean = sum(rets) / len(rets)
+    var = sum((x - mean) ** 2 for x in rets) / (len(rets) - 1)
+    if var <= 0:
+        return mean < 0
+    return mean / math.sqrt(var / len(rets)) <= -z_min
+
+
 def total_loss_tripped(store, limit=None, mode=None):
     """Hard all-time net-realized-loss stop for the selected account mode."""
     if limit is None:

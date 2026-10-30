@@ -1050,7 +1050,12 @@ class Engine:
         hi_min = float(os.environ.get("LADDER_MAX_MINUTES", 240))
         weights = brain.get_weights(self.store, "crypto")
         ladder, cache = [], {}
-        for series in [x for x in os.environ.get("CRYPTO_LADDER_SERIES", "KXBTCD,KXETHD").split(",") if x]:
+        ladder_series = [x for x in os.environ.get("CRYPTO_LADDER_SERIES", "KXBTCD,KXETHD").split(",") if x]
+        ladders_off = os.environ.get("LADDER_GATE", "yes") == "yes" and guard.proven_loser(
+            self.store, ladder_series, mode=self.s.mode)      # still scanned and logged; only the directional bets stop
+        if ladders_off:
+            summary["ladders_gated"] = True
+        for series in ladder_series:
             try:
                 events = self.data.sports_events(series)
             except Exception:
@@ -1072,7 +1077,7 @@ class Engine:
                     left = (t["close_ts"] - now) / 60
                     self.store.set_kv(f"start_{m['ticker']}", int(t["close_ts"]))
                     self.store.set_kv(f"settle_after_{m['ticker']}", int(t["close_ts"]) + 600)
-                    if not (lo_min <= left <= hi_min) or not self.betting_ok or \
+                    if not (lo_min <= left <= hi_min) or not self.betting_ok or ladders_off or \
                             guard.league_benched(self.store, series, mode=self.s.mode):
                         continue
                     if pair not in cache:
