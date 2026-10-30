@@ -40,8 +40,6 @@ LABEL = {"KXNBAPTS": "points", "KXNBAREB": "rebounds", "KXNBAAST": "assists", "K
          "KXNBABLK": "blocks", "KXNBAPRA": "pts+reb+ast", "KXNBAPR": "pts+reb", "KXNBAPA": "pts+ast", "KXNBARA": "reb+ast",
          "KXNBASTOCK": "stl+blk"}
 PRIOR_GAMES = 12            # last season counts as this many games of evidence for a player
-ABSORB = 0.4                # share of an absent teammate's minutes that the rest of the rotation picks up
-MINUTES_CAP = 29.0          # lineup news never bumps a player past this many minutes (his own recent minutes are never cut)
 TEAM_PRIOR = 20             # ... and this many for a team
 HOME_EDGE, GAME_SD = 2.5, 12.0
 MIN_EDGE, ML_EDGE, MAX_SPREAD, STAKE = 0.08, 0.03, 0.08, 5.0
@@ -90,13 +88,13 @@ def _rate(gs, comps):
     return sum(value(g, comps) for g in gs) / minutes if minutes else None
 
 
-USAGE_COMPS = {"PTS", "AST", "3PM"}      # production that rises when more of the offence runs through him
 
 
-def projection(games, comps, cur_start="2026-10-01", extra_min=0.0):
+def projection(games, comps, cur_start="2026-10-01"):
     """(projected mean, details). Production per MINUTE (this season blended with last by games played, 60%) plus his
     last 10 games (40%), multiplied by the minutes he is actually playing now (the last 5 games count most). Working
-    in minutes is what lets a bigger role, or a returning injury, show up straight away."""
+    in minutes is what lets a bigger role, or a returning injury, show up straight away. Minutes are never projected
+    above what he normally plays (his season average), however many he has played lately or whoever is out."""
     played = [g for g in games if g["MIN"] >= 8]
     if len(played) < 3:
         return None, {}
@@ -108,10 +106,9 @@ def projection(games, comps, cur_start="2026-10-01", extra_min=0.0):
     base = r_prior if not cur else (n * r_cur + PRIOR_GAMES * r_prior) / (n + PRIOR_GAMES)
     r10 = _rate(played[-10:], comps)
     exp_min = 0.7 * (sum(g["MIN"] for g in played[-5:]) / len(played[-5:])) + 0.3 * (sum(g["MIN"] for g in played[-15:]) / len(played[-15:]))
-    own_min = exp_min
-    exp_min = max(own_min, min(MINUTES_CAP, exp_min + extra_min))   # minutes a missing teammate leaves behind, capped
-    usage = 1 + 0.5 * (exp_min - own_min) / own_min if USAGE_COMPS & set(comps) else 1.0
-    mu = (0.6 * base + 0.4 * r10) * exp_min * usage
+    typical = cur if len(cur) >= 5 else played[-30:]
+    exp_min = min(exp_min, sum(g["MIN"] for g in typical) / len(typical))
+    mu = (0.6 * base + 0.4 * r10) * exp_min
     per_game = lambda gs: round(sum(value(g, comps) for g in gs) / len(gs), 1) if gs else None
     return mu, {"season": per_game(cur), "last_season": per_game(prior), "l10": per_game(played[-10:]),
                 "l5": per_game(played[-5:]), "minutes": round(exp_min, 1), "games_this_season": n, "history": len(played)}
@@ -458,14 +455,10 @@ def build_report(client, store=None, now=None, day=None, fetch=requests.get, max
                 ti = team_info[tid]
                 level = "out" if pl["id"] in {a["id"] for a in ti["absent"]} else "doubt" if norm(pl["name"]) in {norm(d["name"]) for d in ti["doubt"]} else "ok"
                 games_p = logs(pl)
-                extra = 0.0
-                if level == "ok" and ti["active_min"] > 0 and ti["out_min"] > 0:
-                    extra = ABSORB * ti["out_min"] * ti["mins"].get(pl["id"], 0.0) / ti["active_min"]   # his share of the missing minutes
-                mu, info = projection(games_p, comps, cur_start, extra_min=extra)
+                mu, info = projection(games_p, comps, cur_start)
                 if mu is None or info.get("history", 0) < MIN_HISTORY:
                     continue
-                mu0, info0 = projection(games_p, comps, cur_start)         # the same player without any minutes passed on
-                row = {"player": pl["name"], "stat": LABEL[series], "projection": round(mu, 1), **info, "extra_minutes": round(extra, 1),
+                row = {"player": pl["name"], "stat": LABEL[series], "projection": round(mu, 1), **info,
                        "status": {"out": "out", "doubt": "uncertain"}.get(level, "healthy"), "rungs": []}
                 best = None
                 for k, m in sorted(rungs):
@@ -477,8 +470,7 @@ def build_report(client, store=None, now=None, day=None, fetch=requests.get, max
                     p_cal = mid + SHRINK * (p - mid)                    # the same forecast, pulled toward Kalshi's own price
                     es = [e for e in side_edges(p, bid, ask) if (ask - bid) <= MAX_SPREAD]
                     ec = [e for e in side_edges(p_cal, bid, ask) if (ask - bid) <= MAX_SPREAD]
-                    p0 = prob_at_least(games_p, comps, mu0, info0["minutes"], k)
-                    e0 = [e for e in side_edges(p0, bid, ask) if (ask - bid) <= MAX_SPREAD] if p0 is not None else []
+                    e0 = es      # minutes are never boosted for lineup news, so the no-guess version is the same forecast
                     rung = {"line": k, "bid": bid, "ask": ask, "kalshi_mid": round(mid, 3), "p_model": round(p, 3),
                             "p_cautious": round(p_cal, 3), "best": es[0] if es else None, "ticker": m["ticker"]}
                     row["rungs"].append(rung)
@@ -497,8 +489,7 @@ def build_report(client, store=None, now=None, day=None, fetch=requests.get, max
                                             "label": f'{pl["name"]} {rung["line"]}+ {LABEL[series]} ({e["side"].upper()})', "side": e["side"],
                                             "price": e["price"], "contracts": e["contracts"], "fee": e["fee"], "p_model": e["p_win"],
                                             "edge": e["edge"], "tip": g["tip"], "projection": row["projection"],
-                                            "cautious_edge": e["cautious_edge"], "base_edge": e["base_edge"], "minutes": info["minutes"],
-                                            "extra_minutes": round(extra, 1)})
+                                            "cautious_edge": e["cautious_edge"], "base_edge": e["base_edge"], "minutes": info["minutes"]})
     # keep the strongest few props per game, and every moneyline pick
     kept, count = [], {}
     for pk in sorted(report["picks"], key=lambda r: -r["edge"]):

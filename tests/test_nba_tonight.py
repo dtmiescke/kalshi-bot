@@ -31,11 +31,11 @@ class TestMaths(unittest.TestCase):
 
     def test_a_bigger_role_shows_up_through_minutes(self):
         old = [game(f"2026-02-{i+1:02d}", 24, pts=10) for i in range(20)]               # 10 points in 24 minutes last season
-        new = [game(f"2026-10-{i+20:02d}", 36, pts=15) for i in range(4)]               # 15 in 36 minutes now
+        new = [game(f"2026-10-{i+20:02d}", 36, pts=15) for i in range(6)]               # 15 in 36 minutes now (six games: his new average counts)
         mu, info = nba.projection(old + new, ("PTS",), "2026-10-01")
         self.assertGreater(mu, 13.0)                                                     # well above last season's 10
-        self.assertEqual(info["minutes"], 31.7)                                          # 0.7 x last 5 (33.6) + 0.3 x last 15 (27.2)
-        self.assertEqual(info["games_this_season"], 4)
+        self.assertEqual(info["minutes"], 33.8)                                          # 0.7 x last 5 (36) + 0.3 x last 15 (28.8), under his 36 average
+        self.assertEqual(info["games_this_season"], 6)
 
     def test_too_little_history_is_not_projected(self):
         self.assertEqual(nba.projection([game("2026-10-20", 30, 10)], ("PTS",))[0], None)
@@ -157,27 +157,22 @@ class TestLineups(unittest.TestCase):
         out = nba.injuries_feed(lambda url, params=None, timeout=None: R())["Team A"]
         self.assertEqual([r["level"] for r in out], ["out", "doubt", "out", "ok"])
 
-    def test_missing_minutes_raise_a_teammates_projection_but_never_past_the_cap(self):
-        games = [game(f"2026-02-{i % 27 + 1:02d}", 24, pts=12) for i in range(25)]
-        base, info = nba.projection(games, ("PTS",))
-        more, info2 = nba.projection(games, ("PTS",), extra_min=3.0)
-        huge, info3 = nba.projection(games, ("PTS",), extra_min=30.0)
-        self.assertGreater(more, base)
-        self.assertEqual(info2["minutes"], 27.0)
-        self.assertEqual(info3["minutes"], nba.MINUTES_CAP)                              # never bumped past 29
-        starters = [game(f"2026-02-{i % 27 + 1:02d}", 35, pts=20) for i in range(25)]
-        self.assertEqual(nba.projection(starters, ("PTS",), extra_min=8.0)[1]["minutes"], 35.0)   # his own minutes are never cut
-        games = [game(f"2026-02-{i % 27 + 1:02d}", 24, pts=12) for i in range(25)]
-        rebounds = [{**g, "REB": 6.0} for g in games]
-        self.assertGreater(nba.projection(rebounds, ("REB",), extra_min=3.0)[0], nba.projection(rebounds, ("REB",))[0])
-        self.assertLess(nba.projection(rebounds, ("REB",), extra_min=3.0)[0] / nba.projection(rebounds, ("REB",))[0],
-                        nba.projection(games, ("PTS",), extra_min=3.0)[0] / base)       # scoring also gets a usage bump; rebounds only minutes
+    def test_minutes_are_never_projected_above_his_average(self):
+        old = [game(f"2026-10-{i+1:02d}", 29, pts=12) for i in range(10)]
+        hot = [game(f"2026-10-{i+11:02d}", 36, pts=18) for i in range(5)]          # five long games lately
+        _, info = nba.projection(old + hot, ("PTS",))
+        avg = (10 * 29 + 5 * 36) / 15
+        self.assertLessEqual(info["minutes"], round(avg, 1))                        # never above the 31.3 he averages
+        steady = [game(f"2026-10-{i+1:02d}", 29, pts=12) for i in range(15)]
+        self.assertEqual(nba.projection(steady, ("PTS",))[1]["minutes"], 29.0)
+        cooling = [game(f"2026-10-{i+1:02d}", 34, pts=15) for i in range(10)] + [game(f"2026-10-{i+11:02d}", 24, pts=10) for i in range(5)]
+        self.assertLess(nba.projection(cooling, ("PTS",))[1]["minutes"], 30.0)    # fewer recent minutes still pull him down
 
     def test_a_star_who_is_out_costs_his_team_strength(self):
         self.assertAlmostEqual(nba.net_loss(28, 7), 0.12 * (28 + 10.5), places=3)
         self.assertGreater(nba.net_loss(28, 7), nba.net_loss(8, 1))
 
-    def test_the_report_shows_who_is_out_and_passes_on_their_minutes(self):
+    def test_the_report_shows_who_is_out_but_does_not_inflate_minutes(self):
         ps = fake_world()
         for p in ps:
             p.start()
@@ -187,8 +182,7 @@ class TestLineups(unittest.TestCase):
         self.assertEqual([a["name"] for a in g["lineups"]["away"]["absent"]], ["Teammate Out"])
         self.assertLess(g["lineups"]["away"]["net_adjustment"], 0)                       # Cleveland is weaker without him
         star = g["props"][0]
-        self.assertGreater(star["extra_minutes"], 0)                                      # the Star picks up some of his minutes
-        self.assertLessEqual(star["minutes"], max(nba.MINUTES_CAP, 34.0))                # never bumped past the cap (his own minutes aside)
+        self.assertNotIn("extra_minutes", star)                                           # no minutes are passed on to teammates
 
     def test_a_player_who_is_out_or_uncertain_is_never_picked(self):
         for level in ("out", "doubt"):
