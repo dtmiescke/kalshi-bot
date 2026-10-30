@@ -115,3 +115,62 @@ class TestEngineFill(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def live_game(home_cur="+650", away_cur="-165", draw_cur=None, state="in"):
+    ml = {"home": {"open": {"odds": "+330"}, "close": {"odds": "+550"}, "current": {"odds": home_cur}},
+          "away": {"open": {"odds": "-145"}, "close": {"odds": "-235"}, "current": {"odds": away_cur}},
+          "draw": {"open": {"odds": "+300"}, "close": {"odds": "+400"}}}
+    if draw_cur:
+        ml["draw"]["current"] = {"odds": draw_cur}
+    return {"id": "9", "date": "2026-10-30T11:30Z", "status": {"type": {"state": state}, "displayClock": "44'", "period": 1},
+            "competitions": [{"competitors": [{"homeAway": "home", "score": "0", "team": {"displayName": "Abha"}},
+                                              {"homeAway": "away", "score": "1", "team": {"displayName": "Al Ittihad"}}],
+                              "odds": [{"moneyline": ml}]}]}
+
+
+class TestLiveOdds(unittest.TestCase):
+    def test_a_live_two_way_game_uses_its_current_prices_not_the_stale_close(self):
+        ev = espn_odds.live_event(live_game())
+        prices = {o["name"]: o["price"] for o in ev["bookmakers"][0]["markets"][0]["outcomes"]}
+        self.assertEqual(prices, {"Abha": 650.0, "Al Ittihad": -165.0})
+        self.assertEqual((ev["clock"], ev["score"]), ("44'", {"Abha": 0.0, "Al Ittihad": 1.0}))
+
+    def test_soccer_without_a_live_draw_price_is_not_published(self):
+        self.assertIsNone(espn_odds.live_event(live_game(), three_way=True))        # the draw only has its stale close
+        ev = espn_odds.live_event(live_game(draw_cur="+380"), three_way=True)
+        self.assertEqual(len(ev["bookmakers"][0]["markets"][0]["outcomes"]), 3)
+
+    def test_only_games_in_play_with_both_current_prices(self):
+        self.assertIsNone(espn_odds.live_event(live_game(state="pre")))
+        self.assertIsNone(espn_odds.live_event(live_game(state="post")))
+        self.assertIsNone(espn_odds.live_event(live_game(home_cur="N/A")))
+
+    def test_fetch_live_is_one_call_and_skips_pregame_games(self):
+        get = MagicMock(return_value=Resp({"events": [live_game(), live_game(state="pre"), game("2")]}))
+        out = espn_odds.fetch_live("basketball_nba", get=get)
+        self.assertEqual([e["id"] for e in out], ["espn:9"])
+        self.assertEqual(get.call_count, 1)
+        self.assertEqual(espn_odds.fetch_live("curling_world_cup", get=get), [])
+
+
+class TestEngineLive(unittest.TestCase):
+    def test_live_snapshot_is_kept_throttled_and_never_enters_the_trading_odds(self):
+        eng, now = TestEngineFill().engine(), time.time()
+        with patch("bot.espn_odds.requests.get", return_value=Resp({"events": [live_game()]})) as get:
+            eng.espn_live("basketball_nba", now)
+            eng.espn_live("basketball_nba", now + 10)                      # throttled
+        self.assertEqual(get.call_count, 1)
+        snap = eng.store.get_kv("espn_live_basketball_nba")
+        self.assertEqual(snap["games"][0]["home"], "Abha")
+        self.assertAlmostEqual(sum(snap["games"][0]["fair"].values()), 1.0, places=3)
+        self.assertEqual(eng.store.q("SELECT COUNT(*) n FROM odds_snapshots")[0]["n"], 0)   # watching only; never traded
+
+    def test_the_live_switch_and_failures(self):
+        eng = TestEngineFill().engine()
+        with patch.dict(os.environ, {"ESPN_LIVE": "no"}), patch("bot.espn_odds.requests.get") as get:
+            eng.espn_live("basketball_nba", time.time())
+        self.assertEqual(get.call_count, 0)
+        with patch("bot.espn_odds.requests.get", side_effect=RuntimeError("boom")):
+            eng.espn_live("basketball_nba", time.time())                   # no crash, nothing stored
+        self.assertIsNone(eng.store.get_kv("espn_live_basketball_nba"))

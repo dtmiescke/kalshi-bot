@@ -248,6 +248,7 @@ class Engine:
         store vig-free consensus. Stale lines never trade: evaluate() refuses
         consensus older than 1.5 x ODDS_MAX_AGE_MINUTES."""
         now = int(time.time())
+        self.espn_live(sport, now)
         cached_events = self.store.get_kv(f"odds_events_{sport}", []) or []
         due, why = refresh_plan(
             self.store, sport, now, next_game, self.s.odds_refresh_minutes,
@@ -303,6 +304,28 @@ class Engine:
             "event_count": len(slim), "credits_remaining": getattr(self.odds, "last_remaining", None),
         })
         log.info("odds %s: %d events, credits left %s", sport, len(events), getattr(self.odds, "last_remaining", None))
+
+    def espn_live(self, sport, now):
+        """Live in-play moneylines from ESPN, free: kept as a snapshot for watching and study. They are never written to
+        the odds table the bot trades from, because a single delayed book against Kalshi's live price mostly shows lag,
+        not edge."""
+        if os.environ.get("ESPN_LIVE", "yes") != "yes" or sport not in espn_odds.ESPN_PATHS:
+            return
+        every = float(os.environ.get("ESPN_LIVE_SECONDS", 60))
+        if now - float(self.store.get_kv(f"espn_live_last_{sport}", 0) or 0) < every:
+            return
+        self.store.set_kv(f"espn_live_last_{sport}", now)
+        try:
+            games = espn_odds.fetch_live(sport)
+        except Exception as exc:
+            log.warning("espn live odds %s unavailable: %s", sport, redact(str(exc)))
+            return
+        out = []
+        for ev in games:
+            fair = {team: round(p, 4) for team, (p, _, _) in consensus(ev).items()}
+            out.append({"id": ev["id"], "home": ev["home_team"], "away": ev["away_team"], "clock": ev.get("clock"),
+                        "period": ev.get("period"), "score": ev.get("score"), "fair": fair})
+        self.store.set_kv(f"espn_live_{sport}", {"ts": now, "sport": sport, "games": out})
 
     def espn_fill(self, sport, now):
         """Free DraftKings moneylines from ESPN when The Odds API data for this sport is stale (out of credits, not due,

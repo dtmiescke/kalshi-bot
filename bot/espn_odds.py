@@ -39,9 +39,9 @@ def _american(value):
     return x if math.isfinite(x) and abs(x) >= 100 else None
 
 
-def _price(side):
+def _price(side, keys=("close", "open")):
     side = side if isinstance(side, dict) else {}
-    for key in ("close", "open"):          # the current line first; the opener only if there is no current one
+    for key in keys:          # the current line first; the opener only if there is no current one
         p = _american((side.get(key) or {}).get("odds"))
         if p is not None:
             return p
@@ -98,3 +98,58 @@ def fetch(sport, days=3, get=None, now=None, timeout=15):
                 if ev:
                     events.append(ev)
     return events
+
+
+def live_event(game, three_way=False):
+    """An in-progress game's CURRENT moneyline as an Odds API shaped event, or None.
+
+    Every side must carry its own live ('current') price: the opening and closing prices ESPN leaves on a live game
+    are stale by definition, and a three-way soccer line without a live draw price would mis-state both teams.
+    These are for watching and studying only: they are never written to the odds table the bot trades from."""
+    if ((game.get("status") or {}).get("type") or {}).get("state") != "in":
+        return None
+    comp = (game.get("competitions") or [{}])[0]
+    teams = {c.get("homeAway"): (c.get("team") or {}).get("displayName") for c in comp.get("competitors") or []}
+    home, away = teams.get("home"), teams.get("away")
+    if not home or not away:
+        return None
+    for odds in comp.get("odds") or []:
+        ml = odds.get("moneyline") or {}
+        ph, pa = _price(ml.get("home"), ("current",)), _price(ml.get("away"), ("current",))
+        if ph is None or pa is None:
+            continue
+        outcomes = [{"name": home, "price": ph}, {"name": away, "price": pa}]
+        if three_way:
+            draw = _price(ml.get("draw"), ("current",))
+            if draw is None:
+                continue
+            outcomes.append({"name": "Draw", "price": draw})
+        status = game.get("status") or {}
+        return {"id": f"espn:{game.get('id')}", "home_team": home, "away_team": away,
+                "commence_time": game.get("date"), "source": "espn", "live": True,
+                "clock": status.get("displayClock"), "period": status.get("period"),
+                "score": {home: _num(next((c.get("score") for c in comp["competitors"] if c.get("homeAway") == "home"), None)),
+                          away: _num(next((c.get("score") for c in comp["competitors"] if c.get("homeAway") == "away"), None))},
+                "bookmakers": [{"key": "draftkings", "markets": [{"key": "h2h", "outcomes": outcomes}]}]}
+    return None
+
+
+def _num(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_live(sport, get=None, timeout=15):
+    """Games being played right now with a live moneyline: one call, today's slate. Raises on a failed request."""
+    path = ESPN_PATHS.get(sport)
+    if not path:
+        return []
+    r = (get or requests.get)(SCOREBOARD.format(path=path), params={"limit": 300}, timeout=timeout)
+    r.raise_for_status()
+    payload = r.json()
+    if not isinstance(payload, dict):
+        raise RuntimeError("ESPN scoreboard returned an unexpected payload")
+    three_way = sport.startswith("soccer")
+    return [e for e in (live_event(g, three_way) for g in payload.get("events") or [] if isinstance(g, dict)) if e]
