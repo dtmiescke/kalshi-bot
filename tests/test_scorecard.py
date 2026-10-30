@@ -3,7 +3,7 @@ import random
 import tempfile
 import unittest
 
-from bot import experiment, nba_tonight, nfl_tonight, scorecard
+from bot import experiment, nba_tonight, nfl_tonight, scorecard, sports_combos
 from bot.storage import Store
 
 
@@ -99,6 +99,7 @@ class TestReport(unittest.TestCase):
     def test_nba_and_experiment_lanes_read_their_tables(self):
         self.store.x(nba_tonight.SCHEMA)
         self.store.x(nfl_tonight.SCHEMA)
+        self.store.x(sports_combos.SCHEMA)
         experiment.ensure_table(self.store)
         for i, (kind, pnl) in enumerate((("prop", 5.0), ("prop", -5.0), ("ml", 2.0))):
             self.store.x("""INSERT INTO nba_picks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -113,6 +114,9 @@ class TestReport(unittest.TestCase):
         self.store.x("INSERT INTO nfl_picks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                      ("N1", 1, "A at B", "prop", "l", "no", .4, 12, 4.8, .1, .7, .2, 2, "settled", "no", 7.0, 3))
         self.assertEqual({x["lane"]: x for x in scorecard.report(self.store)["lanes"]}["NFL player props (shadow)"]["dollars"], 7.0)
+        self.store.x("INSERT INTO sports_combos VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                     ("K1", 86400 * 5, 3, "[]", .2, .5, .35, .1, 20, 4.0, .1, 1, "settled", -4.1, 2))
+        self.assertEqual({x["lane"]: x for x in scorecard.report(self.store)["lanes"]}["Bet combos, several players (shadow)"]["dollars"], -4.1)
 
 
 if __name__ == "__main__":

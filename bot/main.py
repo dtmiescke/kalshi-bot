@@ -136,6 +136,12 @@ def periodic_cycle(s, store, data):
             nfl_tonight.run(store, data, every=int(os.environ.get("NFL_EVERY_SECONDS", 7200)))
         except Exception as e:
             logging.warning("nfl tracker failed: %s", e)
+    if os.environ.get("SPORTS_COMBOS", "yes") == "yes":      # multi-player bet combos built from the shadow picks: paper only
+        try:
+            from . import sports_combos
+            sports_combos.run(store, every=int(os.environ.get("SPORTS_COMBOS_SECONDS", 3600)))
+        except Exception as e:
+            logging.warning("sports combos failed: %s", e)
     if os.environ.get("SPORTS_CONSISTENCY", "yes") == "yes":   # Kalshi-only price-consistency scan: measures, never trades
         try:
             from . import sports_consistency
