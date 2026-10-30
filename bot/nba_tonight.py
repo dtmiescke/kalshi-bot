@@ -45,6 +45,8 @@ HOME_EDGE, GAME_SD = 2.5, 12.0
 MIN_EDGE, ML_EDGE, MAX_SPREAD, STAKE = 0.08, 0.03, 0.08, 5.0
 MAX_PER_GAME = 8            # picks recorded for one game, across every hourly pass (they used to pile up to 20)
 MAX_PER_PLAYER = 2          # ... and for one player: his lines all win or lose together
+MAX_PER_STAT = 2            # ... and for one kind of stat in a game, so a night is not eight "points" bets
+MAX_SAME_SIDE = 5           # ... and how many may lean the same way (all unders, all overs) out of the 8
 BOOK_AGREE = 0.12           # a game-winner pick must be within this of the sportsbook consensus
 SHRINK = 0.35               # a disagreement with Kalshi is trusted this much for the cautious check (the bot's own learned trust is lower)
 MIN_HISTORY = 15            # games needed before a prop is rated
@@ -361,6 +363,34 @@ def book_prob(store, team_name, now):
     return best[1] if best else None
 
 
+_LABEL_PARTS = re.compile(r"^(.*?) \d+\+ (.+?) \((YES|NO)\)$")
+
+
+def label_parts(label, kind="prop"):
+    """(player, stat, side) from a pick label; a game winner has no player or stat."""
+    m = _LABEL_PARTS.match(label or "")
+    return (m.group(1), m.group(2), m.group(3).lower()) if m and kind == "prop" else (None, None, None)
+
+
+def allowed(counts, game, player, stat, side, limits=None):
+    """May one more pick join a game that already holds `counts`? limits: (per game, per player, per stat, same side)."""
+    per_game, per_player, per_stat, same_side = limits or (MAX_PER_GAME, MAX_PER_PLAYER, MAX_PER_STAT, MAX_SAME_SIDE)
+    if counts.get(("game", game), 0) >= per_game:
+        return False
+    if player and counts.get(("player", game, player), 0) >= per_player:
+        return False
+    if stat and counts.get(("stat", game, stat), 0) >= per_stat:
+        return False
+    return not (side and counts.get(("side", game, side), 0) >= same_side)
+
+
+def tally(counts, game, player, stat, side):
+    for key in (("game", game), ("player", game, player) if player else None, ("stat", game, stat) if stat else None,
+                ("side", game, side) if side else None):
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+
+
 def build_report(client, store=None, now=None, day=None, fetch=requests.get, max_props_per_game=6):
     """Everything for tonight's slate. Returns {"games": [...], "picks": [...], "ts": now}. Never trades."""
     now = int(time.time() if now is None else now)
@@ -538,13 +568,14 @@ def build_report(client, store=None, now=None, day=None, fetch=requests.get, max
                                             "price": e["price"], "contracts": e["contracts"], "fee": e["fee"], "p_model": e["p_win"],
                                             "edge": e["edge"], "tip": g["tip"], "projection": row["projection"],
                                             "cautious_edge": e["cautious_edge"], "base_edge": e["base_edge"], "minutes": info["minutes"]})
-    # keep the strongest few props per game, and every moneyline pick
-    kept, count = [], {}
+    # the best picks that are NOT all the same bet: capped per game, per player, per kind of stat, and per direction
+    kept, counts = [], {}
     for pk in sorted(report["picks"], key=lambda r: -r["edge"]):
-        if pk["kind"] == "prop":
-            count[pk["game"]] = count.get(pk["game"], 0) + 1
-            if count[pk["game"]] > max_props_per_game:
-                continue
+        player, stat, side = label_parts(pk["label"], pk["kind"])
+        side = side or ("yes" if pk["kind"] == "ml" else None)
+        if not allowed(counts, pk["game"], player, stat, side):
+            continue
+        tally(counts, pk["game"], player, stat, side)
         kept.append(pk)
     report["picks"] = kept
     return report
@@ -567,12 +598,13 @@ def record_picks(store, report, now=None):
             continue                              # never "pick" a game that has started
         if store.q("SELECT 1 FROM nba_picks WHERE ticker=?", (pk["ticker"],)):
             continue
-        if store.q("SELECT COUNT(*) AS n FROM nba_picks WHERE game=?", (pk["game"],))[0]["n"] >= MAX_PER_GAME:
-            continue                              # the game already has its quota from earlier passes
-        who = re.match(r"(.+?) \d+\+", pk["label"]) if pk["kind"] == "prop" else None
-        if who and store.q("SELECT COUNT(*) AS n FROM nba_picks WHERE game=? AND label LIKE ?",
-                           (pk["game"], who.group(1) + " %"))[0]["n"] >= MAX_PER_PLAYER:
-            continue
+        counts = {}
+        for r in store.q("SELECT label, kind, side FROM nba_picks WHERE game=?", (pk["game"],)):
+            player, stat, side = label_parts(r["label"], r["kind"])
+            tally(counts, pk["game"], player, stat, side or r["side"])
+        player, stat, side = label_parts(pk["label"], pk["kind"])
+        if not allowed(counts, pk["game"], player, stat, side or pk["side"]):
+            continue                              # the game already has its mix from earlier passes
         before = store.q("SELECT COUNT(*) AS n FROM nba_picks")[0]["n"]
         store.x("""INSERT OR IGNORE INTO nba_picks (ticker, ts, game, kind, label, side, price, contracts, stake, fee,
                    p_model, edge, tip_ts, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'open')""",

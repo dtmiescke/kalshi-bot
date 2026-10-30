@@ -161,3 +161,16 @@ class TestAccount(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMix(unittest.TestCase):
+    def test_a_game_is_not_five_of_the_same_bet(self):
+        store = Store(os.path.join(tempfile.mkdtemp(), "t.sqlite"))
+        base = {"game": "A at B", "kind": "prop", "side": "yes", "price": 0.5, "contracts": 10, "fee": 0.2, "p_model": 0.7,
+                "edge": 0.15, "tip": TIP}
+        same_stat = [{**base, "ticker": f"S{i}", "label": f"Runner {i} 60+ rushing yards (YES)"} for i in range(5)]
+        self.assertEqual(nfl.record_picks(store, {"picks": same_stat}, NOW), nfl.MAX_PER_STAT)
+        store = Store(os.path.join(tempfile.mkdtemp(), "t.sqlite"))
+        stats = ["passing yards", "receiving yards", "rushing yards", "receptions", "rushing attempts"]
+        same_side = [{**base, "side": "no", "ticker": f"D{i}", "label": f"Player {i} 60+ {stats[i]} (NO)"} for i in range(5)]
+        self.assertEqual(nfl.record_picks(store, {"picks": same_side}, NOW), nfl.MAX_SAME_SIDE)

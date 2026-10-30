@@ -264,18 +264,44 @@ class TestCaps(unittest.TestCase):
         from bot.storage import Store
         return Store(os.path.join(tempfile.mkdtemp(), "t.sqlite"))
 
+    STATS = ["points", "rebounds", "assists", "threes", "steals", "blocks"]
+
+    def mixed(self, hour, n=4):
+        return [self.pick(f"T{hour}-{i}", f"Player {hour}{i} 10+ {self.STATS[(hour * n + i) // 2 % 6]} ({'YES' if (hour + i) % 2 else 'NO'})")
+                for i in range(n)]
+
     def test_one_game_never_collects_more_than_the_quota_across_passes(self):
         st = self.store()
-        for hour in range(5):                                           # hourly passes each bring new tickers
-            picks = [self.pick(f"T{hour}-{i}", f"Player {hour}{i} 10+ points (YES)") for i in range(4)]
-            nba.record_picks(st, {"picks": picks}, now=1_793_300_000 + hour)
+        for hour in range(8):                                           # hourly passes each bring new tickers
+            nba.record_picks(st, {"picks": self.mixed(hour)}, now=1_793_300_000 + hour)
         self.assertEqual(st.q("SELECT COUNT(*) n FROM nba_picks")[0]["n"], nba.MAX_PER_GAME)
         nba.record_picks(st, {"picks": [self.pick("X", "Someone 5+ rebounds (YES)", game="C at D")]}, now=1_793_300_100)
         self.assertEqual(st.q("SELECT COUNT(*) n FROM nba_picks WHERE game='C at D'")[0]["n"], 1)   # other games unaffected
 
+    def test_a_night_is_not_eight_of_the_same_bet(self):
+        st = self.store()
+        same_stat = [self.pick(f"S{i}", f"Player {i} 10+ points ({'YES' if i % 2 else 'NO'})") for i in range(8)]
+        self.assertEqual(nba.record_picks(st, {"picks": same_stat}, now=1_793_300_000), nba.MAX_PER_STAT)       # two "points" bets at most
+        st = self.store()
+        same_side = [self.pick(f"D{i}", f"Player {i} 10+ {self.STATS[i % 6]} (NO)") for i in range(8)]
+        self.assertEqual(nba.record_picks(st, {"picks": same_side}, now=1_793_300_000), nba.MAX_SAME_SIDE)     # no more than 5 lean one way
+        rep_picks = same_side + [self.pick("Y1", "Other 4+ assists (YES)")]
+        self.assertEqual(nba.record_picks(st, {"picks": rep_picks}, now=1_793_300_060), 1)                      # the opposite side still fits
+
+    def test_the_report_applies_the_same_mix_rules(self):
+        counts = {}
+        picks = [self.pick(f"R{i}", f"Player {i} 10+ points (NO)", edge=0.2 - i * 0.01) for i in range(6)]
+        kept = []
+        for pk in picks:
+            player, stat, side = nba.label_parts(pk["label"], pk["kind"])
+            if nba.allowed(counts, pk["game"], player, stat, side):
+                nba.tally(counts, pk["game"], player, stat, side)
+                kept.append(pk["ticker"])
+        self.assertEqual(kept, ["R0", "R1"])                                                                  # the points cap bites first
+        self.assertEqual(nba.label_parts("Boston Celtics to win", "ml"), (None, None, None))
     def test_one_player_is_capped_but_a_repeat_ticker_is_not_counted_twice(self):
         st = self.store()
-        picks = [self.pick(f"T{i}", f"Jayson Tatum {10 + i}+ points (NO)") for i in range(5)]
+        picks = [self.pick(f"T{i}", f"Jayson Tatum 10+ {self.STATS[i]} (NO)") for i in range(5)]
         self.assertEqual(nba.record_picks(st, {"picks": picks}, now=1_793_300_000), nba.MAX_PER_PLAYER)
         self.assertEqual(nba.record_picks(st, {"picks": picks}, now=1_793_300_060), 0)
         self.assertEqual(nba.record_picks(st, {"picks": [self.pick("M1", "Boston Celtics to win", kind="ml")]}, now=1_793_300_120), 1)
