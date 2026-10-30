@@ -3,7 +3,7 @@ import random
 import tempfile
 import unittest
 
-from bot import experiment, nba_tonight, scorecard
+from bot import experiment, nba_tonight, nfl_tonight, scorecard
 from bot.storage import Store
 
 
@@ -98,6 +98,7 @@ class TestReport(unittest.TestCase):
 
     def test_nba_and_experiment_lanes_read_their_tables(self):
         self.store.x(nba_tonight.SCHEMA)
+        self.store.x(nfl_tonight.SCHEMA)
         experiment.ensure_table(self.store)
         for i, (kind, pnl) in enumerate((("prop", 5.0), ("prop", -5.0), ("ml", 2.0))):
             self.store.x("""INSERT INTO nba_picks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -109,6 +110,9 @@ class TestReport(unittest.TestCase):
         self.assertEqual(out["NBA moneylines (shadow)"]["dollars"], 2.0)
         self.assertEqual(out["NBA player props (shadow)"]["forecast"], 60.0)
         self.assertEqual(out["Loosened-rules experiment (shadow)"]["wins"], 1)
+        self.store.x("INSERT INTO nfl_picks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                     ("N1", 1, "A at B", "prop", "l", "no", .4, 12, 4.8, .1, .7, .2, 2, "settled", "no", 7.0, 3))
+        self.assertEqual({x["lane"]: x for x in scorecard.report(self.store)["lanes"]}["NFL player props (shadow)"]["dollars"], 7.0)
 
 
 if __name__ == "__main__":

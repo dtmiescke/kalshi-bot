@@ -130,6 +130,12 @@ def periodic_cycle(s, store, data):
         crypto_combo.grade(store)
     except Exception as e:
         logging.warning("crypto combo grading failed: %s", e)
+    if os.environ.get("NFL_TRACKER", "yes") == "yes":      # NFL player props vs Kalshi's prices: shadow picks, never trades
+        try:
+            from . import nfl_tonight
+            nfl_tonight.run(store, data, every=int(os.environ.get("NFL_EVERY_SECONDS", 7200)))
+        except Exception as e:
+            logging.warning("nfl tracker failed: %s", e)
     if os.environ.get("SPORTS_CONSISTENCY", "yes") == "yes":   # Kalshi-only price-consistency scan: measures, never trades
         try:
             from . import sports_consistency

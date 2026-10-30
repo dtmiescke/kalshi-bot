@@ -250,10 +250,10 @@ def roster(team_id, fetch=requests.get):
             for a in data.get("athletes") or [] if isinstance(a, dict) and a.get("id")]
 
 
-def injuries_feed(fetch=requests.get):
+def injuries_feed(fetch=requests.get, base=ESPN):
     """ESPN's league-wide injury list -> {team display name: [{"name", "status", "comment", "level"}]}. level is
     "out" (out or doubtful), "doubt" (day-to-day or questionable: his minutes are uncertain) or "ok"."""
-    data = _get(ESPN + "/injuries", None, fetch)
+    data = _get(base + "/injuries", None, fetch)
     out = {}
     for t in data.get("injuries") or []:
         rows = []
@@ -261,7 +261,7 @@ def injuries_feed(fetch=requests.get):
             a = i.get("athlete") or {}
             text = (i.get("shortComment") or i.get("longComment") or "")
             low = (text + " " + str(i.get("status") or "")).lower()
-            if str(i.get("status") or "").lower() == "out" or "doubtful" in low or "ruled out" in low:
+            if str(i.get("status") or "").lower() == "out" or "doubtful" in low or "ruled out" in low or "injured reserve" in low:
                 level = "out"
             elif "day-to-day" in low or "questionable" in low or "game-time" in low or "minutes" in low:
                 level = "doubt"

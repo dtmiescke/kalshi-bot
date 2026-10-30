@@ -114,6 +114,11 @@ def report(store):
         lanes.append(lane(name, [(r["game"], float(r["stake"]), float(r["pnl"])) for r in sub],
                           [(float(r["p_model"]), float(r["price"]), 1.0 if r["pnl"] > 0 else 0.0) for r in sub
                            if r["p_model"] is not None and r["price"] is not None]))
+    nfl = _q(store, """SELECT game, price, stake, p_model, pnl FROM nfl_picks
+                       WHERE status='settled' AND stake > 0 AND pnl IS NOT NULL""")
+    lanes.append(lane("NFL player props (shadow)", [(r["game"], float(r["stake"]), float(r["pnl"])) for r in nfl],
+                      [(float(r["p_model"]), float(r["price"]), 1.0 if r["pnl"] > 0 else 0.0) for r in nfl
+                       if r["p_model"] is not None and r["price"] is not None]))
     exp = _q(store, """SELECT ts, price, stake, p_win, pnl FROM experiment_bets
                        WHERE status='settled' AND stake > 0 AND pnl IS NOT NULL""")
     lanes.append(lane("Loosened-rules experiment (shadow)", [(r["ts"] // 3600, float(r["stake"]), float(r["pnl"])) for r in exp],
