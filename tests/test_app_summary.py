@@ -130,6 +130,16 @@ class TestAppSummary(unittest.TestCase):
         self.assertIn('/[^aeiou]y$/.test(w)?w.slice(0,-1)+"ies"', html)                 # "entries", not "entrys"
         self.assertIn('(demo?"Demo":"Checking")', html)                                   # connected but state unknown is not "Demo"
 
+    def test_the_sports_tab_has_the_shadow_picks_monitor(self):
+        html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "index.html")).read()
+        self.assertIn("monitorCard()+", html)                                                  # shown at the top of the Sports tab
+        self.assertIn('data-act="mon"', html)
+        self.assertIn('"mon"].includes(a)', html)                                              # the tab switch is wired up
+        self.assertIn("monRep=s.monitor&&s.monitor.lanes?s.monitor:null", html)
+        for piece in ('data-act="mx"', "function pickPanel(", "function comboPanel(", "function legPanel(", "function progBlock(", "function liveProgress(", 'a==="mx"',
+                      "Bet amount", "Kalshi win %", "My win %", "Win amount", "of ${pr.line}", "site.api.espn.com/apis/site/v2/sports"):
+            self.assertIn(piece, html, piece)                                                  # every row opens its details
+
     def test_insights_shows_each_window_read_and_its_result(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")
         self.assertIn("function readsCard(sym)", html)

@@ -136,6 +136,16 @@ def periodic_cycle(s, store, data):
             nfl_tonight.run(store, data, every=int(os.environ.get("NFL_EVERY_SECONDS", 7200)))
         except Exception as e:
             logging.warning("nfl tracker failed: %s", e)
+    try:                                                         # current prices of the open shadow picks, for the app
+        from . import pick_quotes
+        pick_quotes.refresh(store, data, every=int(os.environ.get("PICK_QUOTES_SECONDS", 300)))
+    except Exception as e:
+        logging.warning("pick quotes failed: %s", e)
+    try:                                                         # how far each open pick's player is toward his line, from live box scores
+        from . import pick_progress
+        pick_progress.refresh(store, every=int(os.environ.get("PICK_PROGRESS_SECONDS", 120)))
+    except Exception as e:
+        logging.warning("pick progress failed: %s", e)
     if os.environ.get("SPORTS_COMBOS", "yes") == "yes":      # multi-player bet combos built from the shadow picks: paper only
         try:
             from . import sports_combos
