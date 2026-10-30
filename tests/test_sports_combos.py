@@ -21,11 +21,11 @@ class TestPricing(unittest.TestCase):
     def test_cost_is_the_product_and_every_leg_is_pulled_toward_the_price(self):
         legs = [leg(1, price=.5, p=.7), leg(2, price=.4, p=.6)]
         pr = sc.price_combo(legs)
-        self.assertAlmostEqual(pr["price"], .2)
+        self.assertAlmostEqual(pr["price"], (.5 + sc.COMBO_MARGIN) * (.4 + sc.COMBO_MARGIN))     # each leg carries the combo margin
         self.assertAlmostEqual(pr["p_model"], .42)
         self.assertAlmostEqual(pr["p_cautious"], .6 * .5)                       # .5+.5(.7-.5)=.6 and .4+.5(.6-.4)=.5
         self.assertLess(pr["edge"], pr["p_cautious"] - pr["price"])              # the fee is taken off
-        self.assertEqual(pr["contracts"], int(sc.STAKE // .2))
+        self.assertEqual(pr["contracts"], int(sc.STAKE // pr["price"]))
         self.assertLessEqual(sc.price_combo([leg(3, price=.05, p=.1), leg(4, price=.05, p=.1)])["contracts"], sc.MAX_CONTRACTS)
 
 
@@ -59,6 +59,16 @@ class TestBuild(unittest.TestCase):
         for i, a in enumerate(combos):
             for b in combos[i + 1:]:
                 self.assertLessEqual(len({p["ticker"] for p in a["legs"]} & {p["ticker"] for p in b["legs"]}), 1)
+
+    def test_it_is_realistic_no_long_shots_no_near_certainties_no_four_leg_bundles(self):
+        self.assertEqual(sc.SIZES, (2, 3))
+        picks = [leg(1, price=0.05, p=0.25), leg(2, price=0.95, p=0.99, edge=0.09), leg(3, stat="assists"), leg(4, stat="rebounds")]
+        for c in sc.build(picks):
+            self.assertTrue(all(sc.LEG_PRICE[0] <= p["price"] <= sc.LEG_PRICE[1] for p in c["legs"]))
+        unlikely = [leg(i, price=0.20, p=0.34, edge=0.14, stat=STATS[i]) for i in range(1, 4)]     # three 20-cent legs: ~1% together
+        self.assertEqual(sc.build(unlikely), [])
+        for c in sc.build([leg(i, side="yes" if i % 2 else "no", stat=STATS[i]) for i in range(7)]):
+            self.assertGreaterEqual(c["p_cautious"], sc.MIN_CHANCE)
 
     def test_game_winners_extreme_edges_and_thin_edges_are_not_legs(self):
         ml = leg(1)

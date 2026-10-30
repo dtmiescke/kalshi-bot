@@ -6,7 +6,10 @@ priced as the product of the legs' Kalshi prices, not as native Kalshi combo ord
 so the dollars are a research estimate of how bundling would have done. Nothing is ever bet.
 
 The odds side is unforgiving: combining legs multiplies any error in each leg's chance, so every leg's chance is first
-pulled halfway toward Kalshi's price, and a combo is only kept if that cautious chance still beats its cost."""
+pulled halfway toward Kalshi's price, each leg is charged an extra COMBO_MARGIN (a combo's quoter keeps a margin the
+single markets do not), and a combo is only kept if its cautious chance still beats that cost and is likely enough to be
+worth betting. Kalshi's own combo collections are priced by market makers on request, with no public quote to read, so the
+margin is an assumption, set on the cautious side."""
 import json
 import logging
 import time
@@ -16,10 +19,13 @@ from . import risk
 
 log = logging.getLogger(__name__)
 
-SIZES = (2, 3, 4)
-PER_SIZE = 3                # combos kept per size, best first
+SIZES = (2, 3)              # no long shots: a 4-leg bundle rarely pays
+PER_SIZE = 2                # combos kept per size, best first
 MIN_LEG_EDGE = 0.08
-MAX_LEG_EDGE = 0.30         # a leg this far from Kalshi's price is more likely a model error than value
+MAX_LEG_EDGE = 0.20         # a leg this far from Kalshi's price is more likely a model error than value
+LEG_PRICE = (0.15, 0.85)    # no near-certainties (nothing to win) and no long shots (rarely hit)
+COMBO_MARGIN = 0.02         # extra cost per leg: whoever quotes a combo keeps a margin that single markets do not charge
+MIN_CHANCE = 0.30           # the combo must still be likely enough to be worth betting (cautious chance of every leg hitting)
 MAX_LEG_USES = 2            # a leg may appear in at most this many combos, so the day is not one bet reshuffled
 # ... and two combos share at most one leg
 TRUST = 0.5                 # a leg's chance is price + TRUST x (model - price) before it is multiplied
@@ -38,7 +44,7 @@ def cautious(p, price):
 
 def leg_ok(pk):
     return (pk.get("player") is not None and MIN_LEG_EDGE <= (pk.get("edge") or 0) <= MAX_LEG_EDGE
-            and 0.04 <= (pk.get("price") or 0) <= 0.96 and pk.get("p_model") is not None)
+            and LEG_PRICE[0] <= (pk.get("price") or 0) <= LEG_PRICE[1] and pk.get("p_model") is not None)
 
 
 def stat_of(label):
@@ -51,7 +57,7 @@ def price_combo(legs, fee_rate=0.07):
     """Cost, model chance, cautious chance, edge after fee, contracts and fee for a list of legs (dicts with price, p_model)."""
     cost = p_model = p_c = 1.0
     for leg in legs:
-        cost *= leg["price"]
+        cost *= min(0.99, leg["price"] + COMBO_MARGIN)
         p_model *= leg["p_model"]
         p_c *= cautious(leg["p_model"], leg["price"])
     contracts = max(1, min(MAX_CONTRACTS, int(STAKE // cost)))
@@ -77,7 +83,7 @@ def build(picks, sizes=SIZES, per_size=PER_SIZE):
             if size >= 3 and max(sides.count("yes"), sides.count("no")) > (size * 2) // 3:
                 continue                                             # a bundle that is all one direction is one bet in disguise
             pr = price_combo(legs)
-            if pr["edge"] >= MIN_EDGE:
+            if pr["edge"] >= MIN_EDGE and pr["p_cautious"] >= MIN_CHANCE:
                 found.append({"legs": list(legs), **pr})
         found.sort(key=lambda c: -c["edge"])
         chosen = 0
