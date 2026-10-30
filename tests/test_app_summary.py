@@ -130,6 +130,12 @@ class TestAppSummary(unittest.TestCase):
         self.assertIn('/[^aeiou]y$/.test(w)?w.slice(0,-1)+"ies"', html)                 # "entries", not "entrys"
         self.assertIn('(demo?"Demo":"Checking")', html)                                   # connected but state unknown is not "Demo"
 
+    def test_the_dashboard_summarises_the_monitor_and_shows_the_app_build(self):
+        html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "index.html")).read()
+        self.assertIn("kpis()+monitorSummary()+pnlCard()", html)                                 # under the key numbers on the Dashboard
+        self.assertIn("Open the monitor", html)
+        self.assertIn('APP_BUILD="', html)                                                      # so a stale copy of the app can be told apart
+
     def test_the_sports_tab_has_the_shadow_picks_monitor(self):
         html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "index.html")).read()
         self.assertIn("monitorCard()+", html)                                                  # shown at the top of the Sports tab

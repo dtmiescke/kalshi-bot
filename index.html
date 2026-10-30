@@ -855,7 +855,7 @@ function health(){
 function screenDash(){
   const sp=bets.filter(b=>!b.coin),ss=statsOf(sp);
   const I=insights(bets);
-  return header("Dashboard",botStatus())+liveCard(ui.feat,{chips:true,open:true})+kpis()+pnlCard()+
+  return header("Dashboard",botStatus())+liveCard(ui.feat,{chips:true,open:true})+kpis()+monitorSummary()+pnlCard()+
     `<section class="card list"><button class="navrow" data-act="insights"><span class="navicon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg></span><span class="rowmain"><b>Insights</b><small>${I.n?"Profit factor "+(I.pf==null?"–":I.pf===Infinity?"∞":I.pf.toFixed(2))+" · drawdown "+money(-I.dd)+" · calibration":"Calibration, drawdown, best hours"}</small></span>${CHEV}</button></section>`+coinRows()+
    (sp.length?`<button class="card" data-act="tab" data-v="sports" style="flex-direction:row;justify-content:space-between;align-items:center;text-align:left"><span class="rowmain"><b>Sports</b><small>${plural(sp.length,"bet")} placed · ${plural(sp.filter(b=>b.prop).length,"player prop")}</small></span><span class="rowend num ${cls(ss.total)}">${smoney(ss.total)} ›</span></button>`:"")+health();
 }
@@ -994,6 +994,16 @@ function monitorCard(){ // every shadow account in one place: combos, NBA, NFL (
       +`<small class="note">Tap a pick to open everything about it, with how far the player is toward the line once the game is on. Shadow picks: the bot records what it would bet, before the game starts, and grades it from Kalshi's result. No money is bet.</small>`;
   }
   return`<section class="card" style="gap:8px"><div class="cardhead"><h2>Shadow picks monitor</h2><small class="muted">paper · player stats live from ESPN</small></div><div class="seg" role="group" aria-label="Shadow account">${tabs.map(t=>`<button data-act="mon" data-v="${t[0]}" aria-pressed="${t[0]===cur}">${t[1]}</button>`).join("")}</div>${body}</section>`}
+const APP_BUILD="Oct 30, monitor v3";
+function monitorSummary(){ // the same monitor, summarised on the Dashboard so it is the first thing seen; the full version is on the Sports tab
+  const m=monData();if(!m)return"";
+  const L=m.lanes,n=k=>(L[k]||{}).open||0,combos=m.combos.filter(c=>c.status==="open").slice(0,3),
+    settled=["Bet combos","NBA props","NBA game winners","NFL props"].reduce((a,k)=>({n:a.n+((L[k]||{}).settled||0),p:a.p+((L[k]||{}).pnl||0)}),{n:0,p:0});
+  return`<section class="card" style="gap:8px"><div class="cardhead"><h2>Shadow picks &amp; combos</h2><small class="muted">paper · no money bet</small></div>
+    <section class="grid3"><div class="tile"><small>Open combos</small><b class="num">${n("Bet combos")}</b></div><div class="tile"><small>Open NBA picks</small><b class="num">${n("NBA props")+n("NBA game winners")}</b></div><div class="tile"><small>Open NFL picks</small><b class="num">${n("NFL props")}</b></div></section>
+    ${combos.map(c=>`<div class="kv"><span><b>${plural(c.legs.length,"leg")}</b> <small class="muted">· ${c.legs.map(g=>esc(g.label.replace(/ \(.*$/,""))).join(" + ")}</small></span><b class="num">${Math.round(c.chance*100)}% to hit</b></div>`).join("")}
+    <div class="kv"><span>Settled so far</span><b class="num ${settled.n?cls(settled.p):""}">${settled.n?plural(settled.n,"pick")+" · "+(settled.p>=0?"+$":"−$")+Math.abs(settled.p).toFixed(2):"none yet"}</b></div>
+    <button class="btn primary" data-act="tab" data-v="sports" style="width:100%">Open the monitor ›</button><small class="muted">App build: ${APP_BUILD}. If this card is missing, reload the app.</small></section>`}
 function screenSports(){
   const all=bets.filter(b=>!b.coin),leagues=[...new Set(all.map(b=>b.league))].sort();
   leagues.forEach(l=>{if(custom.leagues[l]==null)custom.leagues[l]=true});
