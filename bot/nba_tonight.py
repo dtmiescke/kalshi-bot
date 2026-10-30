@@ -154,6 +154,46 @@ def team_strength(cur, last):
     return (gc * nc + TEAM_PRIOR * nl) / (gc + TEAM_PRIOR)
 
 
+MATCHUP_COMPS = {"PTS", "3PM"}       # scoring is the only production a weak or strong defence plainly moves
+MATCHUP_MAX = 0.05                   # the matchup never moves a projection by more than 5%
+BACK_TO_BACK = 0.97                  # second night in a row: a small, well-known drag on production
+
+
+def _allowed(cur, last, tid):
+    """Points a team allows per game: this season blended with last by games played."""
+    c, l = cur.get(tid) or {}, last.get(tid) or {}
+    oc, ol = c.get("oppg"), l.get("oppg")
+    if oc is None:
+        return ol
+    if ol is None or not c.get("games"):
+        return oc
+    return (c["games"] * oc + TEAM_PRIOR * ol) / (c["games"] + TEAM_PRIOR)
+
+
+def matchup_factor(comps, opp_id, cur, last):
+    """Scoring multiplier from tonight's defence: weaker than the league average lifts it, tougher trims it (capped)."""
+    if not MATCHUP_COMPS & set(comps):
+        return 1.0
+    allowed = [a for a in (_allowed(cur, last, t) for t in set(cur) | set(last)) if a]
+    mine = _allowed(cur, last, opp_id)
+    if not allowed or not mine:
+        return 1.0
+    league = sum(allowed) / len(allowed)
+    return 1 + max(-MATCHUP_MAX, min(MATCHUP_MAX, 0.5 * (mine - league) / league))
+
+
+def rest_factor(games, tip_iso):
+    """BACK_TO_BACK if he played the calendar day (ET) before tip-off, else 1.0."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    try:
+        tip = datetime.fromisoformat(str(tip_iso).replace("Z", "+00:00")).astimezone(ZoneInfo("America/New_York")).date()
+    except (TypeError, ValueError):
+        return 1.0
+    last = next((g["date"][:10] for g in reversed(games) if g["MIN"] >= 8), None)
+    return BACK_TO_BACK if last and last == (tip - timedelta(days=1)).isoformat() else 1.0
+
+
 def home_win_prob(s_home, s_away):
     return NormalDist().cdf((s_home - s_away + HOME_EDGE) / GAME_SD)
 
@@ -458,6 +498,10 @@ def build_report(client, store=None, now=None, day=None, fetch=requests.get, max
                 mu, info = projection(games_p, comps, cur_start)
                 if mu is None or info.get("history", 0) < MIN_HISTORY:
                     continue
+                opp = g["away"]["id"] if tid == g["home"]["id"] else g["home"]["id"]
+                f_match, f_rest = matchup_factor(comps, opp, cur, last), rest_factor(games_p, g.get("tip"))
+                mu *= f_match * f_rest
+                info = {**info, "matchup": round(f_match, 3), "rest": f_rest}
                 row = {"player": pl["name"], "stat": LABEL[series], "projection": round(mu, 1), **info,
                        "status": {"out": "out", "doubt": "uncertain"}.get(level, "healthy"), "rungs": []}
                 best = None
