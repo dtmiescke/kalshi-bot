@@ -141,6 +141,11 @@ def periodic_cycle(s, store, data):
         pick_quotes.refresh(store, data, every=int(os.environ.get("PICK_QUOTES_SECONDS", 300)))
     except Exception as e:
         logging.warning("pick quotes failed: %s", e)
+    try:                                                         # how far each open pick's player is toward his line, from live box scores
+        from . import pick_progress
+        pick_progress.refresh(store, every=int(os.environ.get("PICK_PROGRESS_SECONDS", 120)))
+    except Exception as e:
+        logging.warning("pick progress failed: %s", e)
     if os.environ.get("SPORTS_COMBOS", "yes") == "yes":      # multi-player bet combos built from the shadow picks: paper only
         try:
             from . import sports_combos

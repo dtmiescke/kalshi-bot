@@ -136,8 +136,8 @@ class TestAppSummary(unittest.TestCase):
         self.assertIn('data-act="mon"', html)
         self.assertIn('"mon"].includes(a)', html)                                              # the tab switch is wired up
         self.assertIn("monRep=s.monitor&&s.monitor.lanes?s.monitor:null", html)
-        for piece in ('data-act="mpick"', 'data-act="mcombo"', "function screenPick()", "function screenCombo()", "pick:screenPick,combo:screenCombo",
-                      'a==="mpick"', 'a==="mcombo"', "Bet amount", "Kalshi win %", "My win %", "Win amount"):
+        for piece in ('data-act="mx"', "function pickPanel(", "function comboPanel(", "function progBlock(", "function liveProgress(", 'a==="mx"',
+                      "Bet amount", "Kalshi win %", "My win %", "Win amount", "of ${pr.line}", "site.api.espn.com/apis/site/v2/sports"):
             self.assertIn(piece, html, piece)                                                  # every row opens its details
 
     def test_insights_shows_each_window_read_and_its_result(self):
