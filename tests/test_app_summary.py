@@ -136,9 +136,11 @@ class TestAppSummary(unittest.TestCase):
         self.assertIn('data-act="mon"', html)
         self.assertIn('"mon"].includes(a)', html)                                              # the tab switch is wired up
         self.assertIn("monRep=s.monitor&&s.monitor.lanes?s.monitor:null", html)
-        for piece in ('data-act="mx"', "function pickPanel(", "function comboPanel(", "function legPanel(", "function progBlock(", "function liveProgress(", 'a==="mx"',
+        for piece in ('data-act="mx"', "function pickPanel(", "function comboPanel(", "function legPanel(", "per $1</b>", "Worth now at Kalshi", "function progBlock(", "function liveProgress(", 'a==="mx"',
                       "Bet amount", "Kalshi win %", "My win %", "Win amount", "of ${pr.line}", "site.api.espn.com/apis/site/v2/sports"):
             self.assertIn(piece, html, piece)                                                  # every row opens its details
+        live = html[html.index("function liveBlock("):html.index("function tiles(")]
+        self.assertNotIn(" pts</b>", live)                                                    # moves are shown in % and dollars, not "pts"
 
     def test_insights_shows_each_window_read_and_its_result(self):
         html = (ROOT / "index.html").read_text(encoding="utf-8")

@@ -945,19 +945,21 @@ function progBlock(pr,side){ // "12 of 25 pts" with a bar, the game clock and wh
   const good=side==="yes"?hit:!hit;
   return`<div class="meter"><span>${fmtN(pr.cur)} of ${pr.line} ${esc(pr.unit)}</span><span class="track"><i style="width:${pct}%"></i></span><b class="num">${pct}%</b></div>
     <div class="kv"><span>${esc(head)}</span><b class="${good?"up":"down"}">${verdict}</b></div>${pr.state==="post"?`<small class="muted">Game over, waiting for Kalshi to settle it.</small>`:`<small class="muted">Updated ${mAgo(pr.ts)}</small>`}`}
-function liveBlock(now,nowTs,atBet,mine){ // Kalshi's chance now against the price paid and the bot's own chance
+function liveBlock(now,nowTs,atBet,mine,contracts,stake){ // Kalshi's chance now against the price paid and the bot's own chance, in % and dollars
   if(now==null)return`<div class="kv"><span>Kalshi chance now</span><b class="muted">not quoted yet</b></div>`;
-  const mv=Math.round((now-atBet)*100),gap=Math.round((mine-now)*100);
+  const mv=Math.round((now-atBet)*100),gap=Math.round((mine-now)*100),sg=v=>v>0?"+":v<0?"−":"";
+  const worth=contracts!=null&&stake!=null?contracts*now:null;
   return`<div class="kv"><span>Kalshi chance now${nowTs?` <small class="muted">· ${mAgo(nowTs)}</small>`:""}</span><b class="num">${mPct(now)}</b></div>
-    <div class="kv"><span>Moved since the bet</span><b class="num ${mv>0?"up":mv<0?"down":""}">${mv>0?"+":mv<0?"−":""}${Math.abs(mv)} pts</b></div>
-    <div class="kv"><span>The bot's chance minus Kalshi's now</span><b class="num">${gap>0?"+":""}${gap} pts</b></div>`}
+    <div class="kv"><span>Moved since the bet</span><b class="num ${mv>0?"up":mv<0?"down":""}">${sg(mv)}${Math.abs(mv)}% · $${atBet.toFixed(2)} → $${now.toFixed(2)} per $1</b></div>
+    ${worth!=null?`<div class="kv"><span>Worth now at Kalshi's price</span><b class="num ${cls(worth-stake)}">${money(worth)} · ${mUsd(worth-stake)}</b></div>`:""}
+    <div class="kv"><span>The bot's chance vs Kalshi's now</span><b class="num">${sg(gap)}${Math.abs(gap)}%</b></div>`}
 function tiles(stake,kalshi,mine,win,lose,edge){return`<section class="grid3"><div class="tile"><small>Bet amount</small><b class="num">${money(stake)}</b></div><div class="tile"><small>Kalshi win %</small><b class="num">${mPct(kalshi)}</b></div><div class="tile"><small>My win %</small><b class="num">${mPct(mine)}</b></div></section>
   <section class="grid3"><div class="tile"><small>Win amount</small><b class="num up">${mUsd(win)}</b></div><div class="tile"><small>Lose amount</small><b class="num down">${mUsd(-lose)}</b></div><div class="tile"><small>Edge</small><b class="num">${Math.round(edge*100)}%</b></div></section>`}
 function pickPanel(p){
   const pr=progOf(p.id,p.prog);
   return`<div style="padding:4px 14px 12px;display:grid;gap:8px">${tiles(p.stake,p.price,p.p,p.win,p.lose,p.edge)}
     <div><div class="cap">PROGRESS TOWARD THE LINE</div>${progBlock(pr,p.side)}</div>
-    ${p.status==="open"?`<div><div class="cap">LIVE ON KALSHI</div>${liveBlock(p.now,p.now_ts,p.price,p.p)}</div>`:""}
+    ${p.status==="open"?`<div><div class="cap">LIVE ON KALSHI</div>${liveBlock(p.now,p.now_ts,p.price,p.p,p.contracts,p.stake)}</div>`:""}
     <div><div class="cap">THE BET</div><div class="kv"><span>${esc(p.sport)} ${p.kind==="prop"?"player prop":"game winner"}</span><b>${p.side.toUpperCase()}</b></div><div class="kv"><span>Price paid</span><b class="num">${Math.round(p.price*100)}¢ × ${p.contracts??"–"} contracts</b></div><div class="kv"><span>Fee</span><b class="num">${money(p.fee)}</b></div>
       <div class="kv"><span>Recorded</span><b>${mWhen(p.ts)}</b></div><div class="kv"><span>${p.status==="open"?"Starts":"Played"}</span><b>${mWhen(p.tip)}</b></div>${p.pnl!=null?`<div class="kv"><span>Result</span><b class="num ${cls(p.pnl)}">${mUsd(p.pnl)}</b></div>`:""}</div>
     <small class="note">Kalshi win % is the price paid, Kalshi's chance for the side bought. My win % is the bot's own. A shadow pick: no money is bet.</small></div>`}
@@ -971,7 +973,7 @@ function comboPanel(c){
   const won=c.legs.filter(g=>g.status==="won").length;
   return`<div style="padding:4px 14px 12px;display:grid;gap:8px">${tiles(c.stake,c.price,c.chance,c.win,c.lose,c.edge)}
     <div class="kv"><span>Legs hit so far</span><b class="num">${won} of ${c.legs.length}</b></div>
-    ${c.status==="open"?`<div><div class="cap">LIVE ON KALSHI (ALL LEGS TOGETHER)</div>${liveBlock(c.now,c.now_ts,c.price,c.chance)}</div>`:""}
+    ${c.status==="open"?`<div><div class="cap">LIVE ON KALSHI (ALL LEGS TOGETHER)</div>${liveBlock(c.now,c.now_ts,c.price,c.chance,c.contracts,c.stake)}</div>`:""}
     <div class="kv"><span>Model chance, all legs</span><b class="num">${mPct(c.model)}</b></div><div class="kv"><span>Cost per $1 / contracts</span><b class="num">${Math.round(c.price*100)}¢ × ${c.contracts}</b></div><div class="kv"><span>Fee</span><b class="num">${money(c.fee)}</b></div><div class="kv"><span>Recorded</span><b>${mWhen(c.ts)}</b></div>
     <small class="note">Pays $1 per contract only if every leg wins; it loses the moment one misses. Kalshi win % is the legs' prices multiplied (an estimate, not Kalshi's own combo price). My win % is the bot's cautious chance for all legs together. Tap any leg below for its own details. A shadow combo: no money is bet.</small></div>`}
 function monitorCard(){ // every shadow account in one place: combos, NBA, NFL (summary.json "monitor"); each row drops down to everything about it
