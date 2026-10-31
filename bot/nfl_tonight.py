@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-from . import momentum, nba_tonight as nba, trust
+from . import anchor, momentum, nba_tonight as nba, trust
 from .matching import norm
 
 log = logging.getLogger(__name__)
@@ -108,8 +108,7 @@ def prob_at_least(games, stat, mu, line):
     if avg <= 0:
         return None
     scale = mu / avg
-    hit = sum(1 for x in hist if x * scale > line)
-    return (hit + 0.5) / (len(hist) + 1)
+    return anchor.blend_prob([x * scale for x in hist], line)
 
 
 def team_totals(over_under, spread):
@@ -254,6 +253,9 @@ def build_report(client, store=None, now=None, fetch=requests.get):
                     continue
                 f = script_factor(group, g["points"].get(tid), g["margin"].get(tid))
                 mu *= f
+                season_vals = values([x for x in gl if x["date"] >= CUR_START], stat)
+                avg = anchor.season_average(season_vals, values(gl, stat))
+                mu, _held = anchor.clamp(mu, avg)                      # never far above (or below) what he really averages
                 best = None
                 for line, m in sorted(rungs, key=lambda x: x[0]):
                     bid, ask = nba._f(m.get("yes_bid_dollars")), nba._f(m.get("yes_ask_dollars"))
@@ -269,6 +271,8 @@ def build_report(client, store=None, now=None, fetch=requests.get):
                         report["skipped_extreme"] = report.get("skipped_extreme", 0) + 1
                         continue
                     top = es[0]
+                    if top["side"] == "yes" and not anchor.reachable(line + 0.5, avg):
+                        continue                                        # an over on a line he rarely gets near is not a pick
                     cautious = next((e for e in ec if e["side"] == top["side"]), None)
                     if cautious is None or cautious["edge"] <= 0:
                         continue

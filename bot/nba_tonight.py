@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from . import momentum, risk, trust
+from . import anchor, momentum, risk, trust
 from .matching import name_score, norm
 
 ESPN = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"
@@ -129,8 +129,7 @@ def prob_at_least(games, comps, mu, exp_min, k):
     if avg <= 0:
         return None
     scale = mu / avg
-    hit = sum(1 for x in hist if x * scale >= k - 0.5)
-    return (hit + 0.5) / (len(hist) + 1)
+    return anchor.blend_prob([x * scale for x in hist], k - 0.5)
 
 
 def side_edges(p, bid, ask, stake=STAKE, fee_rate=0.07):
@@ -537,7 +536,11 @@ def build_report(client, store=None, now=None, day=None, fetch=requests.get, max
                 opp = g["away"]["id"] if tid == g["home"]["id"] else g["home"]["id"]
                 f_match, f_rest = matchup_factor(comps, opp, cur, last), rest_factor(games_p, g.get("tip"))
                 mu *= f_match * f_rest
-                info = {**info, "matchup": round(f_match, 3), "rest": f_rest}
+                played_all = [x for x in games_p if x["MIN"] >= 8]
+                this_season = [value(x, comps) for x in played_all if x["date"][:10] >= cur_start]
+                avg = anchor.season_average(this_season, [value(x, comps) for x in played_all])
+                mu, held = anchor.clamp(mu, avg)                      # never far above (or below) what he really averages
+                info = {**info, "matchup": round(f_match, 3), "rest": f_rest, "avg": None if avg is None else round(avg, 1), "held": held}
                 row = {"player": pl["name"], "stat": LABEL[series], "projection": round(mu, 1), **info,
                        "status": {"out": "out", "doubt": "uncertain"}.get(level, "healthy"), "rungs": []}
                 best = None
@@ -556,6 +559,8 @@ def build_report(client, store=None, now=None, day=None, fetch=requests.get, max
                     row["rungs"].append(rung)
                     # a pick needs the raw model to clear the bar AND the cautious version to still agree on the side
                     # and, where lineup news moved his minutes, the version WITHOUT that guess has to agree on the side too
+                    if es and es[0]["side"] == "yes" and not anchor.reachable(k, avg):
+                        es = []                                         # an over on a line he rarely gets near is not a pick
                     if es and es[0]["edge"] >= MIN_EDGE and ec and ec[0]["side"] == es[0]["side"] and ec[0]["edge"] > 0 \
                             and e0 and e0[0]["side"] == es[0]["side"] and e0[0]["edge"] > 0.02 \
                             and (best is None or es[0]["edge"] > best[1]["edge"]):
