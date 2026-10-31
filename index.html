@@ -615,7 +615,7 @@ function insights(list){ // deeper numbers from settled bets (oldest first)
 function screenInsights(){
   const sym=route.sym,list=sym?bets.filter(b=>b.coin===sym):bets,I=insights(list),c=sym&&COINS.find(x=>x.sym===sym);
   if(!I.n)return detailHeader(c?c.name+" insights":"Insights")+`<p class="empty">Insights appear once bets settle.</p>`;
-  const pts=v=>v==null?"–":(v>=0?"+":"−")+Math.abs(v*100).toFixed(1)+" pts";
+  const pts=v=>v==null?"–":(v>=0?"+":"−")+Math.abs(v*100).toFixed(1)+"%";
   const streak=I.cur>0?I.cur+" win"+(I.cur>1?"s":""):I.cur<0?(-I.cur)+" loss"+(I.cur<-1?"es":""):"–";
   const tiles=[["Profit factor",I.pf==null?"–":I.pf===Infinity?"∞":I.pf.toFixed(2),I.pf!=null&&I.pf>=1?"up":"down","Won $ per lost $"],
     ["Per bet",I.exp==null?"–":smoney(I.exp),cls(I.exp||0),"Average result"],["Max drawdown",money(-I.dd),I.dd?"down":"","Worst dip from a peak"],
@@ -894,7 +894,7 @@ function screenCoin(){
     const openBet=s.open[0];
     body=`<section class="card" style="gap:0"><div class="cardhead"><h2>Bot's view</h2><span class="pill">${openBet?"Holding "+openBet.side+" ×"+(openBet.contracts||""):"Watching"}</span></div>
       <div class="kv"><span>Bot model</span><b class="num" data-live="model:${sym}">${modelNote(sym)}</b></div>
-      <div class="kv"><span>Edge vs market</span><b class="num ${m&&now!=null?cls(m.p-now):""}">${m&&now!=null?((m.p-now)>=0?"+":"−")+Math.abs(Math.round((m.p-now)*100))+" pts":"–"}</b></div>
+      <div class="kv"><span>Edge vs market</span><b class="num ${m&&now!=null?cls(m.p-now):""}">${m&&now!=null?((m.p-now)>=0?"+":"−")+Math.abs(Math.round((m.p-now)*100))+"%":"–"}</b></div>
       <div class="kv"><span>Spot / target</span><b class="num" data-live="spot:${sym}">${spotLine(sym)}</b></div>
       <div class="kv"><span>Settles</span><b class="num" data-live="settle:${sym}">${settleLine(sym)}</b></div></section>`;
   }else if(ui.coinTab==="stats"){
@@ -1079,7 +1079,7 @@ function screenBet(){
       <div class="legend"><div class="keys"><span><i class="sw"></i>YES price</span>${entryYes!=null?`<span><i class="sw entry"></i>Your entry (YES ${Math.round(entryYes*100)}¢)</span>`:""}</div></div></section>`+
     `<section class="grid3">${facts.map(f=>`<div class="tile"><small>${f[0]}</small><b class="num">${esc(f[1])}</b></div>`).join("")}</section>`+
     `<section class="card"><h2>Why the bot took it</h2>
-      <div class="kv"><span>Edge at entry</span><b class="num">${b.edge!=null?"+"+(b.edge*100).toFixed(1)+" pts":"–"}</b></div>
+      <div class="kv"><span>Edge at entry</span><b class="num">${b.edge!=null?"+"+(b.edge*100).toFixed(1)+"%":"–"}</b></div>
       <div class="kv"><span>Confidence</span><b class="num">${b.conf!=null?pct(b.conf):"–"}</b></div>
       <div class="kv"><span>Order type</span><b>${esc({maker:"Limit order",taker:"Market order"}[b.style]||b.style||"–")}</b></div>
       ${b.closing!=null?`<div class="kv"><span>Closing price</span><b class="num">${Math.round(b.closing*100)}¢${b.clv!=null?" · CLV "+(b.clv>=0?"+":"−")+Math.abs(b.clv*100).toFixed(1):""}</b></div>`:""}
