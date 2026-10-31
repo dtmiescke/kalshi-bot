@@ -27,6 +27,8 @@ MAX_SPREAD = 0.05
 MAX_PICKS_PER_RUN = 20
 COMBO_MARGIN = 0.02             # extra cost per leg, as in the other combo lane (an assumption)
 LEGS = 3
+SIZES = (2, 3)               # a 2-leg parlay carries half the margin; both are tracked so the results can be compared
+GAP_MIN = 0.04              # a side whose book/Polymarket average sits this far above Kalshi's ask is logged as a gap
 TIERS = (("Chalk", 0.70, 0.90), ("Middle", 0.55, 0.80), ("Riskier", 0.45, 0.70))   # leg price band per tier
 STAKE = nba.STAKE
 MAX_CONTRACTS = 40
@@ -36,6 +38,12 @@ PICK_SCHEMA = """CREATE TABLE IF NOT EXISTS cfb_picks (
 COMBO_SCHEMA = """CREATE TABLE IF NOT EXISTS cfb_combos (
     key TEXT PRIMARY KEY, ts INTEGER, day TEXT, tier TEXT, legs TEXT, price REAL, p_book REAL, contracts INTEGER,
     stake REAL, fee REAL, tip_ts INTEGER, status TEXT, pnl REAL, settled_ts INTEGER)"""
+
+
+ENTRY_SCHEMA = """CREATE TABLE IF NOT EXISTS cfb_entry (ticker TEXT PRIMARY KEY, bid REAL, ask REAL)"""
+GAP_SCHEMA = """CREATE TABLE IF NOT EXISTS cfb_gaps (
+    ticker TEXT PRIMARY KEY, ts INTEGER, game TEXT, team TEXT, ask REAL, bid REAL, p_book REAL, p_poly REAL, p_ref REAL,
+    tip_ts INTEGER, status TEXT, result TEXT, pnl REAL)"""
 
 
 def _f(v):
@@ -101,14 +109,41 @@ def candidates(events, games, fee_rate=0.07, poly=None):
             fee = risk.taker_fee(contracts, ask, fee_rate)
             p2 = polymarket.chance(poly, label, g["away"] if home else g["home"]) if poly else None
             rows.append({"ticker": m["ticker"], "team": label, "p_poly": p2, "game": f'{g["away"]} at {g["home"]}', "gid": g["id"], "tip": g["tip"],
-                         "price": ask, "p_book": p, "contracts": contracts, "fee": fee,
+                         "price": ask, "bid": bid, "p_book": p, "contracts": contracts, "fee": fee,
                          "edge": p - ask - fee / contracts})
         if rows:
             out.append(max(rows, key=lambda r: r["p_book"]))        # the favourite
     return [c for c in out if PICK_PRICE[0] <= c["price"] <= PICK_PRICE[1]]
 
 
-def build_combos(cands, legs=LEGS, tiers=TIERS):
+def gaps(events, games, poly, fee_rate=0.07):
+    """Every side (not just favourites) whose book/Polymarket average is at least GAP_MIN above Kalshi's ask, with BOTH
+    outside prices present: the case where three independent prices disagree with Kalshi in the same direction."""
+    out = []
+    for ev in events:
+        g = match(ev.get("title"), games)
+        if not g or not poly:
+            continue
+        for m in ev.get("markets") or []:
+            label = m.get("yes_sub_title") or ""
+            home = name_score(label, g["home"]) >= name_score(label, g["away"])
+            bid, ask = _f(m.get("yes_bid_dollars")), _f(m.get("yes_ask_dollars"))
+            p2 = polymarket.chance(poly, label, g["away"] if home else g["home"])
+            if bid is None or ask is None or p2 is None or not 0 < bid <= ask < 1:
+                continue
+            p1 = g["p_home"] if home else g["p_away"]
+            ref = (p1 + p2) / 2
+            if ref - ask >= GAP_MIN and min(p1, p2) > ask:
+                out.append({"ticker": m["ticker"], "team": label, "game": f'{g["away"]} at {g["home"]}', "ask": ask, "bid": bid,
+                            "p_book": p1, "p_poly": p2, "p_ref": ref, "tip": g["tip"]})
+    return out
+
+
+def build_combos(cands, sizes=SIZES, tiers=TIERS):
+    return [c for n in sizes for c in _build(cands, n, tiers)]
+
+
+def _build(cands, legs, tiers):
     """One parlay per tier: the legs in its price band whose combined book chance is highest, one per game, none reused
     across tiers when enough other games exist. Priced at the product of asks plus COMBO_MARGIN per leg."""
     used, out = set(), []
@@ -128,7 +163,7 @@ def build_combos(cands, legs=LEGS, tiers=TIERS):
         used.update(c["ticker"] for c in combo)
         cost = prod(min(0.99, c["price"] + COMBO_MARGIN) for c in combo)
         contracts = max(1, min(MAX_CONTRACTS, int(STAKE // cost)))
-        out.append({"tier": name, "legs": list(combo), "price": cost, "p_book": prod(c["p_book"] for c in combo),
+        out.append({"tier": f"{name} {legs}-leg", "legs": list(combo), "price": cost, "p_book": prod(c["p_book"] for c in combo),
                     "contracts": contracts, "fee": risk.taker_fee(contracts, min(max(cost, 0.01), 0.99), 0.07)})
     return out
 
@@ -151,6 +186,7 @@ def record(store, cands, combos, now):
     """Save picks and combos once each, only before kickoff. Returns (new picks, new combos)."""
     store.x(PICK_SCHEMA)
     store.x(COMBO_SCHEMA)
+    store.x(ENTRY_SCHEMA)
     picks = 0
     for c in cands[:MAX_PICKS_PER_RUN]:
         tip = _tip(c["tip"])
@@ -161,6 +197,7 @@ def record(store, cands, combos, now):
                       (c["ticker"], int(now), c["game"], "ml", f'{c["team"]} to win', "yes", round(c["price"], 4), c["contracts"],
                        round(c["contracts"] * c["price"], 2), c["fee"], round(c["p_book"], 4), round(c["edge"], 4), tip))
         picks += max(0, cur.rowcount or 0)
+        store.x("INSERT OR IGNORE INTO cfb_entry (ticker, bid, ask) VALUES (?,?,?)", (c["ticker"], c.get("bid"), c["price"]))
     new = 0
     day = f"{datetime.fromtimestamp(now, timezone.utc):%Y-%m-%d}"
     for cb in combos:
@@ -177,11 +214,41 @@ def record(store, cands, combos, now):
     return picks, new
 
 
+def record_gaps(store, rows, now):
+    store.x(GAP_SCHEMA)
+    new = 0
+    for r in rows:
+        tip = _tip(r["tip"])
+        if tip is not None and tip <= now:
+            continue
+        cur = store.x("""INSERT OR IGNORE INTO cfb_gaps (ticker, ts, game, team, ask, bid, p_book, p_poly, p_ref, tip_ts, status)
+                         VALUES (?,?,?,?,?,?,?,?,?,?, 'open')""",
+                      (r["ticker"], int(now), r["game"], r["team"], r["ask"], r["bid"], round(r["p_book"], 4), round(r["p_poly"], 4),
+                       round(r["p_ref"], 4), tip))
+        new += max(0, cur.rowcount or 0)
+    return new
+
+
+def settle_gaps(store, client, now):
+    store.x(GAP_SCHEMA)
+    for r in store.q("SELECT * FROM cfb_gaps WHERE status='open' AND COALESCE(tip_ts, 0) < ?", (now - 3 * 3600,)):
+        try:
+            res = client.market(r["ticker"]).get("result")
+        except Exception:
+            continue
+        if res not in ("yes", "no"):
+            continue
+        fee = risk.taker_fee(1, r["ask"], 0.07)
+        pnl = (1 - r["ask"] - fee) if res == "yes" else -(r["ask"] + fee)       # one contract bought at the ask
+        store.x("UPDATE cfb_gaps SET status='settled', result=?, pnl=? WHERE ticker=?", (res, round(pnl, 4), r["ticker"]))
+
+
 def settle(store, client, now=None):
     """Close picks whose Kalshi market has a result, then combos: one lost leg loses it, every leg won wins it."""
     now = int(time.time() if now is None else now)
     store.x(PICK_SCHEMA)
     store.x(COMBO_SCHEMA)
+    settle_gaps(store, client, now)
     closed = 0
     for r in store.q("SELECT * FROM cfb_picks WHERE status='open' AND COALESCE(tip_ts, 0) < ?", (now - 3 * 3600,)):
         try:
@@ -218,10 +285,13 @@ def run(store, client, now=None, every=3600, fetch=requests.get):
             return None
         store.set_kv("cfb_last_run", now)
         games = book_games(fetch, now)
-        cands = candidates(nba.kalshi_events(client, SERIES), games, poly=polymarket.cached(store, 'cfb', now=now))
+        events = nba.kalshi_events(client, SERIES)
+        poly = polymarket.cached(store, 'cfb', now=now)
+        cands = candidates(events, games, poly=poly)
         combos = build_combos(cands)
         picks, new = record(store, cands, combos, now)
-        return {"games": len(games), "candidates": len(cands), "picks": picks, "combos": new}
+        found = record_gaps(store, gaps(events, games, poly), now)
+        return {"games": len(games), "candidates": len(cands), "picks": picks, "combos": new, "gaps": found}
     except Exception:
         log.warning("college football pass failed", exc_info=True)
         return None
@@ -246,4 +316,18 @@ def summary(store, now=None):
     cur = [{"tier": r["tier"], "price": r["price"], "p_book": r["p_book"], "stake": r["stake"],
             "legs": [{"team": g["team"], "game": g["game"], "price": g["price"], "p_poly": g.get("p_poly")} for g in json.loads(r["legs"])]}
            for r in combos if r["status"] == "open"][:6]
-    return {"picks": acct(picks), "combos": acct(combos), "open_combos": cur}
+    store.x(GAP_SCHEMA)
+    store.x(ENTRY_SCHEMA)
+    gp = store.q("SELECT * FROM cfb_gaps")
+    gdone = [r for r in gp if r["status"] == "settled"]
+    gaps_out = {"n": len(gp), "settled": len(gdone)}
+    if gdone:
+        gaps_out.update({"wins": sum(1 for r in gdone if r["pnl"] > 0), "pnl_per_contract": round(sum(r["pnl"] for r in gdone), 2),
+                         "avg_gap": round(sum(r["p_ref"] - r["ask"] for r in gdone) / len(gdone), 3)})
+    ent = {r["ticker"]: r for r in store.q("SELECT * FROM cfb_entry")}
+    pdone = [r for r in picks if r["status"] == "settled" and r["ticker"] in ent and ent[r["ticker"]]["bid"] is not None]
+    entry = {"settled": len(pdone)}
+    if pdone:
+        save = sum(r["contracts"] * (r["price"] - (ent[r["ticker"]]["bid"] + r["price"]) / 2) for r in pdone)
+        entry.update({"pnl_ask": round(sum(r["pnl"] for r in pdone), 2), "pnl_mid_if_filled": round(sum(r["pnl"] for r in pdone) + save, 2)})
+    return {"picks": acct(picks), "combos": acct(combos), "open_combos": cur, "gaps": gaps_out, "entry": entry}
