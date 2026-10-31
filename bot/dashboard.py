@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from . import brain, guard
-from . import shadow_monitor, sports_combos, nfl_tonight, scorecard, cross_market, entry_rules, experiment, nba_tonight, sports_consistency, sports_study, readiness, entry_timing, hindsight, lead_lag, online, simulate, slices, sweep, window_review
+from . import momentum, shadow_monitor, sports_combos, nfl_tonight, scorecard, cross_market, entry_rules, experiment, nba_tonight, sports_consistency, sports_study, readiness, entry_timing, hindsight, lead_lag, online, simulate, slices, sweep, window_review
 from .storage import stats_since
 
 E = html.escape
@@ -461,6 +461,7 @@ def summary(store):
         "nfl": _safe(nfl_tonight.summary, store),
         "bet_combos": _safe(sports_combos.summary, store),
         "monitor": _safe(shadow_monitor.report, store),
+        "momentum": _safe(momentum.study, store),
         "experiment": _safe(experiment.report, store),
         "sports_study": _safe(sports_study.report, store),
         "nba": _safe(nba_tonight.summary, store),

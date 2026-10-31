@@ -136,11 +136,19 @@ class TestAppSummary(unittest.TestCase):
         self.assertIn("Open the monitor", html)
         self.assertIn('APP_BUILD="', html)                                                      # so a stale copy of the app can be told apart
 
+    def test_momentum_is_shown_per_bet_and_judged_in_the_scorecard(self):
+        html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "index.html")).read()
+        for piece in ("function trustBlock(", "TRUST TEST", "Passing the test", "How much the bot trusts its model"):
+            self.assertIn(piece, html, piece)
+        for piece in ("function momBlock(", "MOMENTUM GOING IN", "function momStudy(", "DOES MOMENTUM BEAT THE PRICE?",
+                      "momRep=s.momentum&&s.momentum.groups?s.momentum:null", "Last 3 games vs season"):
+            self.assertIn(piece, html, piece)
+
     def test_the_sports_tab_has_the_shadow_picks_monitor(self):
         html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "index.html")).read()
         self.assertIn("monitorCard()+", html)                                                  # shown at the top of the Sports tab
         self.assertIn('data-act="mon"', html)
-        self.assertIn('"mon"].includes(a)', html)                                              # the tab switch is wired up
+        self.assertIn('"mon","monf"].includes(a)', html)                                              # the tab switch is wired up
         self.assertIn("monRep=s.monitor&&s.monitor.lanes?s.monitor:null", html)
         for piece in ('data-act="mx"', "function pickPanel(", "function comboPanel(", "function legPanel(", "per $1</b>", "Worth now at Kalshi", "function progBlock(", "function liveProgress(", 'a==="mx"',
                       "Bet amount", "Kalshi win %", "My win %", "Win amount", "of ${pr.line}", "site.api.espn.com/apis/site/v2/sports"):

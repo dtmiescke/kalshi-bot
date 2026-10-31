@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 
-from bot import sports_combos as sc
+from bot import sports_combos as sc, trust
 from bot.storage import Store
 
 NOW = 1_793_500_000
@@ -88,6 +88,7 @@ class TestAccount(unittest.TestCase):
             self.store.x("INSERT INTO nba_picks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'open',NULL,NULL,NULL)",
                          (f"T{i}", NOW, f"G{i}", "prop", f"Player {i} 10+ {STATS[i]} ({'YES' if i % 2 else 'NO'})",
                           "yes" if i % 2 else "no", .5, 10, 5.0, .1, .7, .15, TIP))
+            trust.save(self.store, {"ticker": f"T{i}", "price": .5, "p_model": .7, "fee": .1, "contracts": 10}, "NBA", 1.0, NOW)
 
     def test_combos_are_recorded_once_and_only_before_the_games(self):
         out = sc.run(self.store, NOW, every=0)
@@ -120,6 +121,13 @@ class TestAccount(unittest.TestCase):
         s = sc.summary(self.store)
         self.assertEqual(s["account"]["open"], len(s["open"]))
         self.assertTrue(all(len(c["legs"]) >= 2 for c in s["open"]))
+
+    def test_picks_that_fail_the_trust_test_never_become_combo_legs(self):
+        self.store.x("DELETE FROM pick_trust")
+        for i in range(6):                                                         # the learned trust is 0: nothing beats the price
+            trust.save(self.store, {"ticker": f"T{i}", "price": .5, "p_model": .7, "fee": .1, "contracts": 10}, "NBA", 0.0, NOW)
+        self.assertEqual(sc._pool_from_db(self.store, NOW), [])
+        self.assertEqual(sc.run(self.store, NOW, every=0)["built"], 0)
 
     def test_run_never_raises(self):
         broken = Store(os.path.join(tempfile.mkdtemp(), "t.sqlite"))

@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-from . import nba_tonight as nba
+from . import momentum, nba_tonight as nba, trust
 from .matching import norm
 
 log = logging.getLogger(__name__)
@@ -180,6 +180,11 @@ def limits():
     return (MAX_PER_GAME, MAX_PER_PLAYER, MAX_PER_STAT, MAX_SAME_SIDE)
 
 
+def unit_nfl(stat):
+    return {"passingYards": "pass yds", "passingTouchdowns": "pass TDs", "receivingYards": "rec yds", "receptions": "rec",
+            "rushingYards": "rush yds", "rushingAttempts": "carries"}.get(stat, "")
+
+
 def liquid(m):
     """A rung worth rating: both sides quoted, a tight enough book, and a price that is not already a near-certainty."""
     bid, ask = nba._f(m.get("yes_bid_dollars")), nba._f(m.get("yes_ask_dollars"))
@@ -270,6 +275,9 @@ def build_report(client, store=None, now=None, fetch=requests.get):
                     if best is None or top["edge"] > best["e"]["edge"]:
                         best = {"e": top, "line": line, "m": m, "cautious": cautious["edge"]}
                 if best:
+                    season_games = [x for x in gl if x["date"] >= CUR_START]
+                    pool = values(season_games, stat) if len(season_games) >= 3 else values(gl, stat)[-15:]
+                    mom = momentum.features(pool, values(gl, stat), unit_nfl(stat))
                     e, m = best["e"], best["m"]
                     n = int(round(best["line"] + 0.5))
                     candidates.append({
@@ -277,7 +285,7 @@ def build_report(client, store=None, now=None, fetch=requests.get):
                         "ticker": m["ticker"], "label": f'{pl["name"]} {n}+ {label} ({e["side"].upper()})', "side": e["side"],
                         "price": e["price"], "contracts": e["contracts"], "fee": e["fee"], "p_model": e["p_win"], "edge": e["edge"],
                         "cautious_edge": round(best["cautious"], 4), "tip": g["tip"], "projection": round(mu, 1), "script": round(f, 3),
-                        "season_avg": info.get("season_avg"), "last3": info.get("last3")})
+                        "season_avg": info.get("season_avg"), "last3": info.get("last3"), "momentum": mom})
     counts, picks = {}, []
     for c in sorted(candidates, key=lambda c: -c["edge"]):
         if len(picks) >= MAX_PER_RUN:
@@ -296,6 +304,7 @@ def record_picks(store, report, now=None):
     now = int(time.time() if now is None else now)
     store.x(SCHEMA)
     added = 0
+    lam = trust.learn(store, "NFL")["lam"]
     for p in report.get("picks", []):
         try:
             tip = int(datetime.fromisoformat(str(p["tip"]).replace("Z", "+00:00")).timestamp())
@@ -316,6 +325,8 @@ def record_picks(store, report, now=None):
                       (p["ticker"], now, p["game"], p["kind"], p["label"], p["side"], p["price"], p["contracts"],
                        round(p["contracts"] * p["price"], 2), p["fee"], p["p_model"], p["edge"], tip))
         added += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        momentum.save(store, p["ticker"], "NFL", p.get("momentum"), now)
+        trust.save(store, p, "NFL", lam, now)
     return added
 
 

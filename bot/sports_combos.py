@@ -15,7 +15,7 @@ import logging
 import time
 from itertools import combinations
 
-from . import risk
+from . import risk, trust
 
 log = logging.getLogger(__name__)
 
@@ -104,12 +104,15 @@ def build(picks, sizes=SIZES, per_size=PER_SIZE):
 
 def _pool_from_db(store, now):
     picks = []
+    verdicts = trust.load(store)
     for table, sport in (("nba_picks", "NBA"), ("nfl_picks", "NFL")):
         try:
             rows = store.q(f"SELECT * FROM {table} WHERE status='open' AND COALESCE(tip_ts, 0) > ?", (int(now),))
         except Exception:
             continue
         for r in rows:
+            if not verdicts.get(r["ticker"], {}).get("official"):
+                continue                      # only picks that still beat the price after the learned trust in the model
             player = None
             if r["kind"] == "prop":
                 import re

@@ -5,6 +5,8 @@ the picks (open first, then the latest settled) and every combo with the live st
 import hashlib
 import json
 
+from . import momentum, trust
+
 OPEN_CAP = 70            # open picks listed per sport
 SETTLED_CAP = 40         # latest settled picks listed per sport
 COMBO_CAP = 40
@@ -37,14 +39,14 @@ def side_now(quote, side):
     return round(mid if side == "yes" else 1 - mid, 4)
 
 
-def _row(sport, r, quotes, progress):
+def _row(sport, r, quotes, progress, feats, verdicts):
     quote = quotes.get(r["ticker"])
     win = (r["contracts"] * (1 - r["price"]) - r["fee"]) if r["contracts"] else None
     return {"id": r["ticker"], "sport": sport, "label": r["label"], "game": r["game"], "side": r["side"], "price": r["price"],
             "p": r["p_model"], "edge": r["edge"], "status": r["status"], "pnl": r["pnl"], "tip": r["tip_ts"],
             "kind": r["kind"], "ts": r["ts"], "contracts": r["contracts"], "stake": r["stake"], "fee": r["fee"],
             "win": round(win, 2) if win is not None else None, "lose": round(r["stake"] + r["fee"], 2),
-            "now": side_now(quote, r["side"]), "now_ts": quote["ts"] if quote else None, "prog": progress.get(r["ticker"])}
+            "now": side_now(quote, r["side"]), "now_ts": quote["ts"] if quote else None, "prog": progress.get(r["ticker"]), "mom": feats.get(r["ticker"]), "trust": verdicts.get(r["ticker"])}
 
 
 def report(store, now=None):
@@ -57,6 +59,8 @@ def report(store, now=None):
         progress = store.get_kv("pick_progress", {}) or {}
     except Exception:
         progress = {}
+    feats = momentum.load(store)
+    verdicts = trust.load(store)
     sides, games, tips = {}, {}, {}
     for sport, table in TABLES:
         rows = _q(store, f"SELECT * FROM {table}")
@@ -72,7 +76,7 @@ def report(store, now=None):
             lanes["NFL props"] = _lane(rows)
         opened = sorted((r for r in rows if r["status"] == "open"), key=lambda r: (r["tip_ts"] or 0, -(r["edge"] or 0)))[:OPEN_CAP]
         settled = sorted((r for r in rows if r["status"] == "settled"), key=lambda r: -(r["settled_ts"] or 0))[:SETTLED_CAP]
-        picks += [_row(sport, r, quotes, progress) for r in opened + settled]
+        picks += [_row(sport, r, quotes, progress, feats, verdicts) for r in opened + settled]
     combos = []
     crows = _q(store, "SELECT * FROM sports_combos ORDER BY (status='open') DESC, ts DESC, edge DESC")
     lanes["Bet combos"] = _lane(crows)
@@ -95,5 +99,6 @@ def report(store, now=None):
                        "now_ts": min((quotes[g["ticker"]]["ts"] for g in legs if g["ticker"] in quotes), default=None),
                        "legs": [{"id": g["ticker"], "game": games.get(g["ticker"]), "tip": tips.get(g["ticker"]),
                                  "side": g.get("side") or sides.get(g["ticker"], "yes"), "label": g["label"], "price": g["price"], "p": g.get("p_model"), "status": status.get(g["ticker"], "open"),
-                                 "now": x, "prog": progress.get(g["ticker"])} for g, x in zip(legs, live)]})
-    return {"lanes": lanes, "picks": picks, "combos": combos}
+                                 "now": x, "prog": progress.get(g["ticker"]), "mom": feats.get(g["ticker"])} for g, x in zip(legs, live)]})
+    return {"lanes": lanes, "picks": picks, "combos": combos, "trust": trust.summary(store),
+            "official": sum(1 for v in verdicts.values() if v["official"]), "recorded": len(verdicts)}
