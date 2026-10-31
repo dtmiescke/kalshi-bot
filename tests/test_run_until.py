@@ -29,7 +29,7 @@ class TestRunUntil(unittest.TestCase):
 
     def test_the_workflow_runs_the_guard_first_with_a_default_and_a_variable(self):
         text = open(os.path.join(ROOT, ".github", "workflows", "bot.yml")).read()
-        self.assertIn("vars.APP_RUN_UNTIL || '2026-11-02T08:00:00Z'", text)
+        self.assertIn("vars.APP_RUN_UNTIL || 'never'", text)                                  # no stop date unless one is set
         self.assertIn("run: bash .github/run_until.sh", text)
         self.assertLess(text.index("bash .github/run_until.sh"), text.index("pip install"))        # before any work
         self.assertLess(text.index("bash .github/run_until.sh"), text.index("python -m bot.main scheduled"))
