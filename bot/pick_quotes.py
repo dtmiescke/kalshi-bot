@@ -8,7 +8,7 @@ import time
 log = logging.getLogger(__name__)
 
 BATCH = 50
-TABLES = ("nba_picks", "nfl_picks")
+TABLES = ("nba_picks", "nfl_picks", "cfb_picks")
 
 
 def _f(v):

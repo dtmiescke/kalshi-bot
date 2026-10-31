@@ -10,7 +10,7 @@ from . import momentum, trust
 OPEN_CAP = 70            # open picks listed per sport
 SETTLED_CAP = 40         # latest settled picks listed per sport
 COMBO_CAP = 40
-TABLES = (("NBA", "nba_picks"), ("NFL", "nfl_picks"))
+TABLES = (("NBA", "nba_picks"), ("NFL", "nfl_picks"), ("CFB", "cfb_picks"))
 
 
 def _q(store, sql, args=()):
@@ -72,6 +72,8 @@ def report(store, now=None):
         if sport == "NBA":
             lanes["NBA props"] = _lane([r for r in rows if r["kind"] == "prop"])
             lanes["NBA game winners"] = _lane([r for r in rows if r["kind"] != "prop"])
+        elif sport == "CFB":
+            lanes["CFB favorites"] = _lane(rows)
         else:
             lanes["NFL props"] = _lane(rows)
         opened = sorted((r for r in rows if r["status"] == "open"), key=lambda r: (r["tip_ts"] or 0, -(r["edge"] or 0)))[:OPEN_CAP]
@@ -100,5 +102,29 @@ def report(store, now=None):
                        "legs": [{"id": g["ticker"], "game": games.get(g["ticker"]), "tip": tips.get(g["ticker"]),
                                  "side": g.get("side") or sides.get(g["ticker"], "yes"), "label": g["label"], "price": g["price"], "p": g.get("p_model"), "status": status.get(g["ticker"], "open"),
                                  "now": x, "prog": progress.get(g["ticker"]), "mom": feats.get(g["ticker"])} for g, x in zip(legs, live)]})
+    cfb = _q(store, "SELECT * FROM cfb_combos ORDER BY (status='open') DESC, ts DESC")
+    lanes["CFB parlays"] = _lane(cfb)
+    for r in cfb[:COMBO_CAP]:
+        try:
+            legs = json.loads(r["legs"])
+        except ValueError:
+            continue
+        live = [side_now(quotes.get(g["ticker"]), "yes") for g in legs]
+        now_chance = None
+        if all(x is not None for x in live):
+            now_chance = 1.0
+            for x in live:
+                now_chance *= x
+        win = r["contracts"] * (1 - r["price"]) - r["fee"]
+        combos.append({"id": hashlib.sha1(r["key"].encode()).hexdigest()[:10], "sport": "CFB", "tier": r["tier"], "status": r["status"],
+                       "pnl": r["pnl"], "price": r["price"], "chance": r["p_book"], "model": r["p_book"], "edge": None,
+                       "stake": r["stake"], "fee": r["fee"], "contracts": r["contracts"], "win": round(win, 2),
+                       "lose": round(r["stake"] + r["fee"], 2), "tip": r["tip_ts"], "ts": r["ts"],
+                       "now": None if now_chance is None else round(now_chance, 4),
+                       "now_ts": min((quotes[g["ticker"]]["ts"] for g in legs if g["ticker"] in quotes), default=None),
+                       "legs": [{"id": g["ticker"], "game": g.get("game"), "tip": tips.get(g["ticker"]), "side": "yes",
+                                 "label": f'{g["team"]} to win', "price": g["price"], "p": g.get("p_book"),
+                                 "status": status.get(g["ticker"], "open"), "now": x, "prog": None, "mom": None}
+                                for g, x in zip(legs, live)]})
     return {"lanes": lanes, "picks": picks, "combos": combos, "trust": trust.summary(store),
             "official": sum(1 for v in verdicts.values() if v["official"]), "recorded": len(verdicts)}
