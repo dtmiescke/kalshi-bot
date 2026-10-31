@@ -136,6 +136,12 @@ class TestAppSummary(unittest.TestCase):
         self.assertIn("Open the monitor", html)
         self.assertIn('APP_BUILD="', html)                                                      # so a stale copy of the app can be told apart
 
+    def test_momentum_is_shown_per_bet_and_judged_in_the_scorecard(self):
+        html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "index.html")).read()
+        for piece in ("function momBlock(", "MOMENTUM GOING IN", "function momStudy(", "DOES MOMENTUM BEAT THE PRICE?",
+                      "momRep=s.momentum&&s.momentum.groups?s.momentum:null", "Last 3 games vs season"):
+            self.assertIn(piece, html, piece)
+
     def test_the_sports_tab_has_the_shadow_picks_monitor(self):
         html = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "index.html")).read()
         self.assertIn("monitorCard()+", html)                                                  # shown at the top of the Sports tab

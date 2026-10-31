@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from . import risk
+from . import momentum, risk
 from .matching import name_score, norm
 
 ESPN = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"
@@ -363,6 +363,8 @@ def book_prob(store, team_name, now):
     return best[1] if best else None
 
 
+UNIT_NBA = {"KXNBAPTS": "pts", "KXNBAREB": "reb", "KXNBAAST": "ast", "KXNBA3PT": "threes", "KXNBASTL": "stl", "KXNBABLK": "blk",
+            "KXNBAPRA": "pts+reb+ast", "KXNBAPR": "pts+reb", "KXNBAPA": "pts+ast", "KXNBARA": "reb+ast", "KXNBASTOCK": "stl+blk"}
 _LABEL_PARTS = re.compile(r"^(.*?) \d+\+ (.+?) \((YES|NO)\)$")
 
 
@@ -563,7 +565,12 @@ def build_report(client, store=None, now=None, day=None, fetch=requests.get, max
                 entry["props"].append(row)
                 if best and level == "ok":                           # never pick a player who is out or whose minutes are uncertain
                     rung, e = best
-                    report["picks"].append({"kind": "prop", "game": f'{g["away"]["name"]} at {g["home"]["name"]}', "ticker": rung["ticker"],
+                    played = [x for x in games_p if x["MIN"] >= 8]
+                    season = [x for x in played if x["date"][:10] >= cur_start]
+                    pool = season if len(season) >= 3 else played[-15:]
+                    mom = momentum.features([value(x, comps) for x in pool], [value(x, comps) for x in played], UNIT_NBA.get(series, ""),
+                                            [x["MIN"] for x in pool], [x["MIN"] for x in played])
+                    report["picks"].append({"momentum": mom, "kind": "prop", "game": f'{g["away"]["name"]} at {g["home"]["name"]}', "ticker": rung["ticker"],
                                             "label": f'{pl["name"]} {rung["line"]}+ {LABEL[series]} ({e["side"].upper()})', "side": e["side"],
                                             "price": e["price"], "contracts": e["contracts"], "fee": e["fee"], "p_model": e["p_win"],
                                             "edge": e["edge"], "tip": g["tip"], "projection": row["projection"],
@@ -611,6 +618,7 @@ def record_picks(store, report, now=None):
                 (pk["ticker"], now, pk["game"], pk["kind"], pk["label"], pk["side"], pk["price"], pk["contracts"],
                  round(pk["contracts"] * pk["price"], 2), pk["fee"], pk["p_model"], pk["edge"], tip))
         new += store.q("SELECT COUNT(*) AS n FROM nba_picks")[0]["n"] - before
+        momentum.save(store, pk["ticker"], "NBA", pk.get("momentum"), now)
     return new
 
 
