@@ -523,7 +523,7 @@ function widthOf(id,fallback){const el=$(id);return el&&el.clientWidth?el.client
 
 /* ================= navigation ================= */
 let route={tab:"dash",page:"main"},stack=[];
-let ui={feat:"BTC",coinTab:"overview",pnlRange:"7d",sportsType:"all",league:"All",actView:"open",mon:"combos",open:{}};
+let ui={feat:"BTC",coinTab:"overview",pnlRange:"7d",sportsType:"all",league:"All",actView:"open",mon:"combos",monf:"all",open:{}};
 let custom={types:{game:true,prop:true},leagues:{}};
 try{Object.assign(custom,JSON.parse(localStorage.getItem("kbot_custom")||"{}"))}catch(e){}
 function go(r){stack.push(route);route=Object.assign({tab:route.tab},r);history.pushState({d:stack.length},"");render(true)}
@@ -970,11 +970,18 @@ function momBlock(m,price,now){ // is he hot or cold going in, and how far has K
     <div class="kv"><span>Last 5 games</span><b class="num">${(m.last5||[]).map(fmtN).join(" · ")}</b></div>
     ${m.min_trend!=null?`<div class="kv"><span>Minutes, last 3 vs season</span><b class="num ${m.min_trend>0?"up":m.min_trend<0?"down":""}">${m.min_trend>0?"+":m.min_trend<0?"−":""}${Math.abs(m.min_trend)} min</b></div>`:""}
     ${mv!=null?`<div class="kv"><span>Kalshi's price since the pick</span><b class="num ${mv>0?"up":mv<0?"down":""}">${mv>0?"+":mv<0?"−":""}${Math.abs(mv)}% · $${price.toFixed(2)} → $${now.toFixed(2)}</b></div>`:""}`}
+function trustBlock(t,p,price){ // does the trusted chance still beat the price after fees?
+  if(!t)return`<div class="kv"><span>Trust test</span><b class="muted">not recorded for this pick</b></div>`;
+  return`<div class="kv"><span>How much the bot trusts its model</span><b class="num">${Math.round(t.lam*100)}%</b></div>
+    <div class="kv"><span>Chance after that trust</span><b class="num">${mPct(t.p_cal)} vs ${mPct(price)} price</b></div>
+    <div class="kv"><span>Edge left after the fee</span><b class="num ${t.edge_cal>0?"up":"down"}">${t.edge_cal>=0?"+":"−"}${Math.abs(Math.round(t.edge_cal*100))}% · $${Math.abs(t.edge_cal).toFixed(2)} per $1</b></div>
+    <div class="kv"><span>Result of the test</span><b class="${t.official?"up":"muted"}">${t.official?"✓ Passes (needs +3%)":"Research pick (under +3%)"}</b></div>`}
 function pickPanel(p){
   const pr=progOf(p.id,p.prog);
   return`<div style="padding:4px 14px 12px;display:grid;gap:8px">${tiles(p.stake,p.price,p.p,p.win,p.lose,p.edge)}
     <div><div class="cap">PROGRESS TOWARD THE LINE</div>${progBlock(pr,p.side)}</div>
     ${p.status==="open"?`<div><div class="cap">LIVE ON KALSHI</div>${liveBlock(p.now,p.now_ts,p.price,p.p,p.contracts,p.stake)}</div>`:""}
+    <div><div class="cap">TRUST TEST</div>${trustBlock(p.trust,p.p,p.price)}</div>
     <div><div class="cap">MOMENTUM GOING IN</div>${momBlock(p.mom,p.price,p.now)}</div>
     <div><div class="cap">THE BET</div><div class="kv"><span>${esc(p.sport)} ${p.kind==="prop"?"player prop":"game winner"}</span><b>${p.side.toUpperCase()}</b></div><div class="kv"><span>Price paid</span><b class="num">${Math.round(p.price*100)}¢ × ${p.contracts??"–"} contracts</b></div><div class="kv"><span>Fee</span><b class="num">${money(p.fee)}</b></div>
       <div class="kv"><span>Recorded</span><b>${mWhen(p.ts)}</b></div><div class="kv"><span>${p.status==="open"?"Starts":"Played"}</span><b>${mWhen(p.tip)}</b></div>${p.pnl!=null?`<div class="kv"><span>Result</span><b class="num ${cls(p.pnl)}">${mUsd(p.pnl)}</b></div>`:""}</div>
@@ -1007,9 +1014,11 @@ function monitorCard(){ // every shadow account in one place: combos, NBA, NFL (
     body=lane(["Bet combos"])+(m.combos.length?m.combos.map(c=>{const o=!!ui.open[c.id];return`<section class="card" style="gap:4px"><button data-act="mx" data-v="${esc(c.id)}" aria-expanded="${o}" style="all:unset;cursor:pointer;display:block;width:100%"><div class="kv"><span><b>${plural(c.legs.length,"leg")}</b> <small class="muted">· costs ${Math.round(c.price*100)}¢ per $1 · ${Math.round(c.chance*100)}% chance all hit · ${cash(c.stake)} stake</small></span><b class="num ${c.status==="open"?"":c.pnl>=0?"up":"down"}">${c.status==="open"?"Open":mUsd(c.pnl)} ${chev(o)}</b></div></button>${o?comboPanel(c):""}${c.legs.map((g,i)=>{const key=c.id+":"+(g.id||i),lo=!!ui.open[key],pr=progOf(g.id||"",g.prog);return`<div style="border-top:1px solid var(--line,#8883)"><button data-act="mx" data-v="${esc(key)}" aria-expanded="${lo}" class="kv" style="all:unset;cursor:pointer;display:flex;justify-content:space-between;gap:8px;width:100%;padding:8px 0"><span>${esc(g.label)} <small class="muted">· ${Math.round(g.price*100)}¢${pr&&pr.cur!=null&&g.status==="open"?" · "+fmtN(pr.cur)+" of "+pr.line+" "+esc(pr.unit):""}</small></span><b class="num ${g.status==="won"?"up":g.status==="lost"?"down":"muted"}">${mark[g.status]} ${word[g.status]} ${chev(lo)}</b></button>${lo?legPanel(g):""}</div>`}).join("")}</section>`}).join(""):`<p class="empty">No combos yet. The bot builds them each hour from the open picks.</p>`)
       +`<small class="note">Tap a combo for its totals, and tap any leg for that bet's own details. Each combo pays only if every leg wins. One leg per game, a different player in each. The price is an estimate, not Kalshi's own combo price. Nothing is bet.</small>`;
   }else{
-    const sp=cur==="nba"?"NBA":"NFL",names=cur==="nba"?["NBA props","NBA game winners"]:["NFL props"],rows=m.picks.filter(p=>p.sport===sp);
+    const sp=cur==="nba"?"NBA":"NFL",names=cur==="nba"?["NBA props","NBA game winners"]:["NFL props"],all=m.picks.filter(p=>p.sport===sp),rows=ui.monf==="pass"?all.filter(p=>p.trust&&p.trust.official):all,tr=(m.trust||{})[sp];
     const games={};rows.forEach(p=>(games[p.game]=games[p.game]||[]).push(p));
-    body=lane(names)+(rows.length?Object.entries(games).map(([g,ps])=>`<section class="card list"><div class="kv" style="padding:10px 14px"><b>${esc(g)}</b><small class="muted">${ps[0].status==="open"?mWhen(ps[0].tip):"settled"}</small></div>${ps.map(p=>{const o=!!ui.open[p.id],pr=progOf(p.id,p.prog);return`<div><button class="kv" data-act="mx" data-v="${esc(p.id)}" aria-expanded="${o}" style="padding:6px 14px;width:100%;background:none;border:0;color:inherit;font:inherit;text-align:left;cursor:pointer"><span>${esc(p.label)} <small class="muted">· ${Math.round(p.price*100)}¢ · model ${Math.round(p.p*100)}%${pr&&pr.cur!=null&&p.status==="open"?" · "+fmtN(pr.cur)+" of "+pr.line+" "+esc(pr.unit):""}</small></span><b class="num ${p.status==="settled"?(p.pnl>0?"up":"down"):"muted"}">${p.status==="settled"?mUsd(p.pnl):"Open"} ${chev(o)}</b></button>${o?pickPanel(p):""}</div>`}).join("")}</section>`).join(""):`<p class="empty">No ${sp} picks recorded yet.</p>`)
+    const ntest=all.filter(p=>p.trust&&p.trust.official).length;
+    body=lane(names)+`<div class="kv"><span>Model trust <small class="muted">· ${tr?(tr.source==="learned"?"learned from "+plural(tr.n,"settled pick"):"default until "+60+" settled picks ("+tr.n+" so far)"):""}</small></span><b class="num">${tr?Math.round(tr.lam*100)+"%":"–"}</b></div>
+      <div class="seg" role="group" aria-label="Which picks">${[["all","All picks"],["pass","Passing the test ("+ntest+")"]].map(t=>`<button data-act="monf" data-v="${t[0]}" aria-pressed="${t[0]===ui.monf}">${t[1]}</button>`).join("")}</div>`+(rows.length?Object.entries(games).map(([g,ps])=>`<section class="card list"><div class="kv" style="padding:10px 14px"><b>${esc(g)}</b><small class="muted">${ps[0].status==="open"?mWhen(ps[0].tip):"settled"}</small></div>${ps.map(p=>{const o=!!ui.open[p.id],pr=progOf(p.id,p.prog);return`<div><button class="kv" data-act="mx" data-v="${esc(p.id)}" aria-expanded="${o}" style="padding:6px 14px;width:100%;background:none;border:0;color:inherit;font:inherit;text-align:left;cursor:pointer"><span>${p.trust&&p.trust.official?"✓ ":""}${esc(p.label)} <small class="muted">· ${Math.round(p.price*100)}¢ · model ${Math.round(p.p*100)}%${p.trust&&!p.trust.official?" · research":""}${pr&&pr.cur!=null&&p.status==="open"?" · "+fmtN(pr.cur)+" of "+pr.line+" "+esc(pr.unit):""}</small></span><b class="num ${p.status==="settled"?(p.pnl>0?"up":"down"):"muted"}">${p.status==="settled"?mUsd(p.pnl):"Open"} ${chev(o)}</b></button>${o?pickPanel(p):""}</div>`}).join("")}</section>`).join(""):`<p class="empty">${all.length?"No picks pass the trust test right now. The model has not yet shown it beats Kalshi's price, so none are called official. They stay recorded as research picks.":"No "+sp+" picks recorded yet."}</p>`)
       +`<small class="note">Tap a pick to open everything about it, with how far the player is toward the line once the game is on. Shadow picks: the bot records what it would bet, before the game starts, and grades it from Kalshi's result. No money is bet.</small>`;
   }
   return`<section class="card" style="gap:8px"><div class="cardhead"><h2>Shadow picks monitor</h2><small class="muted">paper · player stats live from ESPN</small></div><div class="seg" role="group" aria-label="Shadow account">${tabs.map(t=>`<button data-act="mon" data-v="${t[0]}" aria-pressed="${t[0]===cur}">${t[1]}</button>`).join("")}</div>${body}</section>`}
@@ -1256,7 +1265,7 @@ document.addEventListener("click",async e=>{
   if(a==="mx"){ui.open[v]=!ui.open[v];render();if(ui.open[v])liveProgress();return}
   if(a==="set")return go({page:"set",sec:v});
   if(a==="insights")return go({page:"insights",sym:v||null});
-  if(["coinTab","pnlRange","sportsType","league","actView","mon"].includes(a)){ui[a]=v;return render()}
+  if(["coinTab","pnlRange","sportsType","league","actView","mon","monf"].includes(a)){ui[a]=v;return render()}
   if(a==="customize"){sheetOpen=true;return render()}
   if(a==="closeSheet"){sheetOpen=false;return render()}
   if(a==="toggleType"){custom.types[v]=custom.types[v]===false;saveCustom();return render()}

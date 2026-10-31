@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from . import momentum, risk
+from . import momentum, risk, trust
 from .matching import name_score, norm
 
 ESPN = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"
@@ -595,6 +595,7 @@ def record_picks(store, report, now=None):
     now = int(time.time() if now is None else now)
     store.x(SCHEMA)
     new = 0
+    lam = trust.learn(store, "NBA")["lam"]
     for pk in report["picks"]:
         tip = None
         try:
@@ -619,6 +620,7 @@ def record_picks(store, report, now=None):
                  round(pk["contracts"] * pk["price"], 2), pk["fee"], pk["p_model"], pk["edge"], tip))
         new += store.q("SELECT COUNT(*) AS n FROM nba_picks")[0]["n"] - before
         momentum.save(store, pk["ticker"], "NBA", pk.get("momentum"), now)
+        trust.save(store, pk, "NBA", lam, now)
     return new
 
 

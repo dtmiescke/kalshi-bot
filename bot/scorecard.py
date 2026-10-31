@@ -17,6 +17,8 @@ or Too early under the minimums. This reports; it never changes a setting or a s
 import math
 import random
 
+from . import trust
+
 MIN_BETS = 100
 MIN_CLUSTERS = 20
 DROP_TOP = 10
@@ -124,6 +126,12 @@ def report(store):
     lanes.append(lane("Bet combos, several players (shadow)", [(r["ts"] // 86400, float(r["stake"]), float(r["pnl"])) for r in cmb],
                       [(float(r["p_cautious"]), float(r["price"]), 1.0 if r["pnl"] > 0 else 0.0) for r in cmb
                        if r["p_cautious"] is not None and r["price"] is not None]))
+    verdicts = trust.load(store)
+    for name, table in (("NBA props passing the trust test (shadow)", "nba_picks"), ("NFL props passing the trust test (shadow)", "nfl_picks")):
+        ok = [r for r in _q(store, f"SELECT ticker, game, price, stake, p_model, pnl FROM {table} WHERE status='settled' AND kind='prop' "
+                                   "AND stake > 0 AND pnl IS NOT NULL") if verdicts.get(r["ticker"], {}).get("official")]
+        lanes.append(lane(name, [(r["game"], float(r["stake"]), float(r["pnl"])) for r in ok],
+                          [(float(r["p_model"]), float(r["price"]), 1.0 if r["pnl"] > 0 else 0.0) for r in ok]))
     exp = _q(store, """SELECT ts, price, stake, p_win, pnl FROM experiment_bets
                        WHERE status='settled' AND stake > 0 AND pnl IS NOT NULL""")
     lanes.append(lane("Loosened-rules experiment (shadow)", [(r["ts"] // 3600, float(r["stake"]), float(r["pnl"])) for r in exp],

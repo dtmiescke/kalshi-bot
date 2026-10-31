@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-from . import momentum, nba_tonight as nba
+from . import momentum, nba_tonight as nba, trust
 from .matching import norm
 
 log = logging.getLogger(__name__)
@@ -304,6 +304,7 @@ def record_picks(store, report, now=None):
     now = int(time.time() if now is None else now)
     store.x(SCHEMA)
     added = 0
+    lam = trust.learn(store, "NFL")["lam"]
     for p in report.get("picks", []):
         try:
             tip = int(datetime.fromisoformat(str(p["tip"]).replace("Z", "+00:00")).timestamp())
@@ -325,6 +326,7 @@ def record_picks(store, report, now=None):
                        round(p["contracts"] * p["price"], 2), p["fee"], p["p_model"], p["edge"], tip))
         added += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
         momentum.save(store, p["ticker"], "NFL", p.get("momentum"), now)
+        trust.save(store, p, "NFL", lam, now)
     return added
 
 
