@@ -14,7 +14,7 @@ from itertools import combinations
 
 import requests
 
-from . import nba_tonight as nba, odds, risk
+from . import nba_tonight as nba, odds, polymarket, risk
 from .espn_odds import SCOREBOARD, event_from_game
 from .matching import name_score
 
@@ -82,7 +82,7 @@ def match(title, games):
     return best[1] if best else None
 
 
-def candidates(events, games, fee_rate=0.07):
+def candidates(events, games, fee_rate=0.07, poly=None):
     """One row per game: its book favourite, with Kalshi's ask, the book's chance and the edge after the fee."""
     out = []
     for ev in events:
@@ -99,7 +99,8 @@ def candidates(events, games, fee_rate=0.07):
             p = g["p_home"] if home else g["p_away"]
             contracts = max(1, min(MAX_CONTRACTS, int(STAKE // ask)))
             fee = risk.taker_fee(contracts, ask, fee_rate)
-            rows.append({"ticker": m["ticker"], "team": label, "game": f'{g["away"]} at {g["home"]}', "gid": g["id"], "tip": g["tip"],
+            p2 = polymarket.chance(poly, label, g["away"] if home else g["home"]) if poly else None
+            rows.append({"ticker": m["ticker"], "team": label, "p_poly": p2, "game": f'{g["away"]} at {g["home"]}', "gid": g["id"], "tip": g["tip"],
                          "price": ask, "p_book": p, "contracts": contracts, "fee": fee,
                          "edge": p - ask - fee / contracts})
         if rows:
@@ -166,7 +167,7 @@ def record(store, cands, combos, now):
         tips = [t for t in (_tip(c["tip"]) for c in cb["legs"]) if t]
         if tips and min(tips) <= now:
             continue
-        legs = [{k: c[k] for k in ("ticker", "team", "game", "price", "p_book")} for c in cb["legs"]]
+        legs = [{k: c.get(k) for k in ("ticker", "team", "game", "price", "p_book", "p_poly")} for c in cb["legs"]]
         key = day + "|" + "|".join(sorted(c["ticker"] for c in cb["legs"]))
         cur = store.x("""INSERT OR IGNORE INTO cfb_combos (key, ts, day, tier, legs, price, p_book, contracts, stake, fee, tip_ts, status)
                          VALUES (?,?,?,?,?,?,?,?,?,?,?,'open')""",
@@ -217,7 +218,7 @@ def run(store, client, now=None, every=3600, fetch=requests.get):
             return None
         store.set_kv("cfb_last_run", now)
         games = book_games(fetch, now)
-        cands = candidates(nba.kalshi_events(client, SERIES), games)
+        cands = candidates(nba.kalshi_events(client, SERIES), games, poly=polymarket.cached(store, 'cfb', now=now))
         combos = build_combos(cands)
         picks, new = record(store, cands, combos, now)
         return {"games": len(games), "candidates": len(cands), "picks": picks, "combos": new}
@@ -243,6 +244,6 @@ def summary(store, now=None):
     picks = store.q("SELECT * FROM cfb_picks ORDER BY ts DESC")
     combos = store.q("SELECT * FROM cfb_combos ORDER BY ts DESC")
     cur = [{"tier": r["tier"], "price": r["price"], "p_book": r["p_book"], "stake": r["stake"],
-            "legs": [{"team": g["team"], "game": g["game"], "price": g["price"]} for g in json.loads(r["legs"])]}
+            "legs": [{"team": g["team"], "game": g["game"], "price": g["price"], "p_poly": g.get("p_poly")} for g in json.loads(r["legs"])]}
            for r in combos if r["status"] == "open"][:6]
     return {"picks": acct(picks), "combos": acct(combos), "open_combos": cur}

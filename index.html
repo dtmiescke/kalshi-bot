@@ -782,7 +782,7 @@ function cfbCard(){ // college football favourites and parlays vs Kalshi's price
     <div class="kv"><span>Favourites recorded</span><b class="num">${c.picks.n}${win(c.picks)}</b></div>
     <div class="kv"><span>Parlays recorded</span><b class="num">${c.combos.n}${win(c.combos)}</b></div>
     ${(c.open_combos||[]).map(x=>`<div style="padding:8px 0;border-top:1px solid var(--line,#8883)"><div class="kv"><span><b>${esc(x.tier)} parlay</b> <small class="muted">· costs ${Math.round(x.price*100)}¢ per $1 · ${plural(x.legs.length,"team")} must win</small></span><b class="num">${Math.round(x.p_book*100)}% to hit</b></div>
-      ${x.legs.map(g=>`<small class="muted" style="display:block">${esc(g.team)} wins · ${esc(g.game)} · ${Math.round(g.price*100)}¢</small>`).join("")}</div>`).join("")}
+      ${x.legs.map(g=>`<small class="muted" style="display:block">${esc(g.team)} wins · ${esc(g.game)} · Kalshi ${Math.round(g.price*100)}¢${g.p_poly!=null?` · Polymarket ${Math.round(g.p_poly*100)}%`:""}</small>`).join("")}</div>`).join("")}
     <small class="note" style="margin-top:8px">Each day the bot picks the books' favourites on Kalshi's prices and builds three parlays (chalk, middle, riskier), one team per game. The chance shown is the sportsbook's, vig removed, multiplied across the legs. The parlay price is the legs multiplied plus an assumed margin. Nothing is bet.</small></section>`}
 function nflCard(){ // NFL player props vs Kalshi's prices, shadow account (summary.json "nfl")
   const c=sample?{account:{picks:20,settled:0,open:20},tonight:{games:[{home:"Buffalo Bills",away:"Baltimore Ravens"}],picks:[{label:"Jared Goff 275+ passing yards (YES)",price:.4,edge:.27,p_model:.69}]}}:nflRep;
