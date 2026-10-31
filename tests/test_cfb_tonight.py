@@ -67,16 +67,16 @@ class TestCombos(unittest.TestCase):
     def test_one_combo_per_tier_with_distinct_games_and_product_price(self):
         cands = [cand(i, p) for i, p in enumerate([.85, .82, .80, .78, .75, .72, .68, .66, .62, .60, .58, .55])]
         combos = cfb.build_combos(cands)
-        self.assertEqual([c["tier"] for c in combos], ["Chalk", "Middle", "Riskier"])
+        self.assertEqual([c["tier"] for c in combos if len(c["legs"]) == 3], ["Chalk 3-leg", "Middle 3-leg", "Riskier 3-leg"])
         for c in combos:
-            self.assertEqual(len({l["gid"] for l in c["legs"]}), cfb.LEGS)
+            self.assertEqual(len({l["gid"] for l in c["legs"]}), len(c["legs"]))
             want = 1.0
             for l in c["legs"]:
                 want *= l["price"] + cfb.COMBO_MARGIN
             self.assertAlmostEqual(c["price"], want)
 
     def test_too_few_games_gives_no_combo(self):
-        self.assertEqual(cfb.build_combos([cand(1, .8), cand(2, .75)]), [])
+        self.assertEqual([c for c in cfb.build_combos([cand(1, .8), cand(2, .75)]) if len(c["legs"]) == 3], [])
 
 
 class FakeClient:
@@ -96,7 +96,7 @@ class TestRecordSettle(unittest.TestCase):
     def test_record_once_and_not_after_kickoff(self):
         before = 1_793_800_000 - 10 * 86400
         p, c = cfb.record(self.store, self.cands, self.combos, before)
-        self.assertEqual((p, c), (3, 1))
+        self.assertEqual((p, c), (3, 3))
         self.assertEqual(cfb.record(self.store, self.cands, self.combos, before), (0, 0))
         late = cfb.record(Store(os.path.join(tempfile.mkdtemp(), "u.db")), self.cands, self.combos, 1_900_000_000)
         self.assertEqual(late, (0, 0))
@@ -131,3 +131,38 @@ class TestRecordSettle(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGapsAndEntry(unittest.TestCase):
+    def setUp(self):
+        self.store = Store(os.path.join(tempfile.mkdtemp(), "g.db"))
+        self.games = [{"id": "1", "home": "Texas Tech Red Raiders", "away": "Arizona Wildcats", "tip": "2030-01-01T00:00:00Z",
+                       "p_home": .70, "p_away": .30}]
+        self.poly = [{"teams": {"Arizona": .30, "Texas Tech": .70}, "end": None}]
+
+    def test_gap_needs_both_outside_prices_above_the_ask(self):
+        ev = [kev("Texas Tech", "Arizona", "Texas Tech", .62, .64)]
+        g = cfb.gaps(ev, self.games, self.poly)
+        self.assertEqual([x["team"] for x in g], ["Texas Tech"])
+        self.assertEqual(cfb.gaps(ev, self.games, []), [])                 # no Polymarket price: no gap
+        self.games[0]["p_home"] = .60                                      # the book disagrees with Polymarket: not a shared gap
+        self.assertEqual(cfb.gaps(ev, self.games, self.poly), [])
+
+    def test_gap_is_graded_at_the_ask_and_entry_saving_is_reported(self):
+        ev = [kev("Texas Tech", "Arizona", "Texas Tech", .62, .64)]
+        cfb.record_gaps(self.store, cfb.gaps(ev, self.games, self.poly), 1_700_000_000)
+        cfb.settle_gaps(self.store, FakeClient({"K-Tex": "yes"}), 1_900_000_000)
+        s = cfb.summary(self.store)
+        self.assertEqual(s["gaps"]["settled"], 1)
+        self.assertEqual(s["gaps"]["wins"], 1)
+        c = cand(1, .64)
+        c["bid"] = .60
+        cfb.record(self.store, [c], [], 1_700_000_000)
+        cfb.settle(self.store, FakeClient({"T1": "yes"}), 1_900_000_000)
+        e = cfb.summary(self.store)["entry"]
+        self.assertGreater(e["pnl_mid_if_filled"], e["pnl_ask"])
+
+    def test_both_parlay_sizes_are_built(self):
+        cands = [cand(i, p) for i, p in enumerate([.85, .82, .80, .78, .75, .72, .68, .66, .62, .60, .58, .55])]
+        sizes = {len(c["legs"]) for c in cfb.build_combos(cands)}
+        self.assertEqual(sizes, {2, 3})
