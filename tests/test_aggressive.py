@@ -98,6 +98,19 @@ class TestAggressive(unittest.TestCase):
         self.assertEqual(risk.earned_size(self.st, mkt), 0.25)      # losing record: back to floor
         self.assertEqual(risk.earned_size(self.st, {"series": "KXNBAGAME"}), 0.25)
 
+    def test_earned_size_is_halved_when_a_few_wins_carry_the_record(self):
+        mkt = {"ticker": "KXBTC15M-X", "series": "KXBTC15M"}
+        for i in range(200):
+            self.st.add_bet({"ts": 1, "mode": "paper", "ticker": f"KXBTC15M-{i}",
+                             "event_ticker": f"KXBTC15M-{i}", "series": "KXBTC15M", "team": "UP",
+                             "side": "yes", "price": .5, "contracts": 2, "stake": 1, "fee": .02,
+                             "model_prob": .6, "edge": .05, "confidence": .8, "signals": {}})
+        self.st.x("UPDATE bets SET status='graded', pnl=-0.1")
+        self.st.x("UPDATE bets SET pnl=5 WHERE id IN (SELECT id FROM bets ORDER BY id LIMIT 10)")   # 10 big wins, the rest lose
+        self.assertEqual(risk.earned_size(self.st, mkt), risk.FRAGILE_CAP)                           # profitable, but fragile: half size
+        self.st.x("UPDATE bets SET pnl=0.1")
+        self.assertEqual(risk.earned_size(self.st, mkt), 1.0)                                         # an even record keeps full size
+
     def test_maker_fill_rate(self):
         for i in range(25):
             self.st.log_maker("T", 1 if i < 3 else 0, "expired", 45)
