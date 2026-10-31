@@ -57,3 +57,19 @@ class TestMonitor(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCfbMonitor(unittest.TestCase):
+    def test_college_football_picks_and_parlays_are_listed(self):
+        from bot import cfb_tonight
+        store = Store(os.path.join(tempfile.mkdtemp(), "t.sqlite"))
+        cands = [{"ticker": f"C{i}", "team": f"Team{i}", "game": f"A{i} at B{i}", "gid": str(i), "tip": "2030-01-01T00:00:00Z",
+                  "price": p, "p_book": p, "p_poly": None, "contracts": 5, "fee": .1, "edge": 0.0} for i, p in enumerate([.85, .8, .75])]
+        cfb_tonight.record(store, cands, cfb_tonight.build_combos(cands), 1_700_000_000)
+        out = shadow_monitor.report(store)
+        self.assertEqual(out["lanes"]["CFB favorites"]["picks"], 3)
+        self.assertEqual(out["lanes"]["CFB parlays"]["picks"], 1)
+        self.assertEqual({p["sport"] for p in out["picks"]}, {"CFB"})
+        combo = [c for c in out["combos"] if c.get("sport") == "CFB"][0]
+        self.assertEqual(len(combo["legs"]), 3)
+        self.assertTrue(combo["tier"])
