@@ -89,6 +89,10 @@ def staked_on_window(store, event_ticker, mode=None):
     return r[0]["s"]
 
 
+FRAGILE_TOP = 10        # the scorecard calls a lane fragile when it is behind without its 10 best bets
+FRAGILE_CAP = 0.5
+
+
 def earned_size(store, mkt, full_at=200, floor=0.25, mode=None):
     """Size up only on profitable graded history from this account mode/domain."""
     dom = brain.domain_of(mkt.get("series") or mkt.get("ticker"))
@@ -97,7 +101,12 @@ def earned_size(store, mkt, full_at=200, floor=0.25, mode=None):
     mine = [r for r in rows if brain.domain_of(r["series"]) == dom]
     if not mine or sum(r["pnl"] or 0 for r in mine) <= 0:
         return floor
-    return max(floor, min(1.0, (len(mine) / full_at) ** 0.5))
+    size = max(floor, min(1.0, (len(mine) / full_at) ** 0.5))
+    # Profit that vanishes once the best few bets are removed is luck, not a track record: hold the size at half.
+    best_first = sorted((r["pnl"] or 0 for r in mine), reverse=True)
+    if len(mine) > FRAGILE_TOP and sum(best_first[FRAGILE_TOP:]) <= 0:
+        size = min(size, max(floor, FRAGILE_CAP))
+    return size
 
 
 def bid_for(book, side):
