@@ -1,0 +1,123 @@
+=== KALSHI SPORTS BOT REPORT ===
+Bets: 45 total | 0 open | 45 graded
+Betting status: PAUSED — last 50 bets lost to the closing line
+Sold early: 2 positions, P&L $-5.85
+Win rate: 24.4%  (means little on its own)
+P&L: $-400.03 on $765.73 committed  ROI -52.2%
+Avg CLV: -16.40%  | beat close 31.7%  <- the real edge test
+Sample is small (45). Treat results as noise until ~200+.
+
+-- By league --
+KXBTC15M: 4 bets, P&L $+3.26, CLV n/a
+KXBTCD: 19 bets, P&L $-189.49, CLV -9.63%
+KXETHD: 22 bets, P&L $-213.80, CLV -22.24%
+
+-- Signal weights: sports (learned) --
+ml_model                 2.000
+book_consensus           1.500
+crypto_model             1.200
+kalshi_market            1.000
+crypto_model_iv          0.800
+crypto_orderbook         0.500
+line_movement            0.400
+reverse_line_movement    0.400
+trade_flow               0.300
+ai_news                  0.300
+schedule_spot            0.300
+crypto_momentum          0.200
+spot_flow                0.200
+crypto_trend_strategy    0.150
+crypto_multi_timeframe_chart 0.150
+crypto_playbook          0.150
+crypto_mean_reversion_strategy 0.120
+crypto_breakout_strategy 0.100
+crypto_perp_funding      0.100
+crypto_perp_premium      0.100
+
+-- Signal weights: crypto (learned) --
+ml_model                 2.000
+book_consensus           1.500
+crypto_model             1.135
+kalshi_market            1.000
+crypto_model_iv          0.765
+line_movement            0.400
+reverse_line_movement    0.400
+crypto_orderbook         0.327
+ai_news                  0.300
+schedule_spot            0.300
+trade_flow               0.300
+crypto_spot_15m_confirmation 0.298
+crypto_kalshi_orderbook  0.282
+spot_flow                0.192
+crypto_momentum          0.179
+crypto_trend_strategy    0.158
+crypto_multi_timeframe_chart 0.158
+crypto_playbook          0.150
+crypto_mean_reversion_strategy 0.126
+crypto_perp_funding      0.109
+crypto_perp_premium      0.109
+crypto_breakout_strategy 0.105
+
+-- Which signals predict outcomes best? (lower prediction error is better) --
+crypto_model_iv          n=36988  prediction error (Brier)=0.0094
+crypto_model             n=37887  prediction error (Brier)=0.0110
+crypto_kalshi_orderbook  n=25283  prediction error (Brier)=0.0113
+crypto_momentum          n=37887  prediction error (Brier)=0.0115
+crypto_orderbook         n=26802  prediction error (Brier)=0.0125
+kalshi_market            n=38270  prediction error (Brier)=0.0156
+crypto_trend_strategy    n=17500  prediction error (Brier)=0.0175
+crypto_breakout_strategy n=17500  prediction error (Brier)=0.0175
+crypto_mean_reversion_strategy n=17500  prediction error (Brier)=0.0175
+crypto_multi_timeframe_chart n=17500  prediction error (Brier)=0.0176
+crypto_spot_15m_confirmation n= 1278  prediction error (Brier)=0.0776
+crypto_perp_funding      n= 2735  prediction error (Brier)=0.0807
+crypto_perp_premium      n= 2735  prediction error (Brier)=0.0810
+spot_flow                n= 1817  prediction error (Brier)=0.0906
+trade_flow               n= 2366  prediction error (Brier)=0.0987
+crypto_playbook          n=  166  prediction error (Brier)=0.1571
+book_consensus           n=  252  prediction error (Brier)=0.2204
+schedule_spot            n=   70  prediction error (Brier)=0.2537
+line_movement            n=    6  prediction error (Brier)=0.2635
+
+-- Trained model (last training run) --
+not promoted | test log loss model 0.51322 vs Kalshi 0.50128
+Top tools: kalshi_logit, model_prob, tk_chg_7d, vwap_dist, day_high_dist, vol_ratio_15_60, adx_1m, tk_turnover
+Log loss = how badly probability estimates miss; lower is better. Promotion means it passed the bot’s unseen-data checks, not that future profit is guaranteed.
+
+-- Probability accuracy (predicted chance vs what happened) --
+~5.0%: n=29859 actual 0.1%
+~15.0%: n= 305 actual 13.8%
+~25.0%: n= 197 actual 29.9%
+~35.0%: n= 181 actual 33.1%
+~45.0%: n= 132 actual 48.5%
+~55.0%: n= 167 actual 56.3%
+~65.0%: n= 150 actual 66.7%
+~75.0%: n= 125 actual 82.4%
+~85.0%: n= 257 actual 86.8%
+~95.0%: n=29480 actual 99.9%
+
+-- Forecast scorecard: today (settled predictions only) --
+college_football: n=4, model Brier=0.1413, market-price Brier=0.1428, model better by 0.0015
+crypto: n=334, model Brier=0.0736, market-price Brier=0.0663, market better by 0.0073
+nba: n=16, model Brier=0.2050, market-price Brier=0.2055, model better by 0.0004
+nhl: n=6, model Brier=0.2119, market-price Brier=0.2142, model better by 0.0023
+soccer: n=6, model Brier=0.3350, market-price Brier=0.3336, market better by 0.0014
+sports: n=12, model Brier=0.1324, market-price Brier=0.1344, model better by 0.0020
+Brier score = average squared miss between predicted chance and result: 0 is perfect, lower is better. Small samples are descriptive only; this scorecard is not a guarantee of profit.
+
+-- Forecast scorecard: 7 days (settled predictions only) --
+college_football: n=4, model Brier=0.1413, market-price Brier=0.1428, model better by 0.0015
+crypto: n=57682, model Brier=0.0055, market-price Brier=0.0072, model better by 0.0017
+nba: n=22, model Brier=0.2268, market-price Brier=0.2267, market better by 0.0000
+nfl: n=2, model Brier=0.1319, market-price Brier=0.1296, market better by 0.0022
+nhl: n=20, model Brier=0.2556, market-price Brier=0.2571, model better by 0.0016
+soccer: n=6, model Brier=0.3350, market-price Brier=0.3336, market better by 0.0014
+sports: n=12, model Brier=0.1324, market-price Brier=0.1344, model better by 0.0020
+Brier score = average squared miss between predicted chance and result: 0 is perfect, lower is better. Small samples are descriptive only; this scorecard is not a guarantee of profit.
+
+-- Quick guide --
+P&L = dollars won/lost after fees. ROI = profit/loss as a share of money committed.
+CLV (closing-line value) = whether your price was better than the final market price; positive is generally a good sign, not proof of profit.
+Prediction error / Brier = how far predicted chances were from results; 0 is perfect. Compare similar markets and use plenty of settled predictions.
+Signal weights = how strongly the bot currently uses each input; they are not a grade by themselves.
+Calibration = when the bot says 60%, does it happen about 60% of the time? Small samples can mislead.
