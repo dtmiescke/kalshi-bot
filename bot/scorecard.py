@@ -126,6 +126,12 @@ def report(store):
     lanes.append(lane("Bet combos, several players (shadow)", [(r["ts"] // 86400, float(r["stake"]), float(r["pnl"])) for r in cmb],
                       [(float(r["p_cautious"]), float(r["price"]), 1.0 if r["pnl"] > 0 else 0.0) for r in cmb
                        if r["p_cautious"] is not None and r["price"] is not None]))
+    cfp = _q(store, """SELECT game, stake, p_model, price, pnl FROM cfb_picks WHERE status='settled' AND stake > 0 AND pnl IS NOT NULL""")
+    lanes.append(lane("College football favourites (shadow)", [(r["game"], float(r["stake"]), float(r["pnl"])) for r in cfp],
+                      [(float(r["p_model"]), float(r["price"]), 1.0 if r["pnl"] > 0 else 0.0) for r in cfp
+                       if r["p_model"] is not None and r["price"] is not None]))
+    cfc = _q(store, """SELECT day, stake, pnl FROM cfb_combos WHERE status='settled' AND stake > 0 AND pnl IS NOT NULL""")
+    lanes.append(lane("College football parlays (shadow)", [(r["day"], float(r["stake"]), float(r["pnl"])) for r in cfc]))
     verdicts = trust.load(store)
     for name, table in (("NBA props passing the trust test (shadow)", "nba_picks"), ("NFL props passing the trust test (shadow)", "nfl_picks")):
         ok = [r for r in _q(store, f"SELECT ticker, game, price, stake, p_model, pnl FROM {table} WHERE status='settled' AND kind='prop' "

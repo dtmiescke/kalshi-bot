@@ -136,6 +136,12 @@ def periodic_cycle(s, store, data):
             nfl_tonight.run(store, data, every=int(os.environ.get("NFL_EVERY_SECONDS", 7200)))
         except Exception as e:
             logging.warning("nfl tracker failed: %s", e)
+    if os.environ.get("CFB_TRACKER", "yes") == "yes":      # college football moneylines and parlays: shadow picks, never trades
+        try:
+            from . import cfb_tonight
+            cfb_tonight.run(store, data, every=int(os.environ.get("CFB_EVERY_SECONDS", 3600)))
+        except Exception as e:
+            logging.warning("college football tracker failed: %s", e)
     try:                                                         # current prices of the open shadow picks, for the app
         from . import pick_quotes
         pick_quotes.refresh(store, data, every=int(os.environ.get("PICK_QUOTES_SECONDS", 300)))
